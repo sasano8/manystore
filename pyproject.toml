@@ -11,9 +11,22 @@ dependencies = [
     "httpx>=0.27.0",
 ]
 
+# UI/サーバ層は任意。`pip install manystore[server]` のときだけ重い依存が入る。
+# server/ 内では fastapi/uvicorn を遅延 import するので、未インストールでも本体は動く。
+[project.optional-dependencies]
+server = [
+    "fastapi>=0.110.0",
+    "uvicorn>=0.29.0",
+    "watchdog>=4.0.0",
+]
+
 [dependency-groups]
 dev = [
     "pytest>=8.0",
+    # server 層のテスト（ASGI TestClient = starlette + httpx）に必要。httpx は本体依存にも含む。
+    "fastapi>=0.110.0",
+    "uvicorn>=0.29.0",
+    "watchdog>=4.0.0",
 ]
 
 [build-system]

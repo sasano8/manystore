@@ -2,14 +2,30 @@
 
 ## 現在のフォーカス
 
-**M018（HTTP backend, read-only）完了。** ユーザー要望の HTTP read-only ストアを統合（前回未コミットだった
-試作を完成させた）。`make check` 緑（51 passed, 1 skipped）。次サイクルは配布前提の G1（M005〜M008）が安く効く。
+**M019（ストレージ UI）P1〜P3 実装完了。** `manystore.{implement,server,client}` の 3 層を追加し、任意 context を
+HTTP+WS で公開する**汎用 CRUD ストレージ UI** を実装。`make check` 緑（**59 passed, 1 skipped**）＋実起動スモーク
+（interrupt への remote PUT 往復を実証）。最終レイアウトは **単一ディストリビューション + `manystore[server]`
+extra**（当初の別パッケージ案から巻き戻し。理由は `m019-ui-plan.md`）。interrupt 専用 UI は作らず、config の
+`views.featured`（pin/quick_write）で重点表示する汎用 UI＝interrupt も「featured な local への汎用 PUT」で投入。
+
+次サイクル候補: M019 残り（P4 http_store の RW 拡張 / P5 S3 gateway / LocalWatcher=inotify / 認証）、または
+配布前提の G1（M005 redis 削除・M006 LICENSE・M007 py.typed・M008 メタ）。
+
+（前タスク **M018 完了**。）
 本プロジェクトは `agent` ブランチで単線コミットし、`interrupt/` 受信箱の指示を取り込んで進める運用。
 dotfiles はスキルのホスト（＝skills/bin の置き場）で、manystore の interrupt に指示を投函してくる（下り）が、
 dotfiles 自身は Memory Bank を持たない＝「記憶を持つ supervisor」ではない（下記「直近の変更」参照）。
 
 ## 直近の変更
 
+- **M019 P1〜P3 実装（ストレージ UI）**：`manystore/implement`（protocol/config/service/watcher・backend非依存）、
+  `manystore/server`（FastAPI app/routes/__main__/static・遅延 import）、`manystore/client`（StorageClient /
+  RemoteKeyValueStore）を追加。`pyproject` に `[project.optional-dependencies] server` と dev group。
+  `tests/ui/`（implement/server/client の 3 層）。`examples/manystore-ui.toml`・README 節を追加。
+  - **決定の巻き戻し**：当初「別パッケージ（uv workspace）」→ ユーザー選択で **`manystore` 配下に 3 層サブ
+    パッケージ＋extras** に確定（import 名前空間 `manystore.*` 統一、配布は extras+遅延 import で軽さ維持）。
+  - 監視は MVP では **PollingWatcher**（size 差分で created/modified/deleted、全 backend 対応・テスト容易）。
+    inotify(watchdog) ベースの LocalWatcher は後続最適化。`modified` は同一サイズ編集を取りこぼす既知制約。
 - **M018 完了（HTTP backend, read-only）**：ユーザー要望「http ストレージを read-only でよいから欲しい」を実装。
   `backends/http_store.py`（GET で `get`/`open("rb")`、HEAD で `exists`。404→None/FileNotFoundError。書き込み・
   一覧は `io.UnsupportedOperation`）。httpx を遅延 import。`create_key_value_store("http", http_base_url=...,

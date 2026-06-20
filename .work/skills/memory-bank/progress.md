@@ -14,6 +14,12 @@
 - **実 backend 疎通**: NATS / S3（path-style）を実機 E2E で検証済み（`tests/test_e2e_backends.py`、`make e2e-up`）。
   パラメタライズで local / nats / s3-virtual / s3-path に同一 CRUD を注入。`make check` で 47 passed, 1 skipped
   （s3-virtual はローカル S3互換では原理的に skip）。
+- **ストレージ UI / サーバ（M019 P1〜P3）**: `manystore.{implement,server,client}` の 3 層。任意 context を
+  HTTP+WS で公開する汎用 CRUD UI。`manystore[server]` extra（fastapi/uvicorn/watchdog・遅延 import）。
+  REST/WS は `KeyValueStore` と 1:1、`SafeKeyValueStore` でキー検証、PollingWatcher で WS ライブ通知、
+  config の `views.featured` で重点パスを pin/quick_write（interrupt も汎用 PUT で投入）。`RemoteKeyValueStore`
+  でサーバ越しの KVS。同梱ビルドレス Web UI。`make check` で **59 passed, 1 skipped**。実起動スモーク済み
+  （`python -m manystore.server --config examples/manystore-ui.toml`、interrupt への remote PUT 往復を実証）。
 
 ## 残作業（What's left）— バックログ
 
@@ -46,7 +52,7 @@
 | M015 | logging（操作・リトライの可視化） | 低 | G3 | 観測性なし |
 | M016 | テスト拡充（エラーパス/並行/大容量） | 中 | G2 | fake は happy path 中心 |
 | M017 | Python サポート範囲（3.10+ へ広げるか） | 相談 | G4 | `>=3.14` は採用障壁。広げるなら future import 復活＋ruff 設定。3.14純度 vs 採用のトレードオフ |
-| M019 | ストレージの UI | 相談 | — | **ユーザー要望（2026-06-21）。未スコープ**。`ArrayKeyValueStore`/各 backend のキー閲覧・get/put/delete を行う管理 UI。要確認: 形態（Web/TUI/CLI）・読み取り専用 or 書き込み可・対象（単一 backend or Array 横断）・本体同梱 or 別パッケージ。**注意: projectbrief のスコープ（ストレージ抽象ライブラリ）外**——別パッケージ/別リポが妥当か要相談 |
+| M019 | ストレージの UI | **P1〜P3 完了** | — | **ユーザー要望（2026-06-21）実装済み**（詳細 `m019-ui-plan.md`）。`manystore.{implement,server,client}` 一体型＋`[server]` extra。汎用 CRUD UI＋WS ライブ通知＋featured 重点設定。残: P4(http_store RW拡張)・P5(S3 gateway)・LocalWatcher(inotify)・認証。以下は旧スコープメモ→精緻化された要件: (1) manystore IF の上に公開し、その protocol にフロントエンドが接続。(2) **複数コンテキスト（`.work` など）の「ディレクトリ公開」**。(3) ディレクトリを **監視し WebSocket でライブ通知**（更新push）。(4) UI→サーバへ **更新依頼（書き込み）** 可。(5) **本質: interrupt 受信箱へ作業テキストを投入**（remote drop-to-interrupt）。(6) 二次目標: **汎用ストレージ UI**。設計の要点: 既存 read-only `http_store` の対になる **manystore-server（HTTP+WS）** を新設し、その REST/WS が「IF の上に公開する protocol」になる（http_store を RW 拡張すれば client にもなる）。S3 gateway 案は汎用 UI には効くが **watch/notify/interrupt は S3 protocol に無く既定の S3 browser では不可**＝核心要件を満たせない。詳細計画は activeContext 参照 |
 
 **ゴール（段階）**: G1=配布できる（M005〜M008）→ G2=安心して使える（M009〜M011・M016）→
 G3=機能十分（M012〜M015）→ G4=広く使える（M017 判断）。

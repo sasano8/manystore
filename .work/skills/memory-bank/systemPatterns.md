@@ -17,6 +17,14 @@
   `SafeFileStore`。
 - `array_storage.py` — `ArrayKeyValueStore`（論理名＝マウント先で複数 backend を束ねる汎用ストア）
   ＋ `DownloadCache`。
+- **UI/サーバ（M019・`manystore[server]` extra）** — 3 層に分離（詳細 `.work/.../m019-ui-plan.md`）:
+  - `implement/` — backend 非依存の中核。`protocol`(dataclass 契約) / `config`(contexts+views.featured, tomllib) /
+    `service`(`StorageService`: protocol→`KeyValueStore` 写像、`SafeKeyValueStore` でキー検証) /
+    `watcher`(`PollingWatcher`: size 差分→イベント、fan-out)。HTTP 非依存で単体テスト可。
+  - `server/` — FastAPI（`create_app`/routes/`__main__`/static）。REST/WS は `KeyValueStore` と 1:1 の薄い
+    アダプタ。fastapi/uvicorn は遅延 import。同梱ビルドレス Web UI。
+  - `client/` — `StorageClient`（薄い SDK）/ `RemoteKeyValueStore`（1 context を `KeyValueStore` として被せる
+    ＝read-only `http_store` の RW 版）。`transport` 注入で in-process ASGI テスト可。
 
 ## 主要な技術判断
 

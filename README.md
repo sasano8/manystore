@@ -114,6 +114,43 @@ await safe.put("a/b.txt", b"...")     # OK
 await safe.put("../escape", b"...")   # UnsafePathError
 ```
 
+## ストレージ UI / サーバ（`manystore[server]`）
+
+任意の context（公開ディレクトリ/ストア）を **HTTP + WebSocket で公開する汎用ストレージ UI**。
+ブラウザからキー閲覧・編集（フル CRUD）でき、ディレクトリ変更を WebSocket でライブ反映する。
+重い依存（fastapi / uvicorn / watchdog）は optional extra なので、UI が要るときだけ入れる。
+
+```bash
+pip install "manystore[server]"
+# 設定例は examples/manystore-ui.toml を参照
+python -m manystore.server --config examples/manystore-ui.toml   # 既定 http://127.0.0.1:8000
+```
+
+設定（TOML）は context マウントと「ビューの重点設定」を宣言する:
+
+```toml
+default_context = "work"
+
+[contexts.work]            # 公開する context（local は root、s3/nats は接続引数）
+backend = "local"
+root = ".work"
+
+[[views.featured]]         # UI が標準で重点表示するパス（pin / その場で新規作成）
+context = "work"
+path = "skills/memory-bank/interrupt"
+label = "Interrupt"
+pin = true
+quick_write = true
+```
+
+UI 本体は特定用途（interrupt 等）を知らず、config が「重点パス」を pin/quick_write するだけ＝
+**汎用 UI のまま**任意のパスを手早く扱える。protocol（REST/WS）は `KeyValueStore` と 1:1 で対応し、
+`manystore.client.RemoteKeyValueStore` で 1 context をサーバ越しの `KeyValueStore` として扱える。
+
+- 構成: `manystore.implement`（backend 非依存の中核）/ `manystore.server`（FastAPI）/ `manystore.client`（SDK）。
+- 既定 bind は `127.0.0.1`。外部公開は `--host 0.0.0.0` を明示（フル CRUD を晒すため既定は自ホスト）。
+- 監視は MVP では polling（全 backend 対応）。inotify ベースは後続の最適化。
+
 ## その他の公開 API
 
 - `AsyncToSyncKeyValueStore` — async ストアを同期 IF（`SyncKeyValueStore`）として被せるゼロ依存ブリッジ。
