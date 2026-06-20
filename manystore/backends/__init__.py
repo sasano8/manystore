@@ -32,7 +32,7 @@ def create_key_value_store(
     s3_access_key: str = "",
     s3_secret_key: str = "",
     nats_url: str = "",
-    nats_bucket: str = "shoudou_files",
+    nats_bucket: str = "manystore_files",
 ) -> KeyValueStore:
     if backend == "local":
         if local_dir is None:
