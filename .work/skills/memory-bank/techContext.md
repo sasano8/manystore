@@ -38,6 +38,7 @@ uv run pytest                             # test（現状 44 passed）
 - **optional extra `[server]`**（M019・UI/サーバ層）：`fastapi` / `uvicorn` / `watchdog`。
   `manystore.server` 内で遅延 import＝未導入でも `import manystore` は壊れない。`pip install "manystore[server]"`。
   起動: `python -m manystore.server --config <toml>`（既定 bind 127.0.0.1）。
-- dev group: `pytest>=8.0` ＋ server テスト用に `fastapi`/`uvicorn`/`watchdog`（ASGI TestClient は httpx 依存）。
+- dev group: `pytest>=8.0` ＋ `pytest-asyncio>=0.24`（`asyncio_mode="auto"`＝`async def test_*` を自動非同期実行。
+  既存の `asyncio.run` スタイルとも共存）＋ server テスト用に `fastapi`/`uvicorn`/`watchdog`（TestClient は httpx 依存）。
 - import 名・プロジェクト名ともに `manystore`（旧 `shoudou_storage` から統一済み）。
 - `SafeKeyValueStore.download` のキャッシュ既定先はローカル FS（`~/.cache/...`）。

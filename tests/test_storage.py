@@ -96,10 +96,10 @@ def test_local_file_store_open_write_read(tmp_path: Path) -> None:
 
     async def scenario() -> None:
         # 書き込みモードは親ディレクトリを作って open できる。
-        async with await store.open("d/f.bin", "wb") as f:
+        async with await store.open_writer("d/f.bin") as f:
             await f.write(b"hello")
         # 読み込みは open→read→（context manager で close）。
-        async with await store.open("d/f.bin", "rb") as f:
+        async with await store.open_reader("d/f.bin") as f:
             assert await f.read() == b"hello"
 
     asyncio.run(scenario())
@@ -183,14 +183,14 @@ def test_local_file_store_write_is_atomic_on_error(tmp_path: Path) -> None:
     store = LocalFileStore(tmp_path)
 
     async def scenario() -> None:
-        async with await store.open("k", "wb") as f:
+        async with await store.open_writer("k") as f:
             await f.write(b"old")
         # 書き込み中に例外 → 確定せず、既存値（old）が保たれる。
         with pytest.raises(RuntimeError):
-            async with await store.open("k", "wb") as f:
+            async with await store.open_writer("k") as f:
                 await f.write(b"new-partial")
                 raise RuntimeError("boom")
-        async with await store.open("k", "rb") as f:
+        async with await store.open_reader("k") as f:
             assert await f.read() == b"old"
         # 一時ファイルの残骸が無い。
         assert [p.name for p in tmp_path.iterdir()] == ["k"]
@@ -216,14 +216,14 @@ def test_key_value_file_store_open_over_kvs(tmp_path: Path) -> None:
     fs = KeyValueFileStore(LocalKeyValueStore(tmp_path))
 
     async def scenario() -> None:
-        async with await fs.open("k/v.bin", "wb") as f:
+        async with await fs.open_writer("k/v.bin") as f:
             await f.write(b"abc")
             await f.write(b"de")  # close 時にまとめて put
-        async with await fs.open("k/v.bin", "rb") as f:
+        async with await fs.open_reader("k/v.bin") as f:
             assert await f.read() == b"abcde"
         # 無いキーの読み取りは FileNotFoundError。
         with pytest.raises(FileNotFoundError):
-            await fs.open("missing", "rb")
+            await fs.open_reader("missing")
 
     asyncio.run(scenario())
 
@@ -232,12 +232,12 @@ def test_safe_file_store_validates_filename(tmp_path: Path) -> None:
     safe = SafeFileStore(LocalFileStore(tmp_path))
 
     async def scenario() -> None:
-        async with await safe.open("ok/a.bin", "wb") as f:
+        async with await safe.open_writer("ok/a.bin") as f:
             await f.write(b"x")
-        async with await safe.open("ok/a.bin", "rb") as f:
+        async with await safe.open_reader("ok/a.bin") as f:
             assert await f.read() == b"x"
         with pytest.raises(UnsafePathError):
-            await safe.open("../evil", "rb")
+            await safe.open_reader("../evil")
 
     asyncio.run(scenario())
 
@@ -315,20 +315,20 @@ def test_s3_file_store_streams_multipart_write_and_read() -> None:
 
     async def scenario() -> None:
         # 11 バイトを part_size=4 で書く → パート分割（4,4,3）して multipart upload。
-        async with await store.open("k", "wb") as f:
+        async with await store.open_writer("k") as f:
             await f.write(b"hello world")
         assert fake.objects["k"] == b"hello world"
         assert len(fake._uploads) == 0  # complete 済み
 
         # ストリーム read（全体／chunk）。
-        async with await store.open("k", "rb") as f:
+        async with await store.open_reader("k") as f:
             assert await f.read() == b"hello world"
-        async with await store.open("k", "rb") as f:
+        async with await store.open_reader("k") as f:
             assert await f.read(5) == b"hello"
             assert await f.read() == b" world"
 
         # 空書き込みは空オブジェクトを put（multipart 0 パート不可）。
-        async with await store.open("empty", "wb") as f:
+        async with await store.open_writer("empty") as f:
             pass
         assert fake.objects["empty"] == b""
 
@@ -390,21 +390,21 @@ def test_nats_file_store_buffered_read_write() -> None:
 
     async def scenario() -> None:
         # write はバッファして close で put。
-        async with await store.open("k", "wb") as f:
+        async with await store.open_writer("k") as f:
             await f.write(b"hello")
             await f.write(b" world")
         assert fake.objects["k"] == b"hello world"
 
         # read は全体取得してバッファから返す（全体／chunk）。
-        async with await store.open("k", "rb") as f:
+        async with await store.open_reader("k") as f:
             assert await f.read() == b"hello world"
-        async with await store.open("k", "rb") as f:
+        async with await store.open_reader("k") as f:
             assert await f.read(5) == b"hello"
             assert await f.read() == b" world"
 
         # 無いキーは FileNotFoundError。
         with pytest.raises(FileNotFoundError):
-            await store.open("missing", "rb")
+            await store.open_reader("missing")
 
     asyncio.run(scenario())
 
@@ -815,12 +815,12 @@ def test_http_file_store_read() -> None:
     fs._client = lambda: _FakeHttpClient(objects, _HTTP_BASE)
 
     async def scenario() -> None:
-        async with await fs.open("a.txt", "rb") as f:
+        async with await fs.open_reader("a.txt") as f:
             assert await f.read() == b"hello"
         with pytest.raises(FileNotFoundError):  # 404 → FileNotFoundError
-            await fs.open("missing", "rb")
+            await fs.open_reader("missing")
         with pytest.raises(io.UnsupportedOperation):  # write は非対応
-            await fs.open("a.txt", "wb")
+            await fs.open_writer("a.txt")
 
     asyncio.run(scenario())
 

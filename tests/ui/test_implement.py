@@ -1,4 +1,7 @@
-"""implement 層のテスト（HTTP 非依存）。config 解釈 / StorageService の CRUD / PollingWatcher。"""
+"""implement 層のテスト（HTTP 非依存）。config 解釈 / StorageService の CRUD / PollingWatcher。
+
+pytest-asyncio（asyncio_mode=auto）で `async def test_*` をそのまま回す。
+"""
 
 import asyncio
 from pathlib import Path
@@ -49,74 +52,62 @@ def test_parse_config_normalizes_local_root(tmp_path: Path) -> None:
     assert cfg.featured[0].quick_write is True
 
 
-def test_service_crud_and_featured(tmp_path: Path) -> None:
+async def test_service_crud_and_featured(tmp_path: Path) -> None:
     service = StorageService(_config(tmp_path))
+    await service.connect()
+    try:
+        # contexts / featured / default が protocol 通りに見える。
+        names = {c.name for c in service.list_contexts()}
+        assert names == {"work", "ro"}
+        assert service.default_context == "work"
+        assert service.featured()[0]["label"] == "Interrupt"
 
-    async def scenario() -> None:
-        await service.connect()
-        try:
-            # contexts / featured / default が protocol 通りに見える。
-            names = {c.name for c in service.list_contexts()}
-            assert names == {"work", "ro"}
-            assert service.default_context == "work"
-            assert service.featured()[0]["label"] == "Interrupt"
+        # CRUD（interrupt 投入も「featured な local への put」として汎用 put で成立）。
+        await service.put("work", "interrupt/note.md", b"hello")
+        assert await service.exists("work", "interrupt/note.md")
+        assert await service.get("work", "interrupt/note.md") == b"hello"
 
-            # CRUD（interrupt 投入も「featured な local への put」として汎用 put で成立）。
-            await service.put("work", "interrupt/note.md", b"hello")
-            assert await service.exists("work", "interrupt/note.md")
-            assert await service.get("work", "interrupt/note.md") == b"hello"
+        entries = await service.list_entries("work", prefix="interrupt/")
+        assert [e.key for e in entries] == ["interrupt/note.md"]
+        assert await service.list_entries("work", prefix="nope/") == []
 
-            entries = await service.list_entries("work", prefix="interrupt/")
-            assert [e.key for e in entries] == ["interrupt/note.md"]
-            assert await service.list_entries("work", prefix="nope/") == []
-
-            await service.delete("work", "interrupt/note.md")
-            assert await service.get("work", "interrupt/note.md") is None
-        finally:
-            await service.aclose()
-
-    asyncio.run(scenario())
+        await service.delete("work", "interrupt/note.md")
+        assert await service.get("work", "interrupt/note.md") is None
+    finally:
+        await service.aclose()
 
 
-def test_service_readonly_and_unknown_context(tmp_path: Path) -> None:
+async def test_service_readonly_and_unknown_context(tmp_path: Path) -> None:
     service = StorageService(_config(tmp_path))
-
-    async def scenario() -> None:
-        await service.connect()
-        try:
-            with pytest.raises(ReadOnlyContext):
-                await service.put("ro", "a.txt", b"x")
-            with pytest.raises(ContextNotFound):
-                await service.get("missing", "a.txt")
-        finally:
-            await service.aclose()
-
-    asyncio.run(scenario())
+    await service.connect()
+    try:
+        with pytest.raises(ReadOnlyContext):
+            await service.put("ro", "a.txt", b"x")
+        with pytest.raises(ContextNotFound):
+            await service.get("missing", "a.txt")
+    finally:
+        await service.aclose()
 
 
-def test_polling_watcher_detects_changes(tmp_path: Path) -> None:
+async def test_polling_watcher_detects_changes(tmp_path: Path) -> None:
     store = LocalKeyValueStore(tmp_path)
+    watcher = PollingWatcher(store, "work", interval=0.05)
+    await watcher.start()
+    gen = watcher.subscribe()
+    # 購読を先に登録してから変更を起こす（イベントの取りこぼし防止）。
+    first = asyncio.ensure_future(gen.__anext__())
+    await asyncio.sleep(0.02)
+    await store.put("a.txt", b"hi")
+    ev = await asyncio.wait_for(first, 2.0)
+    assert ev.type == "created"
+    assert ev.key == "a.txt"
 
-    async def scenario() -> None:
-        watcher = PollingWatcher(store, "work", interval=0.05)
-        await watcher.start()
-        gen = watcher.subscribe()
-        # 購読を先に登録してから変更を起こす（イベントの取りこぼし防止）。
-        first = asyncio.ensure_future(gen.__anext__())
-        await asyncio.sleep(0.02)
-        await store.put("a.txt", b"hi")
-        ev = await asyncio.wait_for(first, 2.0)
-        assert ev.type == "created"
-        assert ev.key == "a.txt"
+    # modified（サイズ変化）も拾う。
+    nxt = asyncio.ensure_future(gen.__anext__())
+    await asyncio.sleep(0.02)
+    await store.put("a.txt", b"hi there")
+    ev2 = await asyncio.wait_for(nxt, 2.0)
+    assert ev2.type == "modified"
 
-        # modified（サイズ変化）も拾う。
-        nxt = asyncio.ensure_future(gen.__anext__())
-        await asyncio.sleep(0.02)
-        await store.put("a.txt", b"hi there")
-        ev2 = await asyncio.wait_for(nxt, 2.0)
-        assert ev2.type == "modified"
-
-        await gen.aclose()
-        await watcher.aclose()
-
-    asyncio.run(scenario())
+    await gen.aclose()
+    await watcher.aclose()

@@ -76,5 +76,8 @@ class SafeFileStore:
     def __init__(self, store: FileStore) -> None:
         self._store = store
 
-    async def open(self, filename: str, mode: str = "rb") -> FileObject:
-        return await self._store.open(validate_safe_path(filename), mode)
+    async def open_reader(self, filename: str) -> FileObject:
+        return await self._store.open_reader(validate_safe_path(filename))
+
+    async def open_writer(self, filename: str) -> FileObject:
+        return await self._store.open_writer(validate_safe_path(filename))

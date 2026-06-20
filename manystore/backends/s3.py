@@ -234,12 +234,11 @@ class S3FileStore(_S3Base):
         super().__init__(bucket, endpoint_url, region, access_key, secret_key, addressing_style)
         self._part_size = part_size
 
-    async def open(self, filename: str, mode: str = "rb") -> FileObject:
-        if "r" in mode:
-            cm = self._session()
-            client = await cm.__aenter__()
-            resp = await client.get_object(Bucket=self._bucket, Key=filename)
-            return _S3StreamReader(cm, client, resp["Body"])
-        if "w" in mode:
-            return _S3MultipartWriter(self, filename, self._part_size)
-        raise ValueError(f"unsupported mode for S3FileStore: {mode!r}")
+    async def open_reader(self, filename: str) -> FileObject:
+        cm = self._session()
+        client = await cm.__aenter__()
+        resp = await client.get_object(Bucket=self._bucket, Key=filename)
+        return _S3StreamReader(cm, client, resp["Body"])
+
+    async def open_writer(self, filename: str) -> FileObject:
+        return _S3MultipartWriter(self, filename, self._part_size)

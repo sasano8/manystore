@@ -95,9 +95,18 @@ class FileObject(Protocol):
 
 
 class FileStore(Protocol):
-    """`open` でファイルオブジェクトを取得するストリーム指向のストア。"""
+    """ファイルオブジェクト（[FileObject]）を取得するストリーム指向のストア（バイナリ専用）。
 
-    async def open(self, filename: str, mode: str = "rb") -> FileObject: ...
+    `mode` 文字列を解釈する `open` ではなく、方向が型に出る 2 メソッドに分ける:
+    - `open_reader(filename)` … 読み取り用（write は `io.UnsupportedOperation`）。
+    - `open_writer(filename)` … 書き込み用（read は `io.UnsupportedOperation`）。
+
+    どちらもバイナリ（bytes）だけを扱う。テキストの符号化は利用側の責務にし、ストアは
+    バイト列の入出力に専念する（テスト時もモード分岐が無く意図が明確）。
+    """
+
+    async def open_reader(self, filename: str) -> FileObject: ...
+    async def open_writer(self, filename: str) -> FileObject: ...
 
 
 # ── KeyValueStore を FileStore として被せる汎用アダプタ ──
@@ -166,12 +175,11 @@ class KeyValueFileStore:
     def __init__(self, store: KeyValueStore) -> None:
         self._store = store
 
-    async def open(self, filename: str, mode: str = "rb") -> FileObject:
-        if "r" in mode:
-            data = await self._store.get(filename)
-            if data is None:
-                raise FileNotFoundError(filename)
-            return _KvReadFileObject(data)
-        if "w" in mode:
-            return _KvWriteFileObject(self._store, filename)
-        raise ValueError(f"unsupported mode for KeyValueFileStore: {mode!r}")
+    async def open_reader(self, filename: str) -> FileObject:
+        data = await self._store.get(filename)
+        if data is None:
+            raise FileNotFoundError(filename)
+        return _KvReadFileObject(data)
+
+    async def open_writer(self, filename: str) -> FileObject:
+        return _KvWriteFileObject(self._store, filename)

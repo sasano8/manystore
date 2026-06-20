@@ -5,9 +5,9 @@
 
 ## 特徴
 
-- **2 つのストア抽象**
-  - `KeyValueStore` — `put` / `get` / `list` / `exists` / `delete` / `cp` / `mv`（バイト列をキーで出し入れ）
-  - `FileStore` — `open` で `FileObject`（ストリーム）を取得
+- **2 つのストア抽象**（名前空間で分離: `manystore.kv` / `manystore.file`。トップからも再エクスポート）
+  - `KeyValueStore`（`manystore.kv`）— `put` / `get` / `list` / `exists` / `delete` / `cp` / `mv`（バイト列をキーで出し入れ）
+  - `FileStore`（`manystore.file`）— `open_reader` / `open_writer` で `FileObject`（ストリーム・**バイナリ専用**）を取得
 - **backend を差し替えるだけ** — `Local` / `S3` / `NATS Object Store` / `HTTP`（read-only）。ラッパは 1 枚に留め、下で backend を入れ替える。
 - **async が一次実装**、sync ブリッジ（`AsyncToSyncKeyValueStore`）も提供。
 - **接続ライフサイクル** — `connect` / retry / timeout / deadline を `ConnectPolicy` で制御。
@@ -80,8 +80,8 @@ async with connect_key_value_store(
     exists = await store.exists("a.txt")  # HEAD で存在確認
 ```
 
-> **HTTP backend は read-only**: `get` / `exists` と `FileStore.open(..., "rb")` のみ。`put` / `delete` /
-> `cp` / `mv` / `list` / `iter` は `io.UnsupportedOperation` を投げる。
+> **HTTP backend は read-only**: `get` / `exists` と `FileStore.open_reader(...)` のみ。`put` / `delete` /
+> `cp` / `mv` / `list` / `iter` / `open_writer` は `io.UnsupportedOperation` を投げる。
 
 接続を挟まず実体を直接作るなら `create_key_value_store(backend, **opts)` も使える。
 

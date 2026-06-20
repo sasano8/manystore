@@ -136,14 +136,13 @@ class NatsFileStore(_NatsBase):
     ストリーミングはスレッド安全な受け渡しが要るので deferred）。write はバッファして close で put。
     """
 
-    async def open(self, filename: str, mode: str = "rb") -> FileObject:
-        if "r" in mode:
-            obs = await self._get_obs()
-            try:
-                result = await obs.get(filename)
-            except Exception as e:
-                raise FileNotFoundError(filename) from e
-            return _KvReadFileObject(result.data or b"")
-        if "w" in mode:
-            return _NatsBufferedWriter(self, filename)
-        raise ValueError(f"unsupported mode for NatsFileStore: {mode!r}")
+    async def open_reader(self, filename: str) -> FileObject:
+        obs = await self._get_obs()
+        try:
+            result = await obs.get(filename)
+        except Exception as e:
+            raise FileNotFoundError(filename) from e
+        return _KvReadFileObject(result.data or b"")
+
+    async def open_writer(self, filename: str) -> FileObject:
+        return _NatsBufferedWriter(self, filename)

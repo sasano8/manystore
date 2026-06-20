@@ -87,20 +87,19 @@ class HttpKeyValueStore(_HttpBase):
 
 
 class HttpFileStore(_HttpBase):
-    """HTTP 越しの read-only [FileStore]。read（`open(..., "rb")`）のみ。write は非対応。
+    """HTTP 越しの read-only [FileStore]。`open_reader` のみ。`open_writer` は非対応。
 
     read は GET で全体を取得してバッファから返す（NATS backend と同じ方式）。真のストリーミングが
     要るなら将来 httpx の streaming（`client.stream`）で逐次化する余地がある。
     """
 
-    async def open(self, filename: str, mode: str = "rb") -> FileObject:
-        if "w" in mode:
-            _read_only("open(w)")
-        if "r" in mode:
-            async with self._client() as client:
-                resp = await client.get(self._url(filename))
-                if resp.status_code == 404:
-                    raise FileNotFoundError(filename)
-                resp.raise_for_status()
-                return _KvReadFileObject(resp.content)
-        raise ValueError(f"unsupported mode for HttpFileStore: {mode!r}")
+    async def open_reader(self, filename: str) -> FileObject:
+        async with self._client() as client:
+            resp = await client.get(self._url(filename))
+            if resp.status_code == 404:
+                raise FileNotFoundError(filename)
+            resp.raise_for_status()
+            return _KvReadFileObject(resp.content)
+
+    async def open_writer(self, filename: str) -> FileObject:
+        _read_only("open_writer")

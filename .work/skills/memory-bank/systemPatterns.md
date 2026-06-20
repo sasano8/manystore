@@ -28,7 +28,13 @@
 
 ## 主要な技術判断
 
-- **2 ストア抽象**：`KeyValueStore`（put/get/list/exists/delete/cp/mv）と `FileStore`（`open`→`FileObject`）。
+- **公開は 2 名前空間にグルーピング**：`manystore.kv`（値ストア群）/ `manystore.file`（ファイル群）に
+  facade を分け、トップ `manystore` は後方互換で両者をフラット再エクスポート（`__all__` は両 facade の
+  `__all__` を dict.fromkeys で重複畳み込み）。ruff の re-export 検出のためトップは star import + `# noqa: F403`。
+- **FileStore はバイナリ専用の方向別 API**：`open(mode)` を廃止し `open_reader(filename)` / `open_writer(filename)`
+  に置換（方向が型に出てテスト容易・テキスト符号化は利用側責務）。全 *FileStore・KeyValueFileStore・
+  SafeFileStore・SyncFileStore Protocol を更新。HttpFileStore は read-only ＝ `open_writer` は `io.UnsupportedOperation`。
+- **2 ストア抽象**：`KeyValueStore`（put/get/list/exists/delete/cp/mv）と `FileStore`（`open_reader`/`open_writer`→`FileObject`）。
   backend = `Local` / `S3` / `Nats…`。Local は init で絶対パス固定（cd 非依存）、put は親ディレクトリ作成、
   list は再帰（rglob、相対 posix キー）で s3/nats のフラットキー規約に整合。
 - **接続ライフサイクル**：init では接続せず `async with`（`connecting`）で接続。`verify` は接続確認の
