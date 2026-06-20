@@ -121,10 +121,17 @@ await safe.put("../escape", b"...")   # UnsafePathError
 重い依存（fastapi / uvicorn / watchdog）は optional extra なので、UI が要るときだけ入れる。
 
 ```bash
+# 開発用ワンコマンド起動（既定ストレージ .cache/manystore_dev は使い捨て・自動作成）
+make ui                    # = uv run python -m manystore.server --config examples/manystore-ui.dev.toml
+make ui PORT=9000          # ポート変更
+
+# 自分の設定で起動する場合（配布利用時）
 pip install "manystore[server]"
-# 設定例は examples/manystore-ui.toml を参照
 python -m manystore.server --config examples/manystore-ui.toml   # 既定 http://127.0.0.1:8000
 ```
+
+ブラウザで `http://127.0.0.1:8000` を開く。`make ui` は開発用設定（`examples/manystore-ui.dev.toml`）で
+既定ストレージを `.cache/manystore_dev`（`.gitignore` 済みの使い捨て）にし、起動時に自動作成する。
 
 設定（TOML）は context マウントと「ビューの重点設定」を宣言する:
 

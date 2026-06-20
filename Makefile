@@ -11,7 +11,14 @@ SRC := manystore tests
 E2E_S3_ACCESS_KEY := manystore
 E2E_S3_SECRET_KEY := manystoresecret123
 
-.PHONY: format format-check lint test check e2e-up e2e-down
+.PHONY: format format-check lint test check ui e2e-up e2e-down
+
+# ストレージ UI / サーバを開発設定で起動（既定 http://127.0.0.1:8000）。
+# 既定ストレージは .cache/manystore_dev（使い捨て・起動時に自動作成）。PORT=xxxx で上書き可。
+UI_CONFIG := examples/manystore-ui.dev.toml
+PORT := 8000
+ui:
+	uv run python -m manystore.server --config $(UI_CONFIG) --port $(PORT)
 
 # コード整形（自動修正）
 format:
