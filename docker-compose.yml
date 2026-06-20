@@ -24,10 +24,10 @@ services:
     ports:
       - "9333:9333"   # Master UI (http://localhost:9333)
       - "23646:23646" # Admin UI (http://localhost:23646)
-      - "8888:8888"   # Filer
       - "8333:8333"   # S3 API
-      - "7333:7333"   # WebDAV
-      - "9340:9340"   # Volume
+      - "8888:8888"   # Filer  # filer の上で S3 が提供される
+      - "9340:9340"   # Volume  # Filer へのリクエストはマスターを通り Volume に転送される
+      # - "7333:7333"   # WebDAV
       - "8181:8181"   # ICEBERG
     command: "mini -dir=/data"
     # command: "server -dir=/data"  # server 版の方が本番向け
