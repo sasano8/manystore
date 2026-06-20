@@ -1,6 +1,6 @@
-"""shoudou_storage のテスト（juice の test 群とは分離した同階層ディレクトリ）。
+"""manystore のテスト（juice の test 群とは分離した同階層ディレクトリ）。
 
-ストレージは将来 juice の外のライブラリとして抽出する想定のため、テストを `shoudou_storage`
+ストレージは将来 juice の外のライブラリとして抽出する想定のため、テストを `manystore`
 パッケージと同階層の `tests_storage/` に置く（src/＋tests/ と同型。パッケージ dir はソースのみ＝
 wheel にもテストが入らない）。juice の `make test`（testpaths=["tests"]）の対象外。
 ここを直接 `pytest tests_storage/` で回す。
@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-from shoudou_storage import (
+from manystore import (
     DEFAULT_CACHE_DIR,
     ArrayKeyValueStore,
     AsyncToSyncKeyValueStore,

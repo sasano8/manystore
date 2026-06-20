@@ -17,7 +17,7 @@ from .async_storage import FileInfo, KeyValueStore, _atomic_write_bytes, _kv_cop
 from .safe_path import validate_safe_path
 
 # ダウンロードキャッシュのデフォルト先（ホーム配下）。
-DEFAULT_CACHE_DIR = Path.home() / ".cache" / "shoudou_storage"
+DEFAULT_CACHE_DIR = Path.home() / ".cache" / "manystore"
 
 
 class ArrayKeyValueStore:
@@ -119,7 +119,7 @@ class DownloadCache:
 
     KVS 操作は委譲しつつ、`download(key)` で値をローカルキャッシュへ落としてパスを返す（PyTorch の
     モデル DL 様）。キャッシュは常にローカル FS・sync。`cache_dir` は init で絶対パスへ固定
-    （cwd が変わってもヒットさせるため。既定 `~/.cache/shoudou_storage`）。
+    （cwd が変わってもヒットさせるため。既定 `~/.cache/manystore`）。
     """
 
     def __init__(self, store: KeyValueStore, cache_dir: Path | str | None = None) -> None:
