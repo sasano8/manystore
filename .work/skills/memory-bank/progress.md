@@ -41,10 +41,13 @@ S3 は path-style 修正のみで実証保留）。M003 は supervisor（dotfile
 
 - ストレージ抽象を juice から切り出す方針（juice 課題 E006）。juice は将来「利用する側」になり、結線は
   juice 側 adapter に閉じる（manystore は pristine）。
-- **S3 backend は path-style 必須（M002 で発見）**: `_session()` が virtual-host アドレッシングのままで、
-  S3 互換サーバ（minio/SeaweedFS）では `bucket.<host>` を名前解決できず接続不可だった。カスタム endpoint
-  時に `addressing_style=path` を強制するよう修正（実 AWS は endpoint 無しなので従来どおり）。fake テストでは
-  気づけず、実機 E2E で初めて露見＝M002 の価値。
+- **S3 アドレッシングスタイルを明示パラメータ化（M002 で発見）**: 既定の virtual-host だと S3 互換サーバ
+  （minio/SeaweedFS）で `bucket.<host>` を名前解決できず接続不可。fake テストでは気づけず実機 E2E で露見。
+  方針は「**既定 virtual（ドメイン）、利用側が `"path"` を opt-in**」。`S3*Store(addressing_style="virtual")`、
+  `create_key_value_store(s3_addressing_style=...)`、`connect_key_value_store("s3", s3_addressing_style="path")`。
+  実 AWS は既定 virtual のまま。
+- **E2E テストはパラメタライズ**（`tests/test_e2e_backends.py`）: 同一 CRUD を local / nats / s3-virtual /
+  s3-path に注入して回す（実行する test は1つ、注入インスタンスだけ違う）。各ケースは未到達/認証未整備なら skip。
 - **Python 3.14+ を前提に確定（M003）**: 3.14 は注釈遅延評価（PEP 649）が既定なので、自クラス等を戻り値
   注釈に使う前方参照はそのまま valid＝`from __future__ import annotations` は不要。当初 `requires-python>=3.10`
   だったため ruff が forward-ref を F821 と判定し future import を入れたが、方針は「3.14+ 前提」なので撤回。

@@ -58,6 +58,7 @@ async with connect_key_value_store(
     s3_region="us-east-1",
     s3_access_key="...",
     s3_secret_key="...",
+    s3_addressing_style="path",   # S3 互換サーバ（minio/SeaweedFS 等）は path 必須。既定は "virtual"（ドメイン）
 ) as store:
     ...
 

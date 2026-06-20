@@ -9,10 +9,11 @@
 
 ## 直近の変更
 
-- **M002 一部完了**：docker（nats / seaweedfs）を起動し `tests/test_e2e_backends.py` を追加。**NATS は実機で
-  put/get/exists/list/cp/delete を検証（pass）**。S3 は実機検証で **path-style バグを発見・修正**（`backends/s3.py`
-  の `_session()`：カスタム endpoint 時に `addressing_style=path` を強制）。ただし SeaweedFS mini の S3 認証が
-  動的で静的鍵が無く実機 E2E は保留（テストは認証未整備で skip。`MANYSTORE_S3_ACCESS_KEY/SECRET_KEY` を渡せば検証）。
+- **M002 一部完了**：docker（nats / seaweedfs）で `tests/test_e2e_backends.py` を**パラメタライズ**追加
+  （同一 CRUD を local / nats / s3-virtual / s3-path に注入。実行 test は1つ、注入インスタンスだけ違う）。
+  **local / nats は実機で pass**。S3 は実機検証で **アドレッシングスタイル問題を発見**し、`addressing_style` を
+  **明示パラメータ化（既定 virtual＝ドメイン、`"path"` は opt-in）**に変更（`s3_addressing_style`）。S3 実機 E2E は
+  SeaweedFS mini の認証が動的で鍵未整備のため skip（`MANYSTORE_S3_ACCESS_KEY/SECRET_KEY` を渡せば検証）。
 - **M004 完了**：ルート `README.md` を作成（特徴・install・local/S3/NATS の接続例・`ConnectPolicy` プリセット・
   `Safe*` ラッパ・その他公開 API・開発/CI/3.14 注記）。公開 API は `manystore/__init__.py` の `__all__` に準拠。
 - **M003 完了（supervisor 指示で着手）**：dotfiles（supervisor）が manystore の interrupt に投函した指示

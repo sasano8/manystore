@@ -1,7 +1,14 @@
-"""実 backend（SeaweedFS=S3 / 実 NATS）への E2E 疎通テスト。
+"""実 backend への E2E 疎通テスト（パラメタライズ）。
 
-`docker-compose.yml` の nats / seaweedfs を起動しているときだけ走り、到達できなければ skip する
-（CI など backend が無い環境では自動 skip＝赤くしない）。手元検証:
+**同一の CRUD ラウンドトリップ（`_crud_roundtrip`）を、注入するストアだけ変えて全 backend で回す**:
+
+- `local`       … 一時ディレクトリ
+- `nats`        … NATS Object Store
+- `s3-virtual`  … S3 virtual-host（ドメイン）スタイル
+- `s3-path`     … S3 path スタイル
+
+各ケースは backend が無い／認証未整備なら **skip**（CI など backend 無し環境で赤くしない）。
+`local` は常に走り、失敗は実バグなので skip しない。手元検証:
 
     docker compose up -d nats seaweedfs
     uv run pytest tests/test_e2e_backends.py -v
@@ -11,7 +18,12 @@ import asyncio
 import contextlib
 import os
 import socket
+import tempfile
 import uuid
+from collections.abc import AsyncIterator, Callable
+from contextlib import asynccontextmanager
+from dataclasses import dataclass
+from pathlib import Path
 
 import pytest
 
@@ -21,9 +33,10 @@ S3_HOST, S3_PORT = "localhost", 8333
 NATS_HOST, NATS_PORT = "localhost", 4222
 S3_ENDPOINT = f"http://{S3_HOST}:{S3_PORT}"
 NATS_URL = f"nats://{NATS_HOST}:{NATS_PORT}"
+S3_BUCKET = "manystore-e2e"
 
-# S3 互換サーバの認証情報は環境ごとに違う（SeaweedFS mini は動的・minio は minioadmin 等）。
-# 既定はダミーで、有効な鍵は env で渡す。鍵不一致や未設定なら test_s3_e2e は skip する。
+# S3 互換サーバの認証は環境ごとに違う（SeaweedFS mini は動的・minio は minioadmin 等）。
+# 既定はダミーで、有効な鍵は env で渡す。鍵不一致や未整備なら該当ケースは skip。
 S3_ACCESS_KEY = os.environ.get("MANYSTORE_S3_ACCESS_KEY", "any")
 S3_SECRET_KEY = os.environ.get("MANYSTORE_S3_SECRET_KEY", "any")
 
@@ -36,8 +49,23 @@ def _reachable(host: str, port: int) -> bool:
         return False
 
 
-async def _crud_roundtrip(store, key: str, payload: bytes) -> None:
-    """put→get→exists→list→cp→delete を一通り検証する（backend 共通）。"""
+def _s3_up() -> bool:
+    return _reachable(S3_HOST, S3_PORT)
+
+
+def _nats_up() -> bool:
+    return _reachable(NATS_HOST, NATS_PORT)
+
+
+def _always() -> bool:
+    return True
+
+
+async def _crud_roundtrip(store) -> None:
+    """全 backend 共通の CRUD ラウンドトリップ（put→get→exists→list→cp→delete）。"""
+    key = f"e2e/{uuid.uuid4().hex}"
+    payload = b"hello-manystore"
+
     await store.put(key, payload)
     assert await store.get(key) == payload
     assert await store.exists(key) is True
@@ -54,8 +82,27 @@ async def _crud_roundtrip(store, key: str, payload: bytes) -> None:
     assert await store.exists(key) is False
 
 
-async def _s3_ensure_bucket(bucket: str) -> None:
-    """S3 の connect は head_bucket で存在前提なので、先にバケットを作る（既存なら無視）。"""
+# ── backend ごとの「ストアを開く」context manager（中身は同じテストに注入される） ──
+
+
+@asynccontextmanager
+async def _open_local() -> AsyncIterator[object]:
+    with tempfile.TemporaryDirectory() as d:
+        async with connect_key_value_store("local", local_dir=Path(d)) as store:
+            yield store
+
+
+@asynccontextmanager
+async def _open_nats() -> AsyncIterator[object]:
+    async with connect_key_value_store(
+        "nats", nats_url=NATS_URL, nats_bucket="manystore_e2e", policy=ConnectPolicy.fail_fast()
+    ) as store:
+        yield store
+
+
+async def _s3_ensure_bucket(addressing_style: str) -> None:
+    """S3 の connect は head_bucket で存在前提なので、先にバケットを作る（既存/失敗は無視）。"""
+    from aiobotocore.config import AioConfig
     from aiobotocore.session import get_session
 
     session = get_session()
@@ -63,49 +110,61 @@ async def _s3_ensure_bucket(bucket: str) -> None:
         "s3",
         endpoint_url=S3_ENDPOINT,
         region_name="us-east-1",
-        aws_access_key_id="any",
-        aws_secret_access_key="any",
+        aws_access_key_id=S3_ACCESS_KEY,
+        aws_secret_access_key=S3_SECRET_KEY,
+        config=AioConfig(s3={"addressing_style": addressing_style}),
     ) as client:
         with contextlib.suppress(Exception):
-            await client.create_bucket(Bucket=bucket)
+            await client.create_bucket(Bucket=S3_BUCKET)
 
 
-async def _s3_flow() -> None:
-    bucket = "manystore-e2e"
-    await _s3_ensure_bucket(bucket)
-    async with connect_key_value_store(
-        "s3",
-        s3_bucket=bucket,
-        s3_endpoint=S3_ENDPOINT,
-        s3_access_key=S3_ACCESS_KEY,
-        s3_secret_key=S3_SECRET_KEY,
-        policy=ConnectPolicy.fail_fast(),
-    ) as store:
-        await _crud_roundtrip(store, f"e2e/{uuid.uuid4().hex}.txt", b"hello-s3")
+def _open_s3(addressing_style: str) -> Callable[[], object]:
+    @asynccontextmanager
+    async def opener() -> AsyncIterator[object]:
+        await _s3_ensure_bucket(addressing_style)
+        async with connect_key_value_store(
+            "s3",
+            s3_bucket=S3_BUCKET,
+            s3_endpoint=S3_ENDPOINT,
+            s3_access_key=S3_ACCESS_KEY,
+            s3_secret_key=S3_SECRET_KEY,
+            s3_addressing_style=addressing_style,
+            policy=ConnectPolicy.fail_fast(),
+        ) as store:
+            yield store
+
+    return opener
 
 
-async def _nats_flow() -> None:
-    async with connect_key_value_store(
-        "nats",
-        nats_url=NATS_URL,
-        nats_bucket="manystore_e2e",
-        policy=ConnectPolicy.fail_fast(),
-    ) as store:
-        await _crud_roundtrip(store, f"k-{uuid.uuid4().hex}", b"hello-nats")
+@dataclass
+class _Case:
+    id: str
+    opener: Callable[[], object]  # () -> async context manager（store を yield）
+    reachable: Callable[[], bool]  # 安価な到達チェック
+    skip_on_error: bool  # 実行時エラーを skip 扱いにするか（env 依存）。False=実バグ
 
 
-def test_s3_e2e() -> None:
-    if not _reachable(S3_HOST, S3_PORT):
-        pytest.skip("SeaweedFS S3 が起動していない（docker compose up -d seaweedfs）")
-    # path-style 修正は実施済みだが、S3 互換サーバの有効な認証情報が要る。鍵が未整備なら
-    # skip（M002 の S3 実証は後回し）。MANYSTORE_S3_ACCESS_KEY/SECRET_KEY を渡せば検証する。
+CASES = [
+    _Case("local", _open_local, _always, skip_on_error=False),
+    _Case("nats", _open_nats, _nats_up, skip_on_error=True),
+    _Case("s3-virtual", _open_s3("virtual"), _s3_up, skip_on_error=True),
+    _Case("s3-path", _open_s3("path"), _s3_up, skip_on_error=True),
+]
+
+
+async def _run(opener: Callable[[], object]) -> None:
+    async with opener() as store:
+        await _crud_roundtrip(store)
+
+
+@pytest.mark.parametrize("case", CASES, ids=[c.id for c in CASES])
+def test_backend_crud(case: _Case) -> None:
+    """注入するストアだけ変えて、全 backend で同じ CRUD を回す。"""
+    if not case.reachable():
+        pytest.skip(f"{case.id}: backend 未到達")
     try:
-        asyncio.run(_s3_flow())
-    except Exception as e:  # noqa: BLE001 — 認証/設定未整備は失敗でなく skip 扱い
-        pytest.skip(f"S3 実証は後回し（認証/設定 未整備）: {type(e).__name__}: {e}")
-
-
-def test_nats_e2e() -> None:
-    if not _reachable(NATS_HOST, NATS_PORT):
-        pytest.skip("NATS が起動していない（docker compose up -d nats）")
-    asyncio.run(_nats_flow())
+        asyncio.run(_run(case.opener))
+    except Exception as e:
+        if case.skip_on_error:
+            pytest.skip(f"{case.id}: 環境/認証 未整備 → {type(e).__name__}: {e}")
+        raise

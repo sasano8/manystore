@@ -31,6 +31,7 @@ def create_key_value_store(
     s3_region: str = "us-east-1",
     s3_access_key: str = "",
     s3_secret_key: str = "",
+    s3_addressing_style: str = "virtual",
     nats_url: str = "",
     nats_bucket: str = "manystore_files",
 ) -> KeyValueStore:
@@ -45,6 +46,7 @@ def create_key_value_store(
             region=s3_region,
             access_key=s3_access_key,
             secret_key=s3_secret_key,
+            addressing_style=s3_addressing_style,
         )
     elif backend == "nats":
         return NatsObjectKeyValueStore(url=nats_url, bucket=nats_bucket)
