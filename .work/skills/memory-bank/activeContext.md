@@ -2,12 +2,14 @@
 
 ## 現在のフォーカス
 
-**M001 / M003 完了。** 残りは M002（実 backend 疎通）/ M004（README）。次サイクルは着手前にユーザー確認。
+**M001 / M003 / M004 完了。** 残りは **M002（実 backend 疎通）のみ**（docker 前提で環境依存＝着手前にユーザー確認）。
 このプロジェクトは supervisor（dotfiles）の worker として `agent` ブランチで作業し、interrupt 指示を取り込んで
 進める運用に入った。
 
 ## 直近の変更
 
+- **M004 完了**：ルート `README.md` を作成（特徴・install・local/S3/NATS の接続例・`ConnectPolicy` プリセット・
+  `Safe*` ラッパ・その他公開 API・開発/CI/3.14 注記）。公開 API は `manystore/__init__.py` の `__all__` に準拠。
 - **M003 完了（supervisor 指示で着手）**：dotfiles（supervisor）が manystore の interrupt に投函した指示
   （`20260620-1200-m003-ci.md`, priority high）を取り込み、GitHub Actions CI（`.github/workflows/ci.yml`：
   setup-uv → `make check`）を追加。指示は `interrupt/archive/` へ退避。

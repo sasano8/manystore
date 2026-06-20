@@ -19,19 +19,19 @@
 | M001 | 旧 `shoudou_storage` 残骸の掃除（docstring/コメント） | 完了 | NATS 既定バケット `shoudou_files`→`manystore_files`。残るは pyproject の由来コメントのみ（意図的に保持） |
 | M002 | 実 backend（minio / 実 NATS）での E2E 疎通検証 | 未着手 | 現状 fake 担保。`docker-compose.yml` で起動して実疎通 |
 | M003 | CI（GitHub Actions）＋ lint/format 統一 | 完了 | `.github/workflows/ci.yml`（setup-uv→`make check`）。supervisor 指示で着手。あわせて **Python 3.14+ 前提**を確定（後述） |
-| M004 | README / ドキュメント整備 | 未着手 | ルート README が無い。公開 API・使い方・接続情報を記載 |
+| M004 | README / ドキュメント整備 | 完了 | ルート `README.md` 作成（特徴・install・quickstart・backend別接続・ConnectPolicy・Safe・開発/CI/3.14）|
 | M005 | juice からの利用（adapter）に向けた IF 確認 | 保留 | juice 側 src に adapter（manystore は pristine 維持）。追加要件が出たらここに |
 
 ## 現状ステータス
 
-抽出・独立ライブラリ化は完了し単体で緑。**M001 / M003 完了**。残バックログは M002（実 backend 疎通）/
-M004（README）。M003 は supervisor（dotfiles）からの interrupt 指示で着手し、CI（`make check`）を追加。
-その過程で 3.10 非互換バグ（下記）を発見・解消。指示ファイルは `interrupt/archive/` へ退避済み。
+抽出・独立ライブラリ化は完了し単体で緑。**M001 / M003 / M004 完了**。残バックログは **M002（実 backend 疎通）**
+のみ。M003 は supervisor（dotfiles）からの interrupt 指示で着手し CI（`make check`）を追加、あわせて Python 3.14+
+前提を確定（下記）。M004 でルート README 作成。
 
 ## 既知の問題
 
-- S3 / NATS backend は in-memory fake でのみ検証済み。**実機（minio / 実 NATS）疎通は未検証**（M002）。
-- ルート README が無い（M004）。
+- S3 / NATS backend は in-memory fake でのみ検証済み。**実機（minio / 実 NATS）疎通は未検証**（M002・残）。
+- ~~ルート README が無い~~（M004 で解消）。
 - ~~CI 未設定~~（M003 で解消）。
 
 ## 意思決定の変遷
