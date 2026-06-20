@@ -113,8 +113,8 @@ manystore/
     watcher.py    #   Watcher / PollingWatcher（+将来 LocalWatcher=watchdog）
   server/         # サーバ層（fastapi/uvicorn を遅延 import。extra: manystore[server]）
     app.py / routes.py / __main__.py / static/
-  client/         # クライアント層（protocol を喋る Python SDK。http_store RW の母体）
-    http_client.py
+  client/         # クライアント層（manystore API 前提。汎用 GET の backends/http_store とは別物）
+    remote.py     #   ManystoreClient（薄い SDK）/ RemoteKeyValueStore
 tests/
   test_storage.py / test_e2e_backends.py          # 既存（不変）
   ui/ test_implement.py / test_server.py / test_client.py

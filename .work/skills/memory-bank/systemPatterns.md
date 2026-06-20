@@ -23,7 +23,8 @@
     `watcher`(`PollingWatcher`: size 差分→イベント、fan-out)。HTTP 非依存で単体テスト可。
   - `server/` — FastAPI（`create_app`/routes/`__main__`/static）。REST/WS は `KeyValueStore` と 1:1 の薄い
     アダプタ。fastapi/uvicorn は遅延 import。同梱ビルドレス Web UI。
-  - `client/` — `StorageClient`（薄い SDK）/ `RemoteKeyValueStore`（1 context を `KeyValueStore` として被せる
+  - `client/remote.py` — manystore API 前提のクライアント（汎用 GET の `backends/http_store` とは別物）。
+    `ManystoreClient`（薄い SDK）/ `RemoteKeyValueStore`（1 context を `KeyValueStore` として被せる
     ＝read-only `http_store` の RW 版）。`transport` 注入で in-process ASGI テスト可。
 
 ## 主要な技術判断

@@ -1,8 +1,12 @@
-"""http_client — manystore.server の REST protocol を喋るクライアント。
+"""remote — manystore.server が公開する REST protocol を喋るクライアント。
 
-[StorageClient] は薄い SDK。[RemoteKeyValueStore] は 1 context を [KeyValueStore] 準拠の
-ストアとして被せ、サーバ越しに put/get/list/exists/delete/cp/mv を行う（read-only の
-backends/http_store の RW 版に相当）。httpx を遅延 import する。
+汎用 HTTP backend（`backends/http_store.py` の単純な GET クライアント）とは別物で、
+**manystore API 前提**のクライアント:
+- [ManystoreClient] … manystore.server の API を呼ぶ薄い SDK（list/get/put/delete）。
+- [RemoteKeyValueStore] … 1 context を [KeyValueStore] 準拠で被せ、サーバ越しに
+  put/get/list/exists/delete/cp/mv を行う（read-only `http_store` の RW 版に相当）。
+
+httpx を遅延 import する。
 """
 
 from collections.abc import AsyncIterator
@@ -17,8 +21,8 @@ def _quote_key(key: str) -> str:
     return quote(key, safe="/")
 
 
-class StorageClient:
-    """manystore.server に対する薄い HTTP SDK（サーバ横断）。"""
+class ManystoreClient:
+    """manystore.server の API を呼ぶ薄い SDK（サーバ横断）。"""
 
     def __init__(
         self,
@@ -85,7 +89,7 @@ class RemoteKeyValueStore:
         headers: dict[str, str] | None = None,
         transport: object | None = None,
     ) -> None:
-        self._client = StorageClient(base_url, headers=headers, transport=transport)
+        self._client = ManystoreClient(base_url, headers=headers, transport=transport)
         self._context = context
 
     async def put(self, key: str, value: bytes) -> None:
