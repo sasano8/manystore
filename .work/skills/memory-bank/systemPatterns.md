@@ -13,8 +13,8 @@
 - `connect.py` — `connect_key_value_store` / `connecting` / `ConnectPolicy`。
 - `safe_path.py` — `validate_safe_path` ＋ `SafeKeyValueStore`（download/キャッシュも担う唯一の KVS wrapper）/
   `SafeFileStore`。
-- `array_storage.py` — `ArrayKeyValueStore`（論理名＝マウント先で複数 backend を束ねる。juice の
-  RegistryArray の汎用版）＋ `DownloadCache`。
+- `array_storage.py` — `ArrayKeyValueStore`（論理名＝マウント先で複数 backend を束ねる汎用ストア）
+  ＋ `DownloadCache`。
 
 ## 主要な技術判断
 
@@ -31,7 +31,7 @@
 
 ## 設計パターン / 原則
 
-1. **pristine に保つ** — 利用側都合で IF を拡張しない。拡張が要るなら doc-first で合意。
+1. **最小・汎用に保つ** — 利用側都合で IF を拡張しない。拡張が要るなら doc-first で合意（YAGNI）。
 2. **ラッパは 1 枚・差し替えるのは backend だけ** — ネスト禁止。
 3. **抽象 IF を backend 固有事情で汚さない** — 例: `vacuum`（空ディレクトリ削除）は Local 固有なので
    Protocol に載せない（s3/nats はフラットで概念なし）。

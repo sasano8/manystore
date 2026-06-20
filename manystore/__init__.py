@@ -1,7 +1,6 @@
 """manystore — 差し替え可能なバックエンドを持つストア群。
 
-2 種のストア抽象を、async / sync / async-to-sync の 3 モジュールに分けて持つ
-（将来 juice の外のライブラリとして抽出する想定）:
+2 種のストア抽象を、async / sync / async-to-sync の 3 モジュールに分けて持つ:
 - [KeyValueStore] … put/get がメインの値ストア（Local / S3 / NATS バックエンド同梱）。
 - [FileStore]     … `open` でファイルオブジェクト（[FileObject]）を取得するストリーム指向の抽象。
 

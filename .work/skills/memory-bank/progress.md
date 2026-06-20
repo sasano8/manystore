@@ -19,17 +19,16 @@
 
 | ID | タスク | 状態 | 備考 |
 |----|--------|------|------|
-| M001 | 旧 `shoudou_storage` 残骸の掃除（docstring/コメント） | 完了 | NATS 既定バケット `shoudou_files`→`manystore_files`。残るは pyproject の由来コメントのみ（意図的に保持） |
+| M001 | 旧 `shoudou_storage` 残骸の掃除（docstring/コメント） | 完了 | NATS 既定バケット `shoudou_files`→`manystore_files`（既定値のみ・テスト非依存）|
 | M002 | 実 backend（S3 / 実 NATS）での E2E 疎通検証 | 完了 | NATS / S3(path) を実機 E2E で検証。`make e2e-up` が SeaweedFS に dev identity（`weed shell s3.configure`）を登録し、`make check` で s3-path も通る（47 passed, 1 skipped）。s3-virtual はローカルでは原理的 skip |
 | M003 | CI（GitHub Actions）＋ lint/format 統一 | 完了 | `.github/workflows/ci.yml`（setup-uv→`make check`）。supervisor 指示で着手。あわせて **Python 3.14+ 前提**を確定（後述） |
 | M004 | README / ドキュメント整備 | 完了 | ルート `README.md` 作成（特徴・install・quickstart・backend別接続・ConnectPolicy・Safe・開発/CI/3.14）|
-| M005 | juice からの利用（adapter）に向けた IF 確認 | 保留 | juice 側 src に adapter（manystore は pristine 維持）。追加要件が出たらここに |
 
 ## 現状ステータス
 
-抽出・独立ライブラリ化は完了し単体で緑。**M001〜M004 すべて完了**。M002 は NATS / S3(path) を実機 E2E で検証
-（`make e2e-up`＋パラメタライズテスト）。M003 は supervisor（dotfiles）の interrupt 指示で着手し CI を追加、
-あわせて Python 3.14+ 前提を確定。M004 でルート README 作成。**バックログは（保留の M005 を除き）一掃**。
+独立ライブラリ化は完了し単体で緑。**M001〜M004 すべて完了でバックログ一掃**。M002 は NATS / S3(path) を実機
+E2E で検証（`make e2e-up`＋パラメタライズテスト）。M003 は supervisor（dotfiles）の interrupt 指示で着手し CI
+を追加、あわせて Python 3.14+ 前提を確定。M004 でルート README 作成。
 
 ## 既知の問題
 
@@ -40,8 +39,8 @@
 
 ## 意思決定の変遷
 
-- ストレージ抽象を juice から切り出す方針（juice 課題 E006）。juice は将来「利用する側」になり、結線は
-  juice 側 adapter に閉じる（manystore は pristine）。
+- ストレージ抽象は独立ライブラリとして自己完結させる。利用側固有の結線は利用側の adapter に閉じ、
+  manystore 本体は最小・汎用に保つ（IF を利用側都合で拡張しない）。
 - **S3 アドレッシングスタイルを明示パラメータ化（M002 で発見）**: 既定の virtual-host だと S3 互換サーバ
   （minio/SeaweedFS）で `bucket.<host>` を名前解決できず接続不可。fake テストでは気づけず実機 E2E で露見。
   方針は「**既定 virtual（ドメイン）、利用側が `"path"` を opt-in**」。`S3*Store(addressing_style="virtual")`、

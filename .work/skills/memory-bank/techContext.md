@@ -31,7 +31,7 @@ uv run pytest                             # test（現状 44 passed）
 
 ## 技術的制約 / 依存
 
-- 実行依存（`[project.dependencies]`、juice の dependency-group から移設）：
+- 実行依存（`[project.dependencies]`）：
   `redis>=5.0.0` / `nats-py>=2.0.0` / `aiobotocore>=2.0.0` / `httpx>=0.27.0`。
 - dev: `pytest>=8.0`。
 - import 名・プロジェクト名ともに `manystore`（旧 `shoudou_storage` から統一済み）。
