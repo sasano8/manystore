@@ -157,20 +157,21 @@ class _LocalAtomicWriter:
 
 
 class LocalFileStore:
-    """`open` でファイルオブジェクトを返すローカル実装（[FileStore]）。書き込みは原子的。"""
+    """`open_reader`/`open_writer` でファイルオブジェクトを返すローカル実装（[FileStore]）。
+
+    書き込みは temp+rename で原子的（all-or-nothing）。バイナリ専用。
+    """
 
     def __init__(self, directory: Path) -> None:
         # KVS と同様、初期化時に絶対パスへ固定する（実行中の cd で挙動を変えない）。
         self._dir = Path(directory).resolve()
         self._dir.mkdir(parents=True, exist_ok=True)
 
-    async def open(self, filename: str, mode: str = "rb") -> FileObject:
-        path = self._dir / filename
-        if "r" in mode:
-            return LocalFileObject(path.open(mode))
-        if "w" in mode:
-            return _LocalAtomicWriter(path)  # temp+rename で all-or-nothing
-        raise ValueError(f"unsupported mode for LocalFileStore: {mode!r}")
+    async def open_reader(self, filename: str) -> FileObject:
+        return LocalFileObject((self._dir / filename).open("rb"))
+
+    async def open_writer(self, filename: str) -> FileObject:
+        return _LocalAtomicWriter(self._dir / filename)  # temp+rename で all-or-nothing
 
     async def connect(self) -> None:
         self._dir.mkdir(parents=True, exist_ok=True)

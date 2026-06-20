@@ -15,6 +15,9 @@ dist/
 .ruff_cache/
 .mypy_cache/
 
+# 開発用の使い捨てストレージ（manystore-ui の dev デフォルト先など。commit しない）
+.cache/
+
 # OS / editor
 .DS_Store
 

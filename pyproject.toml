@@ -1,9 +1,9 @@
 [project]
 name = "manystore"
 version = "0.0.1"
-description = "ストレージ抽象（local / nats / s3 バックエンド）。juice から抽出した独立ライブラリ。"
-requires-python = ">=3.10"
-# juice の dependency-group `shoudou-storage` から持ち出した実行依存。
+description = "ストレージ抽象（local / nats / s3 バックエンド）。差し替え可能な backend を共通 IF の背後に隠す独立ライブラリ。"
+requires-python = ">=3.14"
+# 実行依存（重い backend は各 backend のメソッド内で遅延 import する）。
 dependencies = [
     "redis>=5.0.0",
     "nats-py>=2.0.0",
@@ -11,9 +11,24 @@ dependencies = [
     "httpx>=0.27.0",
 ]
 
+# UI/サーバ層は任意。`pip install manystore[server]` のときだけ重い依存が入る。
+# server/ 内では fastapi/uvicorn を遅延 import するので、未インストールでも本体は動く。
+[project.optional-dependencies]
+server = [
+    "fastapi>=0.110.0",
+    "uvicorn>=0.29.0",
+    "watchdog>=4.0.0",
+]
+
 [dependency-groups]
 dev = [
     "pytest>=8.0",
+    # async テストを `async def test_*` で素直に書く（asyncio_mode=auto）。
+    "pytest-asyncio>=0.24.0",
+    # server 層のテスト（ASGI TestClient = starlette + httpx）に必要。httpx は本体依存にも含む。
+    "fastapi>=0.110.0",
+    "uvicorn>=0.29.0",
+    "watchdog>=4.0.0",
 ]
 
 [build-system]
@@ -25,6 +40,7 @@ packages = ["manystore"]
 
 [tool.ruff]
 line-length = 100
+target-version = "py314"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM"]
@@ -32,3 +48,5 @@ select = ["E", "F", "I", "UP", "B", "SIM"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-ra"
+# `async def test_*` を自動で非同期テストとして実行（マーカ不要）。既存の asyncio.run スタイルとも共存。
+asyncio_mode = "auto"

@@ -19,14 +19,19 @@ class _S3Base:
         region: str = "us-east-1",
         access_key: str = "",
         secret_key: str = "",
+        addressing_style: str = "virtual",
     ) -> None:
         self._bucket = bucket
         self._endpoint_url = endpoint_url or None
         self._region = region
         self._access_key = access_key
         self._secret_key = secret_key
+        # "virtual"（ドメイン。既定）/ "path" / "auto"。S3 互換サーバ（minio / SeaweedFS 等）は
+        # virtual だと bucket.<host> を名前解決できないので、利用側が明示的に "path" を指定する。
+        self._addressing_style = addressing_style
 
     def _session(self):
+        from aiobotocore.config import AioConfig
         from aiobotocore.session import get_session
 
         return get_session().create_client(
@@ -35,6 +40,7 @@ class _S3Base:
             region_name=self._region,
             aws_access_key_id=self._access_key,
             aws_secret_access_key=self._secret_key,
+            config=AioConfig(s3={"addressing_style": self._addressing_style}),
         )
 
     async def connect(self) -> None:
@@ -222,17 +228,17 @@ class S3FileStore(_S3Base):
         region: str = "us-east-1",
         access_key: str = "",
         secret_key: str = "",
+        addressing_style: str = "virtual",
         part_size: int = 8 * 1024 * 1024,
     ) -> None:
-        super().__init__(bucket, endpoint_url, region, access_key, secret_key)
+        super().__init__(bucket, endpoint_url, region, access_key, secret_key, addressing_style)
         self._part_size = part_size
 
-    async def open(self, filename: str, mode: str = "rb") -> FileObject:
-        if "r" in mode:
-            cm = self._session()
-            client = await cm.__aenter__()
-            resp = await client.get_object(Bucket=self._bucket, Key=filename)
-            return _S3StreamReader(cm, client, resp["Body"])
-        if "w" in mode:
-            return _S3MultipartWriter(self, filename, self._part_size)
-        raise ValueError(f"unsupported mode for S3FileStore: {mode!r}")
+    async def open_reader(self, filename: str) -> FileObject:
+        cm = self._session()
+        client = await cm.__aenter__()
+        resp = await client.get_object(Bucket=self._bucket, Key=filename)
+        return _S3StreamReader(cm, client, resp["Body"])
+
+    async def open_writer(self, filename: str) -> FileObject:
+        return _S3MultipartWriter(self, filename, self._part_size)

@@ -1,4 +1,4 @@
-"""backends — backend 毎の具体実装（Local / S3 / NATS）と KVS のファクトリ。
+"""backends — backend 毎の具体実装（Local / S3 / NATS / HTTP）と KVS のファクトリ。
 
 抽象（[KeyValueStore] / [FileStore]）は [async_storage] に、ここには実装だけを置く。
 重い依存（aiobotocore / nats）は各 backend のメソッド内で遅延 import する。
@@ -7,6 +7,7 @@
 from pathlib import Path
 
 from ..async_storage import KeyValueStore
+from .http_store import HttpFileStore, HttpKeyValueStore
 from .local import LocalFileObject, LocalFileStore, LocalKeyValueStore
 from .nats import NatsFileStore, NatsObjectKeyValueStore
 from .s3 import S3FileStore, S3KeyValueStore
@@ -19,6 +20,8 @@ __all__ = [
     "S3FileStore",
     "NatsObjectKeyValueStore",
     "NatsFileStore",
+    "HttpKeyValueStore",
+    "HttpFileStore",
     "create_key_value_store",
 ]
 
@@ -31,8 +34,11 @@ def create_key_value_store(
     s3_region: str = "us-east-1",
     s3_access_key: str = "",
     s3_secret_key: str = "",
+    s3_addressing_style: str = "virtual",
     nats_url: str = "",
     nats_bucket: str = "manystore_files",
+    http_base_url: str = "",
+    http_headers: dict[str, str] | None = None,
 ) -> KeyValueStore:
     if backend == "local":
         if local_dir is None:
@@ -45,8 +51,11 @@ def create_key_value_store(
             region=s3_region,
             access_key=s3_access_key,
             secret_key=s3_secret_key,
+            addressing_style=s3_addressing_style,
         )
     elif backend == "nats":
         return NatsObjectKeyValueStore(url=nats_url, bucket=nats_bucket)
+    elif backend == "http":
+        return HttpKeyValueStore(base_url=http_base_url, headers=http_headers)
     else:
         raise ValueError(f"unknown backend: {backend!r}")

@@ -1,0 +1,31 @@
+# manystore storage UI のサンプル設定。
+# 起動: uv run python -m manystore.server --config examples/manystore-ui.toml
+# （`pip install "manystore[server]"` で server extra を入れておく）
+
+# UI が既定で開く context（任意）。
+default_context = "work"
+
+# ── context マウント（公開するディレクトリ/ストア） ──
+# 名前 → backend。local は `root`、s3/nats/http は create_key_value_store の引数名で書く。
+[contexts.work]
+backend = "local"
+root = ".work"
+
+# 別 backend を足す例（必要に応じて）:
+# [contexts.bucket]
+# backend = "s3"
+# s3_bucket = "my-bucket"
+# s3_endpoint = "http://127.0.0.1:8333"
+# s3_access_key = "..."
+# s3_secret_key = "..."
+# s3_addressing_style = "path"
+# writable = false           # 読み取り専用にしたい context は writable=false
+
+# ── ビューの重点設定（汎用） ──
+# UI 本体は interrupt を特別扱いしない。config が「重点パス」を pin/quick_write するだけ。
+[[views.featured]]
+context = "work"
+path = "skills/memory-bank/interrupt"
+label = "Interrupt"
+pin = true          # サイドバー上部に固定
+quick_write = true  # その場で新規テキストを作成（タイムスタンプ名の雛形を用意）

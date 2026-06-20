@@ -36,6 +36,7 @@ class SyncFileObject(Protocol):
 
 
 class SyncFileStore(Protocol):
-    """`open` でファイルオブジェクトを取得するストリーム指向のストア（同期版）。"""
+    """`open_reader`/`open_writer` でファイルを取得するストア（同期版・バイナリ専用）。"""
 
-    def open(self, filename: str, mode: str = "rb") -> SyncFileObject: ...
+    def open_reader(self, filename: str) -> SyncFileObject: ...
+    def open_writer(self, filename: str) -> SyncFileObject: ...

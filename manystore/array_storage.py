@@ -4,8 +4,6 @@
 `"<name>/<subkey>"` の先頭セグメントで振り分ける。論理名はディレクトリのように振る舞い、全 backend
 を「論理名配下に存在しているかのように」横断できる（[KeyValueStore] を満たす）。
 
-juice の RegistryArray（レイヤ名で registry を束ねる）と同型の汎用版。
-
 [DownloadCache] は ArrayStorage（等の KeyValueStore）を包み、`download` でローカルキャッシュへ取得
 するラッパ層（キャッシュは常にローカル FS。リモート backend をローカルへ落として使う想定）。
 """
