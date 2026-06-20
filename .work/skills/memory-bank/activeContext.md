@@ -10,10 +10,10 @@
 
 - **M003 完了（supervisor 指示で着手）**：dotfiles（supervisor）が manystore の interrupt に投函した指示
   （`20260620-1200-m003-ci.md`, priority high）を取り込み、GitHub Actions CI（`.github/workflows/ci.yml`：
-  setup-uv → `make check`）を追加。**CI 化の過程で 3.10 非互換バグを発見・解消**：8 ファイルが
-  `from __future__ import annotations` 無しで自クラス等を戻り値注釈に使い、3.10〜3.13 では import 時 NameError
-  になる（dev の 3.14 は遅延注釈が既定で表面化せず）。ruff の F821 が検出。future import 追加で `make check` 緑
-  （44 passed）。指示は `interrupt/archive/` へ退避。
+  setup-uv → `make check`）を追加。指示は `interrupt/archive/` へ退避。
+- **Python 3.14+ 前提を確定**：3.14 は注釈遅延評価が既定なので前方参照（自クラス戻り値注釈）はそのまま valid＝
+  `from __future__ import annotations` 不要。`requires-python = ">=3.14"` ＋ ruff `target-version = "py314"` に
+  し future import を全廃。ruff は py314 対応版が要るので `RUFF_VERSION` を 0.15.18 へ。`make check` 緑（44 passed）。
 - **M001 完了**：旧名残骸を監査（`git grep shoudou`）。実コードの残骸は NATS 既定バケット名のみで、
   `manystore/backends/__init__.py` の `nats_bucket="shoudou_files"`→`"manystore_files"` に変更（既定値のみ・
   テスト非依存）。`pyproject.toml` の由来コメント（juice の旧 dependency-group 名）は provenance として意図的に保持。

@@ -13,8 +13,6 @@
   先へ進む（以降の lazy 接続・再試行に委ねる）。
 """
 
-from __future__ import annotations
-
 import asyncio
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager

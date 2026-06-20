@@ -2,7 +2,7 @@
 # format は uvx で ruff のバージョンを固定して実行する（環境差を排除）。
 
 # ruff のピン留めバージョン（更新時はここだけ変える）
-RUFF_VERSION := 0.9.1
+RUFF_VERSION := 0.15.18
 
 # lint/format/test の対象
 SRC := manystore tests

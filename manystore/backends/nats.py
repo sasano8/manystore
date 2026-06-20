@@ -3,8 +3,6 @@
 nats-py はメソッド内で遅延 import する。FileStore は read=全体取得 / write=close で put。
 """
 
-from __future__ import annotations
-
 import contextlib
 import io
 from collections.abc import AsyncIterator

@@ -4,11 +4,12 @@
 
 | 領域 | 技術 | 備考 |
 |------|------|------|
-| 言語 | Python | `requires-python = ">=3.10"`（pyproject）。開発環境は 3.14 |
+| 言語 | Python | **3.14+ 前提**（`requires-python = ">=3.14"`）。3.14 は注釈遅延評価が既定＝`from __future__ import annotations` 不要 |
 | パッケージ管理 | uv | `uv.lock` で pin。`uv sync` / `uv run` |
 | ビルド | hatchling | wheel packages = `["manystore"]` |
-| Lint/Format | ruff | `line-length=100`、`select=["E","F","I","UP","B","SIM"]` |
+| Lint/Format | ruff | `line-length=100`、`target-version="py314"`、`select=["E","F","I","UP","B","SIM"]`。`make`/CI は `RUFF_VERSION=0.15.18`（py314 対応版が必須） |
 | テスト | pytest | `testpaths=["tests"]`、`addopts="-ra"` |
+| CI | GitHub Actions | `.github/workflows/ci.yml`：push/PR で setup-uv → `make check` |
 | 実 backend（任意） | docker-compose | `docker-compose.yml`（nats / minio 等）で実疎通検証用 |
 
 ## 開発セットアップ

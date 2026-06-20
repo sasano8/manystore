@@ -2,7 +2,7 @@
 name = "manystore"
 version = "0.0.1"
 description = "ストレージ抽象（local / nats / s3 バックエンド）。juice から抽出した独立ライブラリ。"
-requires-python = ">=3.10"
+requires-python = ">=3.14"
 # juice の dependency-group `shoudou-storage` から持ち出した実行依存。
 dependencies = [
     "redis>=5.0.0",
@@ -25,6 +25,7 @@ packages = ["manystore"]
 
 [tool.ruff]
 line-length = 100
+target-version = "py314"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM"]

@@ -10,8 +10,6 @@
 扱いが別途必要なため未実装（必要になってから）。
 """
 
-from __future__ import annotations
-
 import asyncio
 from collections.abc import Iterator
 
