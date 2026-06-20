@@ -4,8 +4,9 @@
 
 **M018（HTTP backend, read-only）完了。** ユーザー要望の HTTP read-only ストアを統合（前回未コミットだった
 試作を完成させた）。`make check` 緑（51 passed, 1 skipped）。次サイクルは配布前提の G1（M005〜M008）が安く効く。
-このプロジェクトは supervisor（dotfiles）の worker として `agent` ブランチで作業し、interrupt 指示を取り込んで
-進める運用。
+本プロジェクトは `agent` ブランチで単線コミットし、`interrupt/` 受信箱の指示を取り込んで進める運用。
+dotfiles はスキルのホスト（＝skills/bin の置き場）で、manystore の interrupt に指示を投函してくる（下り）が、
+dotfiles 自身は Memory Bank を持たない＝「記憶を持つ supervisor」ではない（下記「直近の変更」参照）。
 
 ## 直近の変更
 
@@ -16,11 +17,18 @@
   - **モジュール名**: 当初 `http.py` で作られていたが stdlib `http` パッケージと紛れるため `http_store.py` に
     リネーム（**backend 識別子は `"http"` のまま**）。ユーザー指摘。
   - **M005 修正**: httpx は当初「未使用＝削除」だったが http backend で使うので**残す**に変更。`redis` のみ未使用。
-- **プロセスの穴をエスカレーション**：ユーザー要望（http backend）が**着手前に Memory Bank へ保存されず**、前回
-  セッションで未コミットの試作だけが残っていた（活動記録なし）。memory-bank スキルの「要望は着手前に
-  activeContext/タスクへ記録する」運用が抜けた件として、**dotfiles 側に上り受信箱を新設**して投函
-  （`~/projects/dotfiles/.work/skills/memory-bank/interrupt/20260621-0100-manystore-escalation-skill-gap.md`）。
-  上り（worker→親）経路はこれまで受信箱が無く実質ノーオペだったと判明（下り dotfiles→manystore は機能）。
+- **プロセスの穴を2つ発見し、フックで修正**：
+  - (a) ユーザー要望（http backend）が**着手前に Memory Bank へ保存されず**、前回セッションで未コミットの試作だけ
+    残っていた（活動記録なし）。教訓は「要望は着手前に activeContext/タスクへ記録してから実装」。
+  - (b) **より根本**：SessionStart フック `dotfiles/bin/memory-bank-sessionstart` が「`.work/skills/memory-bank/`
+    の**ディレクトリ有無だけ**」を見ていた。① 完全に無ければ黙って no-op（警告なし）、② dir が在れば中身が空でも
+    「Memory Bank があります」と誤検知。つまり **Memory Bank の成立条件（`.work`＋6コア）が崩れても誰も警告しない**。
+    → フックを「**dir はあるがコアが欠けていれば警告して initialize を促す**」よう修正・実測検証（dotfiles 側の作業
+    ツリー変更。コミットは dotfiles 側に委ねる）。完全欠如はマーカー無しに全 repo で鳴らせないので no-op のまま。
+  - **dotfiles の位置づけを訂正**：dotfiles は**スキルのホスト**（skills/bin/install.sh）であって、それ自身は
+    Memory Bank（6コア）を持つプロジェクトではない。「supervisor（dotfiles）が記憶を持って指示する」は実体の
+    ない過去 framing だった。下り（dotfiles→manystore interrupt 投函）は実績あり（M003 の m003-ci 指示）。
+    本セッションで一旦 dotfiles に作った interrupt だけの空ディレクトリは**誤りなので削除して元に戻した**。
 - **UI 要望をバックログ化**：ユーザー要望「ストレージの UI が欲しい」を progress.md の **M019（相談）**へ。
   未スコープ＋本体スコープ外のため、別パッケージ/別リポか着手前に要合意。
 
