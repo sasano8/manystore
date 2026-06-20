@@ -1,0 +1,35 @@
+[project]
+name = "manystore"
+version = "0.0.1"
+description = "ストレージ抽象（local / nats / s3 バックエンド）。juice から抽出した独立ライブラリ。"
+requires-python = ">=3.10"
+# juice の dependency-group `shoudou-storage` から持ち出した実行依存。
+dependencies = [
+    "redis>=5.0.0",
+    "nats-py>=2.0.0",
+    "aiobotocore>=2.0.0",
+    "httpx>=0.27.0",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+# import 名は shoudou_storage（パッケージ名）。プロジェクト名は manystore。
+packages = ["shoudou_storage"]
+
+[tool.ruff]
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests_storage"]
+addopts = "-ra"
