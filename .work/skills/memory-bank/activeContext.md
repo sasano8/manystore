@@ -18,7 +18,11 @@
   - **M005 修正**: httpx は当初「未使用＝削除」だったが http backend で使うので**残す**に変更。`redis` のみ未使用。
 - **プロセスの穴をエスカレーション**：ユーザー要望（http backend）が**着手前に Memory Bank へ保存されず**、前回
   セッションで未コミットの試作だけが残っていた（活動記録なし）。memory-bank スキルの「要望は着手前に
-  activeContext/タスクへ記録する」運用が抜けた件として supervisor(dotfiles) の interrupt へ投函。
+  activeContext/タスクへ記録する」運用が抜けた件として、**dotfiles 側に上り受信箱を新設**して投函
+  （`~/projects/dotfiles/.work/skills/memory-bank/interrupt/20260621-0100-manystore-escalation-skill-gap.md`）。
+  上り（worker→親）経路はこれまで受信箱が無く実質ノーオペだったと判明（下り dotfiles→manystore は機能）。
+- **UI 要望をバックログ化**：ユーザー要望「ストレージの UI が欲しい」を progress.md の **M019（相談）**へ。
+  未スコープ＋本体スコープ外のため、別パッケージ/別リポか着手前に要合意。
 
 - **juice 概念を削除**：manystore は juice と無関係な独立ライブラリなので、コード（`__init__`/`array_storage`/
   `tests`/`pyproject`/README）と Memory Bank から juice・E006・「pristine（juice 都合）」の記述を一掃。設計
