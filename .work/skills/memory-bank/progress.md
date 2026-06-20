@@ -8,6 +8,7 @@
 - 安全パス（`validate_safe_path` / `SafeKeyValueStore`〔download・キャッシュ含む〕 / `SafeFileStore`）。
 - 合成ストア（`ArrayKeyValueStore` / `DownloadCache`）。
 - **テスト**: `uv run pytest` で **44 passed**（S3 / NATS は in-memory fake で検証）。
+- **CI**: GitHub Actions（`.github/workflows/ci.yml`）で push/PR 時に `make check`（ruff format-check + check + pytest）。
 
 ## 残作業（What's left）— バックログ
 
@@ -17,24 +18,28 @@
 |----|--------|------|------|
 | M001 | 旧 `shoudou_storage` 残骸の掃除（docstring/コメント） | 完了 | NATS 既定バケット `shoudou_files`→`manystore_files`。残るは pyproject の由来コメントのみ（意図的に保持） |
 | M002 | 実 backend（minio / 実 NATS）での E2E 疎通検証 | 未着手 | 現状 fake 担保。`docker-compose.yml` で起動して実疎通 |
-| M003 | CI（GitHub Actions）＋ lint/format 統一 | 未着手 | `ruff` + `pytest`。`make check` 相当のワンコマンド化 |
+| M003 | CI（GitHub Actions）＋ lint/format 統一 | 完了 | `.github/workflows/ci.yml`（setup-uv→`make check`）。supervisor 指示で着手。CI 化の過程で 3.10 非互換バグ（後述）も解消 |
 | M004 | README / ドキュメント整備 | 未着手 | ルート README が無い。公開 API・使い方・接続情報を記載 |
 | M005 | juice からの利用（adapter）に向けた IF 確認 | 保留 | juice 側 src に adapter（manystore は pristine 維持）。追加要件が出たらここに |
 
 ## 現状ステータス
 
-抽出・独立ライブラリ化は完了し単体で緑。**M001（旧名残骸の掃除）完了**。残バックログは M002（実 backend
-疎通）/ M003（CI・lint 統一）/ M004（README）。M003 関連の `Makefile`（format/test）と M002 準備の
-`docker-compose.yml` 調整も本サイクルでコミット済み（各々別コミット）。
+抽出・独立ライブラリ化は完了し単体で緑。**M001 / M003 完了**。残バックログは M002（実 backend 疎通）/
+M004（README）。M003 は supervisor（dotfiles）からの interrupt 指示で着手し、CI（`make check`）を追加。
+その過程で 3.10 非互換バグ（下記）を発見・解消。指示ファイルは `interrupt/archive/` へ退避済み。
 
 ## 既知の問題
 
 - S3 / NATS backend は in-memory fake でのみ検証済み。**実機（minio / 実 NATS）疎通は未検証**（M002）。
-- ルート README が無い（M004）。CI 未設定（M003）。
+- ルート README が無い（M004）。
+- ~~CI 未設定~~（M003 で解消）。
 
 ## 意思決定の変遷
 
 - ストレージ抽象を juice から切り出す方針（juice 課題 E006）。juice は将来「利用する側」になり、結線は
   juice 側 adapter に閉じる（manystore は pristine）。
+- **3.10 互換バグ（M003 で発見）**: 複数ファイルが `from __future__ import annotations` 無しで自クラス等を
+  戻り値アノテーションに使用。dev の 3.14 は注釈遅延評価が既定で動くが、宣言する 3.10〜3.13 では import 時
+  NameError。CI の ruff（F821）が検出。該当 8 ファイルに future import を追加して解消。
 - Memory Bank: 独自 2 ファイル構成 → **Cline 準拠 6 ファイル**へ移行。作業フォルダは `.cache/` 案 →
   `.work/skills/memory-bank/` に確定（`.cache/` は「捨てる」含意のため不可。`.work/` は commit する状態）。

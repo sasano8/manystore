@@ -2,12 +2,18 @@
 
 ## 現在のフォーカス
 
-**M001（旧 `shoudou_storage` 残骸の掃除）完了。** 次サイクルは M002（実 backend 疎通）/ M003（CI・lint
-統一）/ M004（README）から選定（着手前にユーザー確認）。M003 は `Makefile` 着手済み・M002 は
-`docker-compose.yml` 調整済み（本サイクルでコミット）。
+**M001 / M003 完了。** 残りは M002（実 backend 疎通）/ M004（README）。次サイクルは着手前にユーザー確認。
+このプロジェクトは supervisor（dotfiles）の worker として `agent` ブランチで作業し、interrupt 指示を取り込んで
+進める運用に入った。
 
 ## 直近の変更
 
+- **M003 完了（supervisor 指示で着手）**：dotfiles（supervisor）が manystore の interrupt に投函した指示
+  （`20260620-1200-m003-ci.md`, priority high）を取り込み、GitHub Actions CI（`.github/workflows/ci.yml`：
+  setup-uv → `make check`）を追加。**CI 化の過程で 3.10 非互換バグを発見・解消**：8 ファイルが
+  `from __future__ import annotations` 無しで自クラス等を戻り値注釈に使い、3.10〜3.13 では import 時 NameError
+  になる（dev の 3.14 は遅延注釈が既定で表面化せず）。ruff の F821 が検出。future import 追加で `make check` 緑
+  （44 passed）。指示は `interrupt/archive/` へ退避。
 - **M001 完了**：旧名残骸を監査（`git grep shoudou`）。実コードの残骸は NATS 既定バケット名のみで、
   `manystore/backends/__init__.py` の `nats_bucket="shoudou_files"`→`"manystore_files"` に変更（既定値のみ・
   テスト非依存）。`pyproject.toml` の由来コメント（juice の旧 dependency-group 名）は provenance として意図的に保持。

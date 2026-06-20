@@ -6,6 +6,8 @@ wheel にもテストが入らない）。juice の `make test`（testpaths=["te
 ここを直接 `pytest tests/` で回す。
 """
 
+from __future__ import annotations
+
 import asyncio
 import io
 from pathlib import Path

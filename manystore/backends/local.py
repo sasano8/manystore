@@ -3,6 +3,8 @@
 書き込みは temp+rename で原子的（all-or-nothing）。パスは init で絶対パスへ固定（cd 非依存）。
 """
 
+from __future__ import annotations
+
 import contextlib
 import io
 import os

@@ -3,6 +3,8 @@
 aiobotocore はメソッド内で遅延 import する（依存を __init__ 直下に持ち込まない）。
 """
 
+from __future__ import annotations
+
 import io
 from collections.abc import AsyncIterator
 

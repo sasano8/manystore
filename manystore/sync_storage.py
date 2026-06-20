@@ -7,6 +7,8 @@
 ときは、これらのインターフェイスに沿った手書きの同期バックエンドを足せる（差し替え可能）。
 """
 
+from __future__ import annotations
+
 from collections.abc import Iterator
 from typing import Protocol
 
