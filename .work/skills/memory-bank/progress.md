@@ -15,7 +15,7 @@
 
 | ID | タスク | 状態 | 備考 |
 |----|--------|------|------|
-| M001 | 旧 `shoudou_storage` 残骸の掃除（docstring/コメント） | 未着手 | import 名は統一済。文字列に旧名が残っていないか |
+| M001 | 旧 `shoudou_storage` 残骸の掃除（docstring/コメント） | 完了 | NATS 既定バケット `shoudou_files`→`manystore_files`。残るは pyproject の由来コメントのみ（意図的に保持） |
 | M002 | 実 backend（minio / 実 NATS）での E2E 疎通検証 | 未着手 | 現状 fake 担保。`docker-compose.yml` で起動して実疎通 |
 | M003 | CI（GitHub Actions）＋ lint/format 統一 | 未着手 | `ruff` + `pytest`。`make check` 相当のワンコマンド化 |
 | M004 | README / ドキュメント整備 | 未着手 | ルート README が無い。公開 API・使い方・接続情報を記載 |
@@ -23,7 +23,9 @@
 
 ## 現状ステータス
 
-抽出・独立ライブラリ化は完了し単体で緑。次は実 backend 疎通 / CI / README のいずれかから着手予定（未選定）。
+抽出・独立ライブラリ化は完了し単体で緑。**M001（旧名残骸の掃除）完了**。残バックログは M002（実 backend
+疎通）/ M003（CI・lint 統一）/ M004（README）。M003 関連の `Makefile`（format/test）と M002 準備の
+`docker-compose.yml` 調整も本サイクルでコミット済み（各々別コミット）。
 
 ## 既知の問題
 

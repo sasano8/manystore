@@ -2,15 +2,19 @@
 
 ## 現在のフォーカス
 
-**未着手。** 次サイクルでバックログ（progress.md の「残作業」M001〜）から 1 つ選び、ここに
-ゴール／タスク（チェックリスト）／完了条件を書いてから着手する。候補の優先度
-（M002 実 backend 疎通 / M003 CI・lint 統一 / M004 README）は着手前にユーザーへ確認するとよい。
+**M001（旧 `shoudou_storage` 残骸の掃除）完了。** 次サイクルは M002（実 backend 疎通）/ M003（CI・lint
+統一）/ M004（README）から選定（着手前にユーザー確認）。M003 は `Makefile` 着手済み・M002 は
+`docker-compose.yml` 調整済み（本サイクルでコミット）。
 
 ## 直近の変更
 
+- **M001 完了**：旧名残骸を監査（`git grep shoudou`）。実コードの残骸は NATS 既定バケット名のみで、
+  `manystore/backends/__init__.py` の `nats_bucket="shoudou_files"`→`"manystore_files"` に変更（既定値のみ・
+  テスト非依存）。`pyproject.toml` の由来コメント（juice の旧 dependency-group 名）は provenance として意図的に保持。
+  `uv run pytest` で **44 passed**。
+- 本セッションで `Makefile`（`uvx ruff@<固定版>` の format / `uv run pytest` の test）を追加（M003 の一部）。
 - juice から `shoudou_storage` を独立ライブラリ `manystore`（別 repo）として抽出。import 名・
-  プロジェクト名を `manystore` に統一。`uv run pytest` で 44 passed。
-  関連 commit: `f80ba87` / `1983fc7` / `2d28010`。
+  プロジェクト名を `manystore` に統一。関連 commit: `f80ba87` / `1983fc7` / `2d28010`。
 - Memory Bank を導入。当初は AGENT_LOOP.md / PROJECT.md の 2 ファイル構成だったが、
   **Cline の Memory Bank（6 コアファイル）に準拠**するよう作り直し、作業フォルダ
   `.work/skills/memory-bank/` 配下へ集約した。
