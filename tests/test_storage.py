@@ -16,6 +16,8 @@ from manystore import (
     AsyncToSyncKeyValueStore,
     ConnectPolicy,
     DownloadCache,
+    HttpFileStore,
+    HttpKeyValueStore,
     KeyValueFileStore,
     LocalFileStore,
     LocalKeyValueStore,
@@ -27,6 +29,7 @@ from manystore import (
     UnsafePathError,
     connect_key_value_store,
     connecting,
+    create_key_value_store,
     validate_safe_path,
 )
 
@@ -726,3 +729,107 @@ def test_array_mount_connects_backend() -> None:
         assert rec.connected is True
 
     asyncio.run(scenario())
+
+
+# ── HTTP backend（read-only。fake httpx client で get/exists/read を検証） ──
+
+
+class _FakeHttpResp:
+    def __init__(self, status_code: int, content: bytes = b"") -> None:
+        self.status_code = status_code
+        self.content = content
+
+    def raise_for_status(self) -> None:
+        if self.status_code >= 400:
+            raise RuntimeError(f"HTTP {self.status_code}")
+
+
+class _FakeHttpClient:
+    """Http*Store を駆動する最小 fake（async context manager 兼 httpx.AsyncClient 代替）。"""
+
+    def __init__(self, objects: dict[str, bytes], base_url: str) -> None:
+        self.objects = objects
+        self._base = base_url.rstrip("/") + "/"
+
+    async def __aenter__(self) -> _FakeHttpClient:
+        return self
+
+    async def __aexit__(self, *exc: object) -> None:
+        return None
+
+    def _key(self, url: str) -> str:
+        return url[len(self._base) :] if url.startswith(self._base) else url
+
+    async def get(self, url: str) -> _FakeHttpResp:
+        key = self._key(url)
+        if key in self.objects:
+            return _FakeHttpResp(200, self.objects[key])
+        return _FakeHttpResp(404)
+
+    async def head(self, url: str) -> _FakeHttpResp:
+        return _FakeHttpResp(200 if self._key(url) in self.objects else 404)
+
+
+_HTTP_BASE = "http://example.test"
+
+
+def test_http_kvs_get_and_exists() -> None:
+    objects = {"a.txt": b"hello", "dir/b.bin": b"\x00\x01"}
+    store = HttpKeyValueStore(base_url=_HTTP_BASE)
+    store._client = lambda: _FakeHttpClient(objects, _HTTP_BASE)  # 接続を fake に差し替え
+
+    async def scenario() -> None:
+        assert await store.get("a.txt") == b"hello"
+        assert await store.get("dir/b.bin") == b"\x00\x01"  # 多段キーも base_url 相対で取れる
+        assert await store.get("missing") is None  # 404 → None
+        assert await store.exists("a.txt") is True
+        assert await store.exists("missing") is False
+
+    asyncio.run(scenario())
+
+
+def test_http_kvs_is_read_only() -> None:
+    store = HttpKeyValueStore(base_url=_HTTP_BASE)
+
+    async def scenario() -> None:
+        with pytest.raises(io.UnsupportedOperation):
+            await store.put("k", b"v")
+        with pytest.raises(io.UnsupportedOperation):
+            await store.delete("k")
+        with pytest.raises(io.UnsupportedOperation):
+            await store.cp("a", "b")
+        with pytest.raises(io.UnsupportedOperation):
+            await store.mv("a", "b")
+        with pytest.raises(io.UnsupportedOperation):
+            await store.list()
+        with pytest.raises(io.UnsupportedOperation):
+            async for _ in store.iter():
+                pass
+
+    asyncio.run(scenario())
+
+
+def test_http_file_store_read() -> None:
+    objects = {"a.txt": b"hello"}
+    fs = HttpFileStore(base_url=_HTTP_BASE)
+    fs._client = lambda: _FakeHttpClient(objects, _HTTP_BASE)
+
+    async def scenario() -> None:
+        async with await fs.open("a.txt", "rb") as f:
+            assert await f.read() == b"hello"
+        with pytest.raises(FileNotFoundError):  # 404 → FileNotFoundError
+            await fs.open("missing", "rb")
+        with pytest.raises(io.UnsupportedOperation):  # write は非対応
+            await fs.open("a.txt", "wb")
+
+    asyncio.run(scenario())
+
+
+def test_create_key_value_store_http_wiring() -> None:
+    # ファクトリ経由で backend="http" → HttpKeyValueStore が組み立つ（base_url/headers を渡す）。
+    store = create_key_value_store(
+        "http", http_base_url=_HTTP_BASE, http_headers={"Authorization": "Bearer t"}
+    )
+    assert isinstance(store, HttpKeyValueStore)
+    assert store._base_url == _HTTP_BASE
+    assert store._headers == {"Authorization": "Bearer t"}

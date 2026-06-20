@@ -2,12 +2,23 @@
 
 ## 現在のフォーカス
 
-**M001〜M004 すべて完了でバックログ一掃。** M002 は NATS / S3(path) を実機 E2E で検証（`make e2e-up` が
-SeaweedFS に dev identity を登録 → `make check` で 47 passed, 1 skipped）。
+**M018（HTTP backend, read-only）完了。** ユーザー要望の HTTP read-only ストアを統合（前回未コミットだった
+試作を完成させた）。`make check` 緑（51 passed, 1 skipped）。次サイクルは配布前提の G1（M005〜M008）が安く効く。
 このプロジェクトは supervisor（dotfiles）の worker として `agent` ブランチで作業し、interrupt 指示を取り込んで
-進める運用に入った。
+進める運用。
 
 ## 直近の変更
+
+- **M018 完了（HTTP backend, read-only）**：ユーザー要望「http ストレージを read-only でよいから欲しい」を実装。
+  `backends/http_store.py`（GET で `get`/`open("rb")`、HEAD で `exists`。404→None/FileNotFoundError。書き込み・
+  一覧は `io.UnsupportedOperation`）。httpx を遅延 import。`create_key_value_store("http", http_base_url=...,
+  http_headers=...)` 配線、`__init__.__all__`・README・テスト（fake httpx client で 4 ケース）整備。
+  - **モジュール名**: 当初 `http.py` で作られていたが stdlib `http` パッケージと紛れるため `http_store.py` に
+    リネーム（**backend 識別子は `"http"` のまま**）。ユーザー指摘。
+  - **M005 修正**: httpx は当初「未使用＝削除」だったが http backend で使うので**残す**に変更。`redis` のみ未使用。
+- **プロセスの穴をエスカレーション**：ユーザー要望（http backend）が**着手前に Memory Bank へ保存されず**、前回
+  セッションで未コミットの試作だけが残っていた（活動記録なし）。memory-bank スキルの「要望は着手前に
+  activeContext/タスクへ記録する」運用が抜けた件として supervisor(dotfiles) の interrupt へ投函。
 
 - **juice 概念を削除**：manystore は juice と無関係な独立ライブラリなので、コード（`__init__`/`array_storage`/
   `tests`/`pyproject`/README）と Memory Bank から juice・E006・「pristine（juice 都合）」の記述を一掃。設計

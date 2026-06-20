@@ -1,12 +1,12 @@
 """manystore — 差し替え可能なバックエンドを持つストア群。
 
 2 種のストア抽象を、async / sync / async-to-sync の 3 モジュールに分けて持つ:
-- [KeyValueStore] … put/get がメインの値ストア（Local / S3 / NATS バックエンド同梱）。
+- [KeyValueStore] … put/get がメインの値ストア（Local / S3 / NATS / HTTP バックエンド同梱）。
 - [FileStore]     … `open` でファイルオブジェクト（[FileObject]）を取得するストリーム指向の抽象。
 
 モジュール:
 - [async_storage]         … ストア抽象（[KeyValueStore] / [FileStore]）＋共通ヘルパ＋汎用アダプタ。
-- [backends]              … backend 毎の具体実装（Local / S3 / NATS）とファクトリ。
+- [backends]              … backend 毎の具体実装（Local / S3 / NATS / HTTP）とファクトリ。
 - [sync_storage]          … 同期インターフェイス（[SyncKeyValueStore] / [SyncFileStore]）。
 - [async_to_sync_storage] … 非同期を同期として被せるブリッジ（[AsyncToSyncKeyValueStore]）。
 
@@ -24,6 +24,8 @@ from .async_storage import (
 )
 from .async_to_sync_storage import AsyncToSyncKeyValueStore
 from .backends import (
+    HttpFileStore,
+    HttpKeyValueStore,
     LocalFileObject,
     LocalFileStore,
     LocalKeyValueStore,
@@ -50,6 +52,7 @@ __all__ = [
     "LocalKeyValueStore",
     "S3KeyValueStore",
     "NatsObjectKeyValueStore",
+    "HttpKeyValueStore",
     "create_key_value_store",
     "SyncKeyValueStore",
     "AsyncToSyncKeyValueStore",
@@ -74,6 +77,7 @@ __all__ = [
     "KeyValueFileStore",
     "S3FileStore",
     "NatsFileStore",
+    "HttpFileStore",
     "SyncFileStore",
     "SyncFileObject",
 ]

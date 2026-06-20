@@ -1,6 +1,6 @@
 # manystore
 
-差し替え可能なバックエンド（**local / S3 / NATS**）を共通インターフェイスの背後に隠す、ストレージ抽象ライブラリ。
+差し替え可能なバックエンド（**local / S3 / NATS / HTTP**）を共通インターフェイスの背後に隠す、ストレージ抽象ライブラリ。
 利用側は接続情報を変えるだけで保存先を切り替えられる。
 
 ## 特徴
@@ -8,7 +8,7 @@
 - **2 つのストア抽象**
   - `KeyValueStore` — `put` / `get` / `list` / `exists` / `delete` / `cp` / `mv`（バイト列をキーで出し入れ）
   - `FileStore` — `open` で `FileObject`（ストリーム）を取得
-- **backend を差し替えるだけ** — `Local` / `S3` / `NATS Object Store`。ラッパは 1 枚に留め、下で backend を入れ替える。
+- **backend を差し替えるだけ** — `Local` / `S3` / `NATS Object Store` / `HTTP`（read-only）。ラッパは 1 枚に留め、下で backend を入れ替える。
 - **async が一次実装**、sync ブリッジ（`AsyncToSyncKeyValueStore`）も提供。
 - **接続ライフサイクル** — `connect` / retry / timeout / deadline を `ConnectPolicy` で制御。
 - **安全パス** — `validate_safe_path` / `Safe*` ラッパが traversal などの危険な key/filename を既定で弾く。
@@ -69,7 +69,19 @@ async with connect_key_value_store(
     nats_bucket="manystore_files",
 ) as store:
     ...
+
+# HTTP（read-only。GET/HEAD で取得するだけ。書き込み・一覧は非対応）
+async with connect_key_value_store(
+    "http",
+    http_base_url="https://example.com/files",
+    http_headers={"Authorization": "Bearer ..."},  # 任意（認証等）
+) as store:
+    data = await store.get("a.txt")     # base_url + "/a.txt" を GET（404 は None）
+    exists = await store.exists("a.txt")  # HEAD で存在確認
 ```
+
+> **HTTP backend は read-only**: `get` / `exists` と `FileStore.open(..., "rb")` のみ。`put` / `delete` /
+> `cp` / `mv` / `list` / `iter` は `io.UnsupportedOperation` を投げる。
 
 接続を挟まず実体を直接作るなら `create_key_value_store(backend, **opts)` も使える。
 
@@ -107,7 +119,7 @@ await safe.put("../escape", b"...")   # UnsafePathError
 - `AsyncToSyncKeyValueStore` — async ストアを同期 IF（`SyncKeyValueStore`）として被せるゼロ依存ブリッジ。
 - `ArrayKeyValueStore` — 論理名（キー先頭セグメント）で複数 backend を束ねる合成ストア。`DownloadCache` 付き。
 - `KeyValueFileStore` — 任意の KVS を `FileStore` 化する汎用アダプタ。
-- backend クラス直指定: `LocalKeyValueStore` / `S3KeyValueStore` / `NatsObjectKeyValueStore`（および各 `*FileStore`）。
+- backend クラス直指定: `LocalKeyValueStore` / `S3KeyValueStore` / `NatsObjectKeyValueStore` / `HttpKeyValueStore`（および各 `*FileStore`。`Http*` は read-only）。
 
 公開シンボルの一覧は `manystore.__all__` を参照。
 

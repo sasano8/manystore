@@ -9,7 +9,9 @@
 - `sync_storage.py` — 同期 IF（`SyncKeyValueStore` / `SyncFileStore` / `SyncFileObject`）。
 - `async_to_sync_storage.py` — `AsyncToSyncKeyValueStore`（専属ループを `run_until_complete` で駆動する
   ゼロ依存ブリッジ）。
-- `backends/` — `local.py` / `s3.py` / `nats.py` ＋ `__init__` の `create_key_value_store`。
+- `backends/` — `local.py` / `s3.py` / `nats.py` / `http_store.py` ＋ `__init__` の `create_key_value_store`。
+  `http_store.py` は **read-only**（GET/HEAD のみ。書き込み・一覧は `io.UnsupportedOperation`）。ファイル名は
+  stdlib `http` パッケージと紛れないよう `http_store`（backend 識別子は `"http"`）。
 - `connect.py` — `connect_key_value_store` / `connecting` / `ConnectPolicy`。
 - `safe_path.py` — `validate_safe_path` ＋ `SafeKeyValueStore`（download/キャッシュも担う唯一の KVS wrapper）/
   `SafeFileStore`。
