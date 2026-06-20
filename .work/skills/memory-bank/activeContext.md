@@ -2,12 +2,17 @@
 
 ## 現在のフォーカス
 
-**M001 / M003 / M004 完了。** 残りは **M002（実 backend 疎通）のみ**（docker 前提で環境依存＝着手前にユーザー確認）。
+**M001 / M003 / M004 完了、M002 一部完了。** NATS は実機 E2E 検証済み。**S3 の実機検証だけ残**（path-style
+バグは修正済みだが SeaweedFS mini の S3 認証が動的で鍵未整備 → minio 切替 or 静的 identity が要る）。
 このプロジェクトは supervisor（dotfiles）の worker として `agent` ブランチで作業し、interrupt 指示を取り込んで
 進める運用に入った。
 
 ## 直近の変更
 
+- **M002 一部完了**：docker（nats / seaweedfs）を起動し `tests/test_e2e_backends.py` を追加。**NATS は実機で
+  put/get/exists/list/cp/delete を検証（pass）**。S3 は実機検証で **path-style バグを発見・修正**（`backends/s3.py`
+  の `_session()`：カスタム endpoint 時に `addressing_style=path` を強制）。ただし SeaweedFS mini の S3 認証が
+  動的で静的鍵が無く実機 E2E は保留（テストは認証未整備で skip。`MANYSTORE_S3_ACCESS_KEY/SECRET_KEY` を渡せば検証）。
 - **M004 完了**：ルート `README.md` を作成（特徴・install・local/S3/NATS の接続例・`ConnectPolicy` プリセット・
   `Safe*` ラッパ・その他公開 API・開発/CI/3.14 注記）。公開 API は `manystore/__init__.py` の `__all__` に準拠。
 - **M003 完了（supervisor 指示で着手）**：dotfiles（supervisor）が manystore の interrupt に投函した指示

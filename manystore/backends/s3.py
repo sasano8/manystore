@@ -29,12 +29,21 @@ class _S3Base:
     def _session(self):
         from aiobotocore.session import get_session
 
+        config = None
+        if self._endpoint_url:
+            # S3 互換サーバ（minio / SeaweedFS 等）は path-style 必須
+            # （virtual-host だと bucket.<host> を名前解決できない）。
+            # カスタム endpoint のときだけ path-style を強制する。
+            from aiobotocore.config import AioConfig
+
+            config = AioConfig(s3={"addressing_style": "path"})
         return get_session().create_client(
             "s3",
             endpoint_url=self._endpoint_url,
             region_name=self._region,
             aws_access_key_id=self._access_key,
             aws_secret_access_key=self._secret_key,
+            config=config,
         )
 
     async def connect(self) -> None:
