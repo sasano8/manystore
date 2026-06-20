@@ -8,10 +8,18 @@
 - `s3-path`     … S3 path スタイル
 
 各ケースは backend が無い／認証未整備なら **skip**（CI など backend 無し環境で赤くしない）。
-`local` は常に走り、失敗は実バグなので skip しない。手元検証:
+`local` は常に走り、失敗は実バグなので skip しない。
 
-    docker compose up -d nats seaweedfs
-    uv run pytest tests/test_e2e_backends.py -v
+手元検証（`make e2e-up` が backend 起動＋SeaweedFS に開発用 S3 identity を登録する）:
+
+    make e2e-up           # docker compose up + S3 identity 登録
+    make check            # local / nats / s3-path が走る（s3-virtual はローカルでは原理的に skip）
+
+S3 の鍵は既定で `make e2e-up` が作る dev identity。別サーバ（minio 等）なら env で上書きする
+（`MANYSTORE_S3_ACCESS_KEY` / `MANYSTORE_S3_SECRET_KEY`）。
+
+注: `s3-virtual`（ドメインスタイル）はローカル S3 互換サーバでは `bucket.<host>` を名前解決できず
+常に skip になる（virtual-host は実 AWS 等の DNS 環境向け）。`s3-path` がローカルの実証ケース。
 """
 
 import asyncio
@@ -35,10 +43,10 @@ S3_ENDPOINT = f"http://{S3_HOST}:{S3_PORT}"
 NATS_URL = f"nats://{NATS_HOST}:{NATS_PORT}"
 S3_BUCKET = "manystore-e2e"
 
-# S3 互換サーバの認証は環境ごとに違う（SeaweedFS mini は動的・minio は minioadmin 等）。
-# 既定はダミーで、有効な鍵は env で渡す。鍵不一致や未整備なら該当ケースは skip。
-S3_ACCESS_KEY = os.environ.get("MANYSTORE_S3_ACCESS_KEY", "any")
-S3_SECRET_KEY = os.environ.get("MANYSTORE_S3_SECRET_KEY", "any")
+# S3 互換サーバの認証は環境ごとに違う。既定は `make e2e-up` が SeaweedFS に登録する dev identity。
+# 別サーバ（minio 等）なら env で上書きする。鍵不一致や未整備なら s3 ケースは skip。
+S3_ACCESS_KEY = os.environ.get("MANYSTORE_S3_ACCESS_KEY", "manystore")
+S3_SECRET_KEY = os.environ.get("MANYSTORE_S3_SECRET_KEY", "manystoresecret123")
 
 
 def _reachable(host: str, port: int) -> bool:

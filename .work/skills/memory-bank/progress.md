@@ -9,8 +9,9 @@
 - 合成ストア（`ArrayKeyValueStore` / `DownloadCache`）。
 - **テスト**: `uv run pytest` で **44 passed**（S3 / NATS は in-memory fake で検証）。
 - **CI**: GitHub Actions（`.github/workflows/ci.yml`）で push/PR 時に `make check`（ruff format-check + check + pytest）。
-- **実 backend 疎通**: NATS Object Store は実機（docker）で E2E 検証済み（`tests/test_e2e_backends.py`）。S3 は
-  path-style 対応済み（実機検証は認証整備後。テストは到達不可/認証未整備なら skip）。
+- **実 backend 疎通**: NATS / S3（path-style）を実機 E2E で検証済み（`tests/test_e2e_backends.py`、`make e2e-up`）。
+  パラメタライズで local / nats / s3-virtual / s3-path に同一 CRUD を注入。`make check` で 47 passed, 1 skipped
+  （s3-virtual はローカル S3互換では原理的に skip）。
 
 ## 残作業（What's left）— バックログ
 
@@ -19,23 +20,23 @@
 | ID | タスク | 状態 | 備考 |
 |----|--------|------|------|
 | M001 | 旧 `shoudou_storage` 残骸の掃除（docstring/コメント） | 完了 | NATS 既定バケット `shoudou_files`→`manystore_files`。残るは pyproject の由来コメントのみ（意図的に保持） |
-| M002 | 実 backend（S3 / 実 NATS）での E2E 疎通検証 | 一部完了 | **NATS 実機 E2E 済**。S3 は path-style バグを修正したが SeaweedFS mini の S3 認証が動的で静的鍵が無く実機検証は保留（テスト skip）。minio 切替 or `-s3.config` 静的 identity で実証可 |
+| M002 | 実 backend（S3 / 実 NATS）での E2E 疎通検証 | 完了 | NATS / S3(path) を実機 E2E で検証。`make e2e-up` が SeaweedFS に dev identity（`weed shell s3.configure`）を登録し、`make check` で s3-path も通る（47 passed, 1 skipped）。s3-virtual はローカルでは原理的 skip |
 | M003 | CI（GitHub Actions）＋ lint/format 統一 | 完了 | `.github/workflows/ci.yml`（setup-uv→`make check`）。supervisor 指示で着手。あわせて **Python 3.14+ 前提**を確定（後述） |
 | M004 | README / ドキュメント整備 | 完了 | ルート `README.md` 作成（特徴・install・quickstart・backend別接続・ConnectPolicy・Safe・開発/CI/3.14）|
 | M005 | juice からの利用（adapter）に向けた IF 確認 | 保留 | juice 側 src に adapter（manystore は pristine 維持）。追加要件が出たらここに |
 
 ## 現状ステータス
 
-抽出・独立ライブラリ化は完了し単体で緑。**M001 / M003 / M004 完了**、**M002 は一部完了**（NATS 実機 E2E 済 /
-S3 は path-style 修正のみで実証保留）。M003 は supervisor（dotfiles）の interrupt 指示で着手し CI（`make check`）
-を追加、あわせて Python 3.14+ 前提を確定。M004 でルート README 作成。残は **M002 の S3 実機検証**。
+抽出・独立ライブラリ化は完了し単体で緑。**M001〜M004 すべて完了**。M002 は NATS / S3(path) を実機 E2E で検証
+（`make e2e-up`＋パラメタライズテスト）。M003 は supervisor（dotfiles）の interrupt 指示で着手し CI を追加、
+あわせて Python 3.14+ 前提を確定。M004 でルート README 作成。**バックログは（保留の M005 を除き）一掃**。
 
 ## 既知の問題
 
-- NATS は実機 E2E 検証済み。**S3 の実機検証は保留**（SeaweedFS mini の S3 認証が動的で静的鍵が無い。
-  minio 切替 or `-s3.config` 静的 identity が要る）。S3 E2E テストは認証未整備で skip（M002 残）。
-- ~~ルート README が無い~~（M004 で解消）。
-- ~~CI 未設定~~（M003 で解消）。
+- ~~S3 の実機検証は保留~~（M002 で解消。`make e2e-up` が SeaweedFS に dev identity を登録し s3-path 実証）。
+- `s3-virtual`（ドメインスタイル）はローカル S3互換では `bucket.<host>` を名前解決できず常に skip。これは
+  **virtual-host の仕様上の制約**（実 AWS 等の DNS 環境向け）であり未解決バグではない。
+- ~~ルート README が無い~~（M004 で解消）。~~CI 未設定~~（M003 で解消）。
 
 ## 意思決定の変遷
 

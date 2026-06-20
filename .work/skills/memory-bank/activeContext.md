@@ -2,8 +2,8 @@
 
 ## 現在のフォーカス
 
-**M001 / M003 / M004 完了、M002 一部完了。** NATS は実機 E2E 検証済み。**S3 の実機検証だけ残**（path-style
-バグは修正済みだが SeaweedFS mini の S3 認証が動的で鍵未整備 → minio 切替 or 静的 identity が要る）。
+**M001〜M004 すべて完了**（M005 は保留）。M002 は NATS / S3(path) を実機 E2E で検証（`make e2e-up` が
+SeaweedFS に dev identity を登録 → `make check` で 47 passed, 1 skipped）。バックログは一掃。
 このプロジェクトは supervisor（dotfiles）の worker として `agent` ブランチで作業し、interrupt 指示を取り込んで
 進める運用に入った。
 
@@ -12,8 +12,10 @@
 - **M002 一部完了**：docker（nats / seaweedfs）で `tests/test_e2e_backends.py` を**パラメタライズ**追加
   （同一 CRUD を local / nats / s3-virtual / s3-path に注入。実行 test は1つ、注入インスタンスだけ違う）。
   **local / nats は実機で pass**。S3 は実機検証で **アドレッシングスタイル問題を発見**し、`addressing_style` を
-  **明示パラメータ化（既定 virtual＝ドメイン、`"path"` は opt-in）**に変更（`s3_addressing_style`）。S3 実機 E2E は
-  SeaweedFS mini の認証が動的で鍵未整備のため skip（`MANYSTORE_S3_ACCESS_KEY/SECRET_KEY` を渡せば検証）。
+  **明示パラメータ化（既定 virtual＝ドメイン、`"path"` は opt-in）**に変更（`s3_addressing_style`）。
+- **M002 完了**: SeaweedFS の S3 認証は `weed shell s3.configure` で dev identity（`manystore`/`manystoresecret123`,
+  Admin）を登録して解決。`make e2e-up`（compose up + identity 登録）で 1 コマンド化し、テスト既定鍵もこの dev
+  identity に。`make check` で **s3-path 実機 pass**（47 passed, 1 skipped）。s3-virtual はローカルでは原理的 skip。
 - **M004 完了**：ルート `README.md` を作成（特徴・install・local/S3/NATS の接続例・`ConnectPolicy` プリセット・
   `Safe*` ラッパ・その他公開 API・開発/CI/3.14 注記）。公開 API は `manystore/__init__.py` の `__all__` に準拠。
 - **M003 完了（supervisor 指示で着手）**：dotfiles（supervisor）が manystore の interrupt に投函した指示

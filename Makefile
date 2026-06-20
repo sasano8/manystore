@@ -7,7 +7,11 @@ RUFF_VERSION := 0.15.18
 # lint/format/test の対象
 SRC := manystore tests
 
-.PHONY: format format-check lint test check
+# 実 backend E2E 用の開発 S3 identity（SeaweedFS に登録する固定鍵。tests の既定もこれ）
+E2E_S3_ACCESS_KEY := manystore
+E2E_S3_SECRET_KEY := manystoresecret123
+
+.PHONY: format format-check lint test check e2e-up e2e-down
 
 # コード整形（自動修正）
 format:
@@ -29,3 +33,13 @@ test:
 
 # 一括検証（format 確認 + test）
 check: format-check test
+
+# 実 backend E2E の起動＋S3 identity 登録（これで s3-path / nats ケースが走る）
+e2e-up:
+	docker compose up -d nats seaweedfs
+	@echo "SeaweedFS の起動待ち..."; sleep 4
+	echo 's3.configure -access_key $(E2E_S3_ACCESS_KEY) -secret_key $(E2E_S3_SECRET_KEY) -user manystore -actions Read,Write,List,Tagging,Admin -apply' | docker compose exec -T seaweedfs weed shell
+
+# 実 backend の停止
+e2e-down:
+	docker compose down
