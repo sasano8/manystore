@@ -20,8 +20,10 @@ uv sync          # 依存を解決（.venv）
 
 ## 検証コマンド（VERIFY 用）
 
-**検証は必ず Makefile 経由で叩く**（ベタ書きの `uvx ruff …` 禁止＝再現性。ruff 版は `Makefile` の
-`RUFF_VERSION := 0.15.18` で 1 点固定。quality スキル R5/R8 の正本に従う）。
+> 品質チェックは**組織の品質方針**に従う（一般メソッド・チェックシートは [[quality]]）。本 repo はそれを
+> **`make check`** に materialize 済み（Makefile が ruff 版を固定）。生 `uvx ruff …` のベタ書きはしない＝再現性。
+
+**検証は Makefile 経由で叩く**（呼び出しは下記）。
 
 ```bash
 make lint          # = uvx ruff@<固定版> check（lint のみ）
