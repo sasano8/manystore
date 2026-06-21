@@ -52,6 +52,7 @@
 | M015 | logging（操作・リトライの可視化） | 低 | G3 | 観測性なし |
 | M016 | テスト拡充（エラーパス/並行/大容量） | 中 | G2 | fake は happy path 中心 |
 | M017 | Python サポート範囲（3.10+ へ広げるか） | 相談 | G4 | `>=3.14` は採用障壁。広げるなら future import 復活＋ruff 設定。3.14純度 vs 採用のトレードオフ |
+| M020 | UI 改善: パンくず階層ナビ + コピー/生パス編集 | 完了 | **ユーザー要望（2026-06-21）**。(1) パスを `dir1 / dir2 / dir3` のクリック可能パンくずに（各階層へジャンプ）。(2) 左にコピーボタン＋空きスペースクリックで生パス textbox 化（貼り付け）。KVS はフラットキーだが `/keys?prefix=` が prefix 配下の全キーを返す→フロントで `/` 区切りに畳んで仮想ツリー表示＝中間階層でも直下フォルダ/ファイルを列挙可能。実装は `static/` のみ（サーバ不変）|
 | M019 | ストレージの UI | **P1〜P3 完了** | — | **ユーザー要望（2026-06-21）実装済み**（詳細 `m019-ui-plan.md`）。`manystore.{implement,server,client}` 一体型＋`[server]` extra。汎用 CRUD UI＋WS ライブ通知＋featured 重点設定。残: P4(http_store RW拡張)・P5(S3 gateway)・LocalWatcher(inotify)・認証。以下は旧スコープメモ→精緻化された要件: (1) manystore IF の上に公開し、その protocol にフロントエンドが接続。(2) **複数コンテキスト（`.work` など）の「ディレクトリ公開」**。(3) ディレクトリを **監視し WebSocket でライブ通知**（更新push）。(4) UI→サーバへ **更新依頼（書き込み）** 可。(5) **本質: interrupt 受信箱へ作業テキストを投入**（remote drop-to-interrupt）。(6) 二次目標: **汎用ストレージ UI**。設計の要点: 既存 read-only `http_store` の対になる **manystore-server（HTTP+WS）** を新設し、その REST/WS が「IF の上に公開する protocol」になる（http_store を RW 拡張すれば client にもなる）。S3 gateway 案は汎用 UI には効くが **watch/notify/interrupt は S3 protocol に無く既定の S3 browser では不可**＝核心要件を満たせない。詳細計画は activeContext 参照 |
 
 **ゴール（段階）**: G1=配布できる（M005〜M008）→ G2=安心して使える（M009〜M011・M016）→

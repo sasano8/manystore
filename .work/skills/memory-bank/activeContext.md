@@ -2,6 +2,18 @@
 
 ## 現在のフォーカス
 
+**M020（UI 改善: パンくず階層ナビ + コピー/生パス編集）完了。** ユーザー要望（2026-06-21）:
+(1) パスを `dir1 / dir2 / dir3` のパンくず表示にし各セグメントをクリックでその階層へ移動、
+(2) 左にコピーボタン、パンくず（空きスペース）をクリックすると生パスのテキストボックスになり貼り付け可能。
+ユーザー懸念「KVS に階層概念が薄い／中間階層に飛ぶと下層が分からない」への回答＝**問題なし**:
+`/keys?prefix=` が prefix 配下の**全キーをフラットに返す**（service.list_entries が iter() を startswith 絞り込み）
+ので、フロントで `/` 区切りに畳めば仮想ツリーになり、中間 prefix でも直下のフォルダ/ファイルを次セグメント
+group で列挙できる（実機 smoke 済み: prefix='dir1/' で dir2/ と直下ファイルが見える）。
+**実装は `manystore/server/static/`（index.html/app.js/style.css）のみ＝サーバ・protocol・python は不変**
+（`pytest tests/ui` 8 passed・app.js は node --check 緑）。app.js は state.dir(現在ディレクトリ prefix)/
+state.key(開いているファイル) を持ち、navigateTo→renderTree(フォルダ/ファイル畳み込み・`..`行)+renderBreadcrumb。
+copy ボタンは clipboard.writeText（不可なら生パス入力にフォールバック）、新規/quick_write は editRawPath。
+
 **M019（ストレージ UI）P1〜P3 実装完了。** `manystore.{implement,server,client}` の 3 層を追加し、任意 context を
 HTTP+WS で公開する**汎用 CRUD ストレージ UI** を実装。`make check` 緑（**59 passed, 1 skipped**）＋実起動スモーク
 （interrupt への remote PUT 往復を実証）。最終レイアウトは **単一ディストリビューション + `manystore[server]`

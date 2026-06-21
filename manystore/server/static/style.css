@@ -44,8 +44,34 @@ header {
   border-bottom: 1px solid #eee;
   background: #fff;
 }
-#current-context { font-weight: 600; min-width: 90px; }
-#key-input { flex: 1; padding: 5px 8px; border: 1px solid #ccc; border-radius: 4px; }
+#copy-btn { padding: 5px 8px; line-height: 1; }
+#breadcrumb {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 1px;
+  min-width: 0;
+  min-height: 28px;
+  padding: 3px 8px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  cursor: text;
+  font-family: ui-monospace, monospace;
+  font-size: 12px;
+}
+#breadcrumb:hover { border-color: #ddd; background: #fafafa; }
+#breadcrumb .crumb {
+  padding: 2px 5px;
+  border-radius: 4px;
+  cursor: pointer;
+  color: #2563a6;
+}
+#breadcrumb .crumb:hover { background: #d7e6f2; }
+#breadcrumb .crumb.leaf { color: #1c1c1c; cursor: default; }
+#breadcrumb .crumb.leaf:hover { background: transparent; }
+#breadcrumb .sep { color: #bbb; }
+#path-input { flex: 1; padding: 5px 8px; border: 1px solid #4a90d9; border-radius: 4px; font-family: ui-monospace, monospace; }
 button {
   padding: 5px 10px;
   border: 1px solid #ccc;
@@ -75,6 +101,7 @@ button:hover { background: #e8e8e8; }
 }
 #keys li:hover { background: #eef3f7; }
 #keys li.active { background: #d7e6f2; }
+#keys li.folder { color: #2563a6; font-weight: 600; }
 #keys .size { color: #999; font-size: 11px; }
 #viewer {
   flex: 1;
