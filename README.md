@@ -144,7 +144,7 @@ root = ".work"
 
 [[views.featured]]         # UI が標準で重点表示するパス（pin / その場で新規作成）
 context = "work"
-path = "skills/memory-bank/interrupt"
+path = "skills/flow-memory-bank/interrupt"
 label = "Interrupt"
 pin = true
 quick_write = true

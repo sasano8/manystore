@@ -18,7 +18,7 @@ root = ".work"
 
 [[views.featured]]
 context = "work"
-path = "skills/memory-bank/interrupt"
+path = "skills/flow-memory-bank/interrupt"
 label = "Interrupt"
 pin = true
 quick_write = true
