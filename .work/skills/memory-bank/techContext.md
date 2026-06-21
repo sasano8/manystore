@@ -20,11 +20,18 @@ uv sync          # 依存を解決（.venv）
 
 ## 検証コマンド（VERIFY 用）
 
+**検証は必ず Makefile 経由で叩く**（ベタ書きの `uvx ruff …` 禁止＝再現性。ruff 版は `Makefile` の
+`RUFF_VERSION := 0.15.18` で 1 点固定。quality スキル R5/R8 の正本に従う）。
+
 ```bash
-uvx ruff check manystore tests            # lint
-uvx ruff format --check manystore tests   # format 確認
-uv run pytest                             # test（現状 44 passed）
+make lint          # = uvx ruff@<固定版> check（lint のみ）
+make format-check  # = ruff format --check + ruff check（書き換えない）
+make test          # = uv run pytest
+make check         # 一括（format-check + test）＝コミット前の「検証緑」判定はこれ
 ```
+
+ワンショットで特定テストだけ回す等は `uv run pytest tests/ui -q` のように直接叩いてよいが、
+**「検証緑か」の最終判定は `make check`** で行う（CI も同じターゲットを呼ぶ＝ローカルと一致）。
 
 実 backend（S3/NATS）の疎通を確認するときは `docker-compose up -d` でバックエンドを起動してから
 該当テストを実行する（接続情報が無い等で起動できない場合のみスキップし、その旨を activeContext に残す）。
