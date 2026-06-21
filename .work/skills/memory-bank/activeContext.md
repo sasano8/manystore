@@ -74,10 +74,10 @@ dotfiles は `workers_dir: workers` を宣言した **supervisor**（自身も M
     「Memory Bank があります」と誤検知。つまり **Memory Bank の成立条件（`.work`＋6コア）が崩れても誰も警告しない**。
     → フックを「**dir はあるがコアが欠けていれば警告して initialize を促す**」よう修正・実測検証（dotfiles 側の作業
     ツリー変更。コミットは dotfiles 側に委ねる）。完全欠如はマーカー無しに全 repo で鳴らせないので no-op のまま。
-  - **dotfiles の位置づけを訂正**：dotfiles は**スキルのホスト**（skills/bin/install.sh）であって、それ自身は
-    Memory Bank（6コア）を持つプロジェクトではない。「supervisor（dotfiles）が記憶を持って指示する」は実体の
-    ない過去 framing だった。下り（dotfiles→manystore interrupt 投函）は実績あり（M003 の m003-ci 指示）。
-    本セッションで一旦 dotfiles に作った interrupt だけの空ディレクトリは**誤りなので削除して元に戻した**。
+  - **dotfiles の位置づけを訂正**（※**この訂正は後に覆った**——上記 2026-06-21「dotfiles の位置づけを再訂正」参照）：
+    当時は「dotfiles はスキルのホストであって Memory Bank を持つ supervisor ではない」と判断したが、**現在の dotfiles は
+    `workers_dir: workers` を宣言し 6 コアの Memory Bank を持つ正式な supervisor**（manystore を `workers/` に symlink 配下）。
+    下り（dotfiles→manystore interrupt 投函）は当時から実績あり（M003 の m003-ci 指示）＝この点だけは一貫。
 - **UI 要望をバックログ化**：ユーザー要望「ストレージの UI が欲しい」を progress.md の **M019（相談）**へ。
   未スコープ＋本体スコープ外のため、別パッケージ/別リポか着手前に要合意。
 
@@ -130,9 +130,9 @@ dotfiles は `workers_dir: workers` を宣言した **supervisor**（自身も M
   `reference/`（ファイル/ディレクトリ）に集約し、品質方針はその 1 エントリ（`reference/quality-policy.md`）。品質以外の
   要件も reference に足せる。コア/SKILL 本体は中身を持たず reference を参照するだけ。
 - **品質チェックは組織の品質方針に従う（関心の分離）**：memory-bank は「品質チェックを行う」だけ・規約を持たない。
-  一般メソッドは [[quality]]、組織固有の適用は **組織の品質方針ファイル**（supervisor memory-bank `quality-policy.md`）、
+  一般メソッドは [[quality]]、組織固有の適用は **組織の品質方針ファイル**（supervisor memory-bank `reference/quality-policy.md`）、
   本 repo の techContext はそれを **`make check` に materialize するだけ**。検証は `make` 経由＝ベタ書き `uvx ruff …`
-  禁止（再現性）。スキル設計（dotfiles）も更新: memory-bank を最小化／quality に「関心の分離」節＋R10／supervisor が
-  drift を定期チェック。
+  禁止（再現性）。スキル設計（dotfiles）も更新: memory-bank を最小化＋ reference/ 導入／quality に「関心の分離（俯瞰的/単体）」
+  「ドキュメントの書き方・読み方」節＋R10/R11／supervisor が drift を定期チェック。
 - ラッパは 1 枚、差し替えるのは backend だけ。抽象 IF を backend 固有事情で汚さない。
 - NATS backend は実 nats-py の API（`get_info` / `get().data`）に合わせる必要があった（過去バグ）。
