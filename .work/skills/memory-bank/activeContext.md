@@ -25,8 +25,9 @@ extra**（当初の別パッケージ案から巻き戻し。理由は `m019-ui-
 
 （前タスク **M018 完了**。）
 本プロジェクトは `agent` ブランチで単線コミットし、`interrupt/` 受信箱の指示を取り込んで進める運用。
-dotfiles はスキルのホスト（＝skills/bin の置き場）で、manystore の interrupt に指示を投函してくる（下り）が、
-dotfiles 自身は Memory Bank を持たない＝「記憶を持つ supervisor」ではない（下記「直近の変更」参照）。
+dotfiles は `workers_dir: workers` を宣言した **supervisor**（自身も Memory Bank を持つ）で、
+`dotfiles/workers/manystore` → 本 repo の symlink 配下に manystore を worker として束ねる。
+下り（dotfiles→manystore interrupt 投函）／上り（manystore→dotfiles interrupt エスカレ）の双方向運用。
 
 ## 直近の変更
 
