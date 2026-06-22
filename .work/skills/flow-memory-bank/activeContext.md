@@ -2,6 +2,28 @@
 
 ## 現在のフォーカス
 
+**M021 S1（S3 ゲートウェイ本体）実装完了（2026-06-23・supervisor interrupt 指示）。** manystore を S3 互換 API
+として公開する新サブパッケージ `manystore.gateway` を追加。`m021-s3-gateway-plan.md` の S1 のみをスコープ厳守で実装
+（S2 multipart・S3 passthrough・S4 SeaweedFS 実機・繰延ページング・残未決 Q1/Q4/Q5 はバックログ）。
+
+- **新規ファイル**: `manystore/implement/s3map.py`（delimiter 畳み込み + S3 XML 生成 + エラー XML。HTTP 非依存＝
+  stdlib `xml.etree.ElementTree` のみ・新依存ゼロ）、`manystore/gateway/{__init__,app,routes,__main__}.py`
+  （M019 server 層と同型。`create_gateway(service)`・FastAPI 遅延 import・lifespan で connect/aclose・`[server]`
+  extra 流用・`python -m manystore.gateway --config <toml>` 既定 port 9000）。
+- **操作（S1）**: GET=GetObject / PUT=PutObject(ETag=MD5) / HEAD=HeadObject(Content-Length) / DELETE=DeleteObject(204)
+  / ListObjectsV2(prefix+delimiter)。すべて既存 `StorageService`（put/get/exists/delete/list_entries）へ 1:1 で乗せる
+  ＝**コア IF 不変**。bucket=context。delimiter は s3map で CommonPrefixes に畳む（service.list_entries は delimiter
+  非対応なので gateway/s3map 側で畳む）。例外→S3 エラー XML（ContextNotFound→NoSuchBucket / ReadOnlyContext→
+  AccessDenied / UnsafePathError→InvalidArgument / get None→NoSuchKey）。
+- **推奨デフォルト適用**: Q2 SigV4 検証=しない（gateway 認証へ委譲）、Q6 extra=`[server]` 相乗り、Q3 ページング=
+  max-keys 上限 1000 クランプ・打ち切りのみ（continuation token は繰延）。Q1/Q4/Q5・S2/S3/S4 はスコープ外。
+- **テスト**: `tests/ui/test_gateway.py`(8・local backend に対し PUT/GET/HEAD/DELETE/ListObjectsV2・delimiter 畳み・
+  各種 S3 エラー XML)・`tests/ui/test_s3map.py`(5・純ロジックの fold/XML)。`make check` 緑（**72 passed, 1 skipped**・
+  従来 59 から +13）。⚠️ 実 S3 client（boto3/aws-cli）疎通は **S4 へ繰越**（aiobotocore は async-only、同期 boto3 は
+  新依存になるため S1 では XML を ElementTree パースで検証。実 client/SeaweedFS 疎通は S4 段階）。
+
+## （旧フォーカス）
+
 **M020（UI 改善: パンくず階層ナビ + コピー/生パス編集）完了。** ユーザー要望（2026-06-21）:
 (1) パスを `dir1 / dir2 / dir3` のパンくず表示にし各セグメントをクリックでその階層へ移動、
 (2) 左にコピーボタン、パンくず（空きスペース）をクリックすると生パスのテキストボックスになり貼り付け可能。
@@ -30,6 +52,17 @@ dotfiles は `workers_dir: workers` を宣言した **supervisor**（自身も M
 下り（dotfiles→manystore interrupt 投函）／上り（manystore→dotfiles interrupt エスカレ）の双方向運用。
 
 ## 直近の変更
+
+- **M021（S3 ゲートウェイ + パススルー）の着手前 deep think を実施（2026-06-23・supervisor interrupt をトリアージ）**：
+  `interrupt/20260623-s3-gateway-and-passthrough.md`（priority normal）を取り込み、**実装はせず設計のみ確定**。
+  成果物 `m021-s3-gateway-plan.md`。要旨＝(1) 最小 S3 操作 = GET/PUT/HEAD/DELETE/ListObjectsV2（multipart は段階2、
+  bucket=context、delimiter 対応）。(2) パススルー = presigned redirect 本線＋プロキシフォールバック、署名は
+  **gateway 保有の実 S3 資格情報**で代理署名（クライアント資格情報は実 S3 へ転用しない＝STS は YAGNI）。
+  presign は **S3 backend 限定の optional capability `SupportsPresign`** に閉じコア IF は不変。(3) 置き場 =
+  新サブパッケージ `manystore.gateway`（M019 同型・FastAPI 遅延 import・既存 `[server]` extra 流用・S3 XML は
+  stdlib ElementTree＝新依存ゼロ・`implement` の `StorageService` を再利用）。(4) 段階 = S1 本体→S2 multipart→
+  S3 パススルー→S4 SeaweedFS 実機。**コード未実装・git commit せず**（WIP なし。コミット判断は worker 対話/ユーザー）。
+  既存 progress の M019 P5（S3 gateway）を本計画として精緻化・採番。
 
 - **検証はベタ書き禁止＝Makefile 経由に統一（ユーザー要望 2026-06-21）**：techContext.md の「検証コマンド」を
   生 `uvx ruff …` → `make lint`/`make check` 参照に修正（ruff 版は `RUFF_VERSION := 0.15.18` で固定済み・既に
