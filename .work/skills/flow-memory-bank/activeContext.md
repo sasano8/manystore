@@ -2,6 +2,34 @@
 
 ## 現在のフォーカス
 
+**M021 S1 を「実 S3 クライアント往復」で検証補強（2026-06-23 後続サイクル・supervisor 指示）。**
+S1 の既存テストは gateway 生成の S3 XML を stdlib ElementTree でパースするだけで**実 S3 クライアント往復が無かった**。
+直前実装者は「実 client = 同期 boto3 は新依存」として S4 へ繰越したが、**manystore はコア依存に `aiobotocore>=2.0.0`
+（botocore 内包の実 S3 クライアント）を持つ**ため、`endpoint_url=<起動 gateway>` に向ければ**新依存ゼロ**で実往復が
+書けると判明＝前倒し解消。
+
+- **追加テスト**: `tests/ui/test_gateway_s3client.py`（4 ケース）。
+  - `test_real_s3_client_roundtrip`: PUT→GET→HEAD→ListObjectsV2(flat)→DELETE を aiobotocore で往復。ETag（PUT/GET/HEAD
+    一致）・本文一致・ContentLength・削除後 GET=NoSuchKey を検証。
+  - `test_real_s3_client_list_delimiter_common_prefixes`: delimiter='/' で CommonPrefixes 畳み、prefix+delimiter で
+    1 階層下の Contents 列挙を実クライアントで検証。
+  - `test_real_s3_client_get_missing_raises_nosuchkey`: 欠損キー GET が `NoSuchKey` 例外（XML パース経路）に。
+  - `test_real_s3_client_readonly_bucket_access_denied`: writable=false への PUT が `AccessDenied`（ClientError）に。
+- **起動方式**: aiobotocore は**実ソケット**を使うので in-process ASGI ではなく **uvicorn を ephemeral port
+  （127.0.0.1:0）で別スレッド起動**するフィクスチャ（`_ThreadedServer`・`server.started` を待って endpoint を返す）。
+  gateway は `GET /{bucket}/{key}` ＝ bucket をパスに置く **path-style** 前提なので client は `addressing_style="path"`。
+- **依存の扱い＝新依存ゼロ**: aiobotocore（3.7.0）はコア依存、uvicorn（0.49.0）は `[server]` extra/dev 既存、
+  pytest-asyncio は既存（`asyncio_mode=auto` で `async def test_*`）。**追加インストール不要**。同期 boto3 は入れていない。
+- **実クライアント往復で判明した齟齬＝ゼロ**: 実 botocore は XML/ヘッダ厳密性に敏感だが、S1 が生成する ETag・
+  Content-Length・XML 名前空間（`http://s3.amazonaws.com/doc/2006-03-01/`）・エラー Code（NoSuchKey/AccessDenied）・
+  ステータスコードを **botocore がそのまま受理**＝不具合・差異なし。S1 の XML/ヘッダ実装が実クライアント基準で妥当と実証。
+- **検証**: `make check` 緑（**76 passed, 1 skipped**・従来 72 から +4。skip は既存 s3-virtual E2E で本変更と無関係）。
+  format-check も clean。
+- **残課題**: S4 = **SeaweedFS 実機 backend** 疎通（実 client 往復は前倒し済み・残るは実 backend とパススルー）／
+  S2 multipart／S3 passthrough。
+
+## （旧フォーカス）
+
 **M021 S1（S3 ゲートウェイ本体）実装完了（2026-06-23・supervisor interrupt 指示）。** manystore を S3 互換 API
 として公開する新サブパッケージ `manystore.gateway` を追加。`m021-s3-gateway-plan.md` の S1 のみをスコープ厳守で実装
 （S2 multipart・S3 passthrough・S4 SeaweedFS 実機・繰延ページング・残未決 Q1/Q4/Q5 はバックログ）。

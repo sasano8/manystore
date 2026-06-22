@@ -174,8 +174,13 @@ manystore/
   ListObjectsV2 のページングは max-keys 上限 1000 でクランプ・打ち切りのみ（continuation token は**繰延**＝Q3）。
   - 実装ファイル: `manystore/gateway/__init__.py`・`app.py`・`routes.py`・`__main__.py`、`manystore/implement/s3map.py`。
     テスト: `tests/ui/test_gateway.py`(8 ケース・local backend で CRUD+LIST+エラー)・`tests/ui/test_s3map.py`(5・純ロジック)。
-  - 受け入れ: ✅ `make check` 緑（**72 passed, 1 skipped**）。⚠️ 実 S3 client（aws-cli/boto3）疎通は **S4 へ繰越**
-    （aiobotocore は async-only で同期 boto3 未導入＝新依存になるため S1 では XML を ElementTree パースで検証）。
+  - 受け入れ: ✅ `make check` 緑（**76 passed, 1 skipped**）。✅ **実 S3 クライアント往復で S1 を検証済み**
+    （2026-06-23 後続サイクル）。当初「実 client 疎通は S4 へ繰越（同期 boto3 は新依存）」としたが、**aiobotocore は
+    botocore を内包する実 S3 クライアント**なので `endpoint_url=<起動した gateway>` に向ければ**新依存ゼロ**で往復可能と
+    判明＝前倒し解消。`tests/ui/test_gateway_s3client.py`(4) で uvicorn を ephemeral port（実ソケット）で別スレッド起動し、
+    aiobotocore（path-style）から PUT→GET→HEAD→ListObjectsV2(flat+delimiter)→DELETE を往復＋NoSuchKey/AccessDenied を
+    実クライアント上で検証。**実 client は XML/ヘッダに厳密だが齟齬ゼロ**（ETag・ContentLength・XML 名前空間・エラー
+    Code・ステータスコードすべて botocore がそのまま受理）。S4 の **SeaweedFS 実機疎通**（パススルー含む）は別途残す。
 - **S2 multipart PUT（optional・大容量）**: CreateMultipartUpload/UploadPart/Complete/Abort を
   `S3FileStore` の multipart writer に橋渡し。大容量 PUT が通る。
   - 受け入れ: 大きめオブジェクトの multipart PUT→GET 一致。`make check` 緑。
@@ -183,7 +188,8 @@ manystore/
   `gateway/passthrough.py`（redirect/proxy 分岐・`--passthrough` スイッチ）。
   - 受け入れ: **backend=s3 のとき** GET/PUT で **307 presigned redirect が観測**できる（`passthrough=redirect`）／
     リダイレクト不可条件で **プロキシにフォールバック**することを観測（テストで両分岐）。`make check` 緑。
-- **S4 実 backend 疎通**: `make e2e-up`（SeaweedFS）で gateway 越し GET/PUT/LIST を実機確認。
+- **S4 実 backend 疎通**: （実 S3 **クライアント**往復は S1 後続で前倒し完了＝`test_gateway_s3client.py`。残るは実
+  **backend** = SeaweedFS）`make e2e-up`（SeaweedFS）で gateway 越し GET/PUT/LIST を実機確認。
   backend=s3 パススルーは SeaweedFS の presigned で redirect/proxy を実観測。activeContext に結果記録。
   - 受け入れ: 実 SeaweedFS で疎通。`make check`（既存 + 新規）緑。
 
