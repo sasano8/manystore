@@ -210,6 +210,29 @@ manystore/
 
 ---
 
+## 統合エントリポイント化（M023・S3 と REST を 1 アプリに束ねる）
+
+> S1/S2 で `gateway`（S3 互換）と `server`（manystore REST）は**独立した 2 アプリ**として並存していた
+> （別 `create_*`・別 `__main__`・別ポート）。supervisor 指示（2026-06-23）で**単一エントリポイント**に束ねた。
+> 詳細は progress.md の **M023** とこのファイル。S3 passthrough(S3)/S4 実機はこのタスクのスコープ外（不変）。
+
+- **採用方式 = `include_router(router, prefix=...)`**。`app.mount()` のサブアプリは Starlette で lifespan が
+  走らない（共有 service の connect が起動時に呼ばれない）落とし穴があるため**却下**。
+- **routes 層を APIRouter ベースに小リファクタ**: `server/routes.py` / `gateway/routes.py` に
+  `build_router(service) -> APIRouter` を追加（既存の `@app.*` デコレータ本体は不変＝`app` 変数が
+  `APIRouter` を指すだけ）。`register_routes(app, service)` は `app.include_router(build_router(service))` の
+  **後方互換シム**に縮退＝既存 `create_app` / `create_gateway` はそのまま動く。
+- **統合アプリ** `manystore/combined.py:create_combined_app(service)`: `/manystore` に native REST/WS、
+  `/s3` に S3 ゲートウェイを include。**共有 service を 1 回だけ connect/aclose する単一 lifespan**を持つ
+  （router は lifespan を持たないので二重 connect/aclose にならない）。S3 クライアントは
+  `endpoint_url=<host>/s3`（path-style）を向ける。
+- **起動**: `python -m manystore --config <toml>`（`manystore/__main__.py`・既定 8000）。単体起動
+  （`python -m manystore.server` / `python -m manystore.gateway`）は**従来どおり維持**。
+- **統合アプリは静的 UI（`/` の StaticFiles）を持ち込まない**（prefix ルータと root が衝突するため・スコープ外）。
+  静的 UI が要るなら従来どおり単体 `create_app` を使う。
+- 受け入れ: `tests/ui/test_combined.py`（+4）= `/manystore` REST 疎通 / native PUT→`/s3` GET の service 共有 /
+  実 aiobotocore で `/s3` 越し PUT/GET/HEAD/List/DELETE / multipart 往復。`make check` 緑（**91 passed, 1 skipped**）。
+
 ## 受け入れ条件（指示対応・総括）
 
 - ゲートウェイ経由で**代表 backend に GET/PUT/LIST が通る**（S1）。

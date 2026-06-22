@@ -19,9 +19,23 @@ from ..implement.service import ContextNotFound, ReadOnlyContext, StorageService
 from ..safe_path import UnsafePathError
 
 
-def register_routes(app, service: StorageService) -> None:
-    """`app`（FastAPI）に protocol のルートを登録する。fastapi は遅延 import。"""
-    from fastapi import HTTPException, Request, Response, WebSocket, WebSocketDisconnect
+def build_router(service: StorageService):
+    """`service` を載せた manystore ネイティブ REST/WS ルートの [APIRouter] を返す。
+
+    統合アプリは `app.include_router(build_router(service), prefix="/manystore")` で前置でき、
+    単体アプリ（[create_app]）は prefix なしで include する。相対パス
+    （`/contexts/...` 等）は prefix が前置されるだけで本体は不変。fastapi は遅延 import。
+    """
+    from fastapi import (
+        APIRouter,
+        HTTPException,
+        Request,
+        Response,
+        WebSocket,
+        WebSocketDisconnect,
+    )
+
+    app = APIRouter()
 
     def _http_error(exc: Exception) -> HTTPException:
         if isinstance(exc, ContextNotFound):
@@ -96,3 +110,14 @@ def register_routes(app, service: StorageService) -> None:
                 await ws.send_json(asdict(ev))
         except WebSocketDisconnect:
             pass
+
+    return app
+
+
+def register_routes(app, service: StorageService) -> None:
+    """`app`（FastAPI）に protocol のルートを登録する（後方互換の薄いシム）。
+
+    内部で [build_router] が返す [APIRouter] を `app.include_router(...)` する。
+    既存の単体アプリ生成（[create_app]）はこの形のまま動く。
+    """
+    app.include_router(build_router(service))

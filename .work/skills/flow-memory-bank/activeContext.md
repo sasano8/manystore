@@ -2,6 +2,30 @@
 
 ## 現在のフォーカス
 
+**M023 統合エントリポイント化 実装完了（2026-06-23・supervisor 指示）。** S1/S2 で並存していた 2 アプリ
+（`gateway`=S3 互換 / `server`=manystore native REST）を**単一 FastAPI に束ね**、パス第一階層で
+`/s3`（S3 互換）と `/manystore`（native REST/WS）に分けた。スコープは統合＋テスト追従のみ
+（S3 passthrough / S4 実機は対象外）。コア IF（KeyValueStore/FileStore/StorageService）不変・新依存ゼロ。
+
+- **採用方式 = `include_router(router, prefix=...)`**。`app.mount()` は Starlette でサブアプリの lifespan が
+  走らず共有 service の connect が起動時に呼ばれない落とし穴ゆえ**却下**。
+- **routes 層を APIRouter 化（小リファクタ）**: `server/routes.py` / `gateway/routes.py` に
+  `build_router(service) -> APIRouter` を追加（`@app.*` デコレータ本体は不変＝`app` 変数が APIRouter を指すだけ）。
+  `register_routes(app, service)` は `app.include_router(build_router(service))` の**後方互換シム**に縮退。
+- **統合アプリ** `manystore/combined.py:create_combined_app(service)`: `/manystore` に native REST/WS、`/s3` に
+  S3 ゲートウェイを include。**共有 service を 1 回だけ connect/aclose する単一 lifespan**（router は lifespan を
+  持たないので二重 connect/aclose を回避）。S3 クライアントは `endpoint_url=<host>/s3`（path-style）。
+- **新エントリ起動** `python -m manystore --config <toml>`（`manystore/__main__.py`・既定 8000）。
+- **後方互換**: 単体 `create_app`/`create_gateway`・`python -m manystore.server`/`.gateway` は不変。静的 UI
+  （`/` の StaticFiles）は従来どおり `create_app` 側に残し、統合アプリには持ち込まない（prefix ルータと root が
+  衝突＝スコープ外）。
+- **追加テスト**: `tests/ui/test_combined.py`(+4) = `/manystore` REST 疎通 / native PUT→`/s3` GET の service 共有 /
+  実 aiobotocore で `/s3` 越し PUT/GET/HEAD/List/DELETE / multipart 往復（uvicorn を ephemeral port で別スレッド起動）。
+- **検証**: `make check` 緑（**91 passed, 1 skipped**・S2 の 87 から +4）。format-check / lint clean。
+- **残課題**: S3 passthrough（`SupportsPresign` + redirect/proxy）／S4 SeaweedFS 実機 backend 疎通／繰延ページング。
+
+## （旧フォーカス）
+
 **M021 S2（Multipart Upload）実装完了（2026-06-23・supervisor 指示）。** スコープは S2 のみ
 （S3 passthrough / S4 実機は対象外）。S3 の multipart API を**コア IF 不変**で `StorageService` の上に薄く合成した。
 
@@ -111,6 +135,14 @@ dotfiles は `workers_dir: workers` を宣言した **supervisor**（自身も M
 
 ## 直近の変更
 
+- **interrupt 受信箱を取り込み（2026-06-23・M023 着手時）**: 2 件をトリアージ。(1)
+  `20260622-stage2-quality-resolved-and-pull-migration.md`（info+low）= quality エスカレ解決の共有は受領（追加作業なし）、
+  pull 型移行＋層エイリアス統一の残タスクを **progress.md M024（priority low）**へ起こした。(2)
+  `20260623-s3-gateway-and-passthrough.md` = M021 の原指示で `m021-s3-gateway-plan.md` に既吸収＝archive へ退避。
+  両ファイルを `interrupt/archive/`（日付プレフィクス）へ移動。
+- **M023 統合エントリポイント化を実装（2026-06-23・supervisor 指示）**: `include_router(prefix=...)` で `/s3`+`/manystore`
+  を 1 アプリに束ねた（上記「現在のフォーカス」）。新規 `combined.py`・`__main__.py`・`tests/ui/test_combined.py`、
+  変更 `server/routes.py`・`gateway/routes.py`（`build_router` 追加・`register_routes` をシム化）。`make check` 緑（91/1）。
 - **M021（S3 ゲートウェイ + パススルー）の着手前 deep think を実施（2026-06-23・supervisor interrupt をトリアージ）**：
   `interrupt/20260623-s3-gateway-and-passthrough.md`（priority normal）を取り込み、**実装はせず設計のみ確定**。
   成果物 `m021-s3-gateway-plan.md`。要旨＝(1) 最小 S3 操作 = GET/PUT/HEAD/DELETE/ListObjectsV2（multipart は段階2、

@@ -48,9 +48,16 @@ _XML = "application/xml"
 DEFAULT_MAX_KEYS = 1000
 
 
-def register_routes(app, service: StorageService) -> None:
-    """`app`（FastAPI）に S3 互換ルートを登録する。fastapi は遅延 import。"""
-    from fastapi import Request, Response
+def build_router(service: StorageService):
+    """`service` を載せた S3 互換ルートの [APIRouter] を返す。fastapi は遅延 import。
+
+    統合アプリは `app.include_router(build_router(service), prefix="/s3")` で前置でき、
+    単体アプリ（[create_gateway]）は prefix なしで include する。相対パス
+    （`/{bucket}/{key:path}` 等）は prefix が前置されるだけで本体は不変。
+    """
+    from fastapi import APIRouter, Request, Response
+
+    app = APIRouter()
 
     def _error_response(exc: Exception, resource: str) -> Response:
         """manystore の例外を S3 エラー XML レスポンスへマップする。"""
@@ -211,6 +218,17 @@ def register_routes(app, service: StorageService) -> None:
 
     def _xml(status: int, body: bytes) -> Response:
         return Response(content=body, status_code=status, media_type=_XML)
+
+    return app
+
+
+def register_routes(app, service: StorageService) -> None:
+    """`app`（FastAPI）に S3 互換ルートを登録する（後方互換の薄いシム）。
+
+    内部で [build_router] が返す [APIRouter] を `app.include_router(...)` する。
+    既存の単体アプリ生成（[create_gateway]）はこの形のまま動く。
+    """
+    app.include_router(build_router(service))
 
 
 def _etag(data: bytes) -> str:
