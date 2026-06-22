@@ -175,3 +175,75 @@ async def test_real_s3_client_readonly_bucket_access_denied(gateway_endpoint: st
         with pytest.raises(ClientError) as ei:
             await s3.put_object(Bucket="ro", Key="x.txt", Body=b"x")
         assert ei.value.response["Error"]["Code"] == "AccessDenied"
+
+
+# ── S2: Multipart Upload を実 S3 クライアントで往復検証 ──
+
+
+async def test_real_s3_client_multipart_roundtrip(gateway_endpoint: str) -> None:
+    """実 S3 クライアントで Create→複数 UploadPart→Complete→GET 一致を往復検証する。
+
+    part サイズは S3 の規約（最終以外 5MiB 以上）には縛られない（gateway は単純結合）が、
+    複数 part を結合した結果が GET の本文と一致することを確認する。
+    """
+    key = "big/object.bin"
+    part1 = b"A" * (1024 * 1024)  # 1 MiB
+    part2 = b"B" * (512 * 1024)  # 0.5 MiB
+    part3 = b"C" * 123  # 端数
+    expected = part1 + part2 + part3
+
+    async with _make_client(gateway_endpoint) as s3:
+        created = await s3.create_multipart_upload(Bucket="work", Key=key)
+        upload_id = created["UploadId"]
+        assert upload_id
+
+        parts = []
+        for n, chunk in enumerate((part1, part2, part3), start=1):
+            up = await s3.upload_part(
+                Bucket="work", Key=key, UploadId=upload_id, PartNumber=n, Body=chunk
+            )
+            parts.append({"ETag": up["ETag"], "PartNumber": n})
+
+        completed = await s3.complete_multipart_upload(
+            Bucket="work",
+            Key=key,
+            UploadId=upload_id,
+            MultipartUpload={"Parts": parts},
+        )
+        # multipart ETag は `<md5hex>-<partCount>` 形式（末尾 -3）。
+        assert completed["ETag"].rstrip('"').endswith("-3")
+
+        # GET で結合結果が一致する。
+        got = await s3.get_object(Bucket="work", Key=key)
+        async with got["Body"] as stream:
+            body = await stream.read()
+        assert body == expected
+        assert got["ContentLength"] == len(expected)
+
+        # 一時 part は ListObjectsV2 に現れない（予約プレフィクスを隠す）。
+        listed = await s3.list_objects_v2(Bucket="work")
+        keys = {c["Key"] for c in listed.get("Contents", [])}
+        assert key in keys
+        assert not any(k.startswith(".manystore-mpu") for k in keys)
+
+
+async def test_real_s3_client_multipart_abort_discards_parts(gateway_endpoint: str) -> None:
+    """実 S3 クライアントで Create→UploadPart→Abort 後、本オブジェクトが未作成なことを検証する。"""
+    key = "aborted/object.bin"
+    async with _make_client(gateway_endpoint) as s3:
+        created = await s3.create_multipart_upload(Bucket="work", Key=key)
+        upload_id = created["UploadId"]
+        await s3.upload_part(
+            Bucket="work", Key=key, UploadId=upload_id, PartNumber=1, Body=b"Z" * 1024
+        )
+
+        await s3.abort_multipart_upload(Bucket="work", Key=key, UploadId=upload_id)
+
+        # 本オブジェクトは未作成（complete していない）。
+        with pytest.raises(s3.exceptions.NoSuchKey):
+            await s3.get_object(Bucket="work", Key=key)
+
+        # 一時 part も掃除済み＝一覧に何も残らない。
+        listed = await s3.list_objects_v2(Bucket="work")
+        keys = {c["Key"] for c in listed.get("Contents", [])}
+        assert not any(k.startswith(".manystore-mpu") for k in keys)

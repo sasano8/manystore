@@ -136,3 +136,105 @@ def test_list_objects_v2_prefix_and_delimiter(tmp_path: Path) -> None:
         }
         assert contents == {"dir1/a.txt"}
         assert prefixes == {"dir1/sub/"}
+
+
+# ── S2: Multipart Upload の HTTP ルート分岐（in-process TestClient） ──
+
+
+def test_multipart_create_upload_complete_get(tmp_path: Path) -> None:
+    with _client(tmp_path) as client:
+        # CreateMultipartUpload: POST /{bucket}/{key}?uploads → uploadId 発行。
+        r = client.post("/work/big.bin", params={"uploads": ""})
+        assert r.status_code == 200
+        upload_id = fromstring(r.content).findtext("s3:UploadId", namespaces=_NS)
+        assert upload_id
+
+        # UploadPart: PUT /{bucket}/{key}?partNumber=N&uploadId=X（part の ETag を返す）。
+        for n, chunk in ((1, b"hello-"), (2, b"world")):
+            r = client.put(
+                "/work/big.bin",
+                params={"partNumber": str(n), "uploadId": upload_id},
+                content=chunk,
+            )
+            assert r.status_code == 200
+            assert r.headers["ETag"].startswith('"')
+
+        # CompleteMultipartUpload: POST /{bucket}/{key}?uploadId=X（Part 列を本文で指定）。
+        complete_body = (
+            "<CompleteMultipartUpload>"
+            "<Part><PartNumber>1</PartNumber></Part>"
+            "<Part><PartNumber>2</PartNumber></Part>"
+            "</CompleteMultipartUpload>"
+        )
+        r = client.post("/work/big.bin", params={"uploadId": upload_id}, content=complete_body)
+        assert r.status_code == 200
+        etag = fromstring(r.content).findtext("s3:ETag", namespaces=_NS)
+        assert etag.rstrip('"').endswith("-2")
+
+        # 結合結果が GET で一致する。
+        r = client.get("/work/big.bin")
+        assert r.status_code == 200
+        assert r.content == b"hello-world"
+
+        # 一時 part は一覧に出ない。
+        r = client.get("/work", params={"list-type": "2"})
+        keys = {
+            c.findtext("s3:Key", namespaces=_NS)
+            for c in fromstring(r.content).findall("s3:Contents", _NS)
+        }
+        assert keys == {"big.bin"}
+
+
+def test_multipart_abort_discards_parts(tmp_path: Path) -> None:
+    with _client(tmp_path) as client:
+        r = client.post("/work/x.bin", params={"uploads": ""})
+        upload_id = fromstring(r.content).findtext("s3:UploadId", namespaces=_NS)
+        client.put(
+            "/work/x.bin", params={"partNumber": "1", "uploadId": upload_id}, content=b"data"
+        )
+
+        # AbortMultipartUpload: DELETE /{bucket}/{key}?uploadId=X → 204。
+        r = client.delete("/work/x.bin", params={"uploadId": upload_id})
+        assert r.status_code == 204
+
+        # 本オブジェクトは未作成・一時 part も掃除済み。
+        assert client.get("/work/x.bin").status_code == 404
+        r = client.get("/work", params={"list-type": "2"})
+        assert fromstring(r.content).findall("s3:Contents", _NS) == []
+
+
+def test_multipart_complete_missing_part_returns_nosuchupload(tmp_path: Path) -> None:
+    with _client(tmp_path) as client:
+        r = client.post("/work/y.bin", params={"uploads": ""})
+        upload_id = fromstring(r.content).findtext("s3:UploadId", namespaces=_NS)
+        client.put(
+            "/work/y.bin", params={"partNumber": "1", "uploadId": upload_id}, content=b"only-part-1"
+        )
+        # part 2 を要求するが未アップロード → NoSuchUpload(404)。
+        complete_body = (
+            "<CompleteMultipartUpload>"
+            "<Part><PartNumber>1</PartNumber></Part>"
+            "<Part><PartNumber>2</PartNumber></Part>"
+            "</CompleteMultipartUpload>"
+        )
+        r = client.post("/work/y.bin", params={"uploadId": upload_id}, content=complete_body)
+        assert r.status_code == 404
+        assert fromstring(r.content).findtext("Code") == "NoSuchUpload"
+
+
+def test_multipart_create_unknown_bucket_returns_nosuchbucket(tmp_path: Path) -> None:
+    with _client(tmp_path) as client:
+        r = client.post("/missing/x.bin", params={"uploads": ""})
+        assert r.status_code == 404
+        assert fromstring(r.content).findtext("Code") == "NoSuchBucket"
+
+
+def test_multipart_upload_part_invalid_part_number(tmp_path: Path) -> None:
+    with _client(tmp_path) as client:
+        r = client.post("/work/z.bin", params={"uploads": ""})
+        upload_id = fromstring(r.content).findtext("s3:UploadId", namespaces=_NS)
+        r = client.put(
+            "/work/z.bin", params={"partNumber": "0", "uploadId": upload_id}, content=b"x"
+        )
+        assert r.status_code == 400
+        assert fromstring(r.content).findtext("Code") == "InvalidArgument"

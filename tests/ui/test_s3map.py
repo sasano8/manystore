@@ -6,7 +6,10 @@ from manystore.implement.protocol import EntryInfo
 from manystore.implement.s3map import (
     S3_NS,
     fold_list_v2,
+    parse_complete_multipart,
+    render_complete_multipart,
     render_error,
+    render_initiate_multipart,
     render_list_v2,
 )
 
@@ -63,3 +66,44 @@ def test_render_error_shape() -> None:
     assert root.findtext("Code") == "NoSuchKey"
     assert root.findtext("Message") == "missing"
     assert root.findtext("Resource") == "/work/x"
+
+
+# ── multipart（S2）の XML 補助 ──
+
+
+def test_render_initiate_multipart_carries_upload_id() -> None:
+    root = fromstring(render_initiate_multipart(bucket="work", key="big.bin", upload_id="u123"))
+    assert root.tag == f"{{{S3_NS}}}InitiateMultipartUploadResult"
+    assert root.findtext("s3:Bucket", namespaces=_NS) == "work"
+    assert root.findtext("s3:Key", namespaces=_NS) == "big.bin"
+    assert root.findtext("s3:UploadId", namespaces=_NS) == "u123"
+
+
+def test_render_complete_multipart_carries_etag() -> None:
+    root = fromstring(render_complete_multipart(bucket="work", key="big.bin", etag='"abc-3"'))
+    assert root.tag == f"{{{S3_NS}}}CompleteMultipartUploadResult"
+    assert root.findtext("s3:Key", namespaces=_NS) == "big.bin"
+    assert root.findtext("s3:ETag", namespaces=_NS) == '"abc-3"'
+
+
+def test_parse_complete_multipart_preserves_request_order() -> None:
+    # クライアントが送る Part 列の順序をそのまま返す（サーバは再ソートしない）。
+    body = (
+        b'<CompleteMultipartUpload xmlns="http://s3.amazonaws.com/doc/2006-03-01/">'
+        b"<Part><PartNumber>1</PartNumber><ETag>&quot;a&quot;</ETag></Part>"
+        b"<Part><PartNumber>2</PartNumber><ETag>&quot;b&quot;</ETag></Part>"
+        b"<Part><PartNumber>3</PartNumber><ETag>&quot;c&quot;</ETag></Part>"
+        b"</CompleteMultipartUpload>"
+    )
+    assert parse_complete_multipart(body) == [1, 2, 3]
+
+
+def test_parse_complete_multipart_without_namespace() -> None:
+    # 名前空間なしの本文（ローカル名で判定）でも part を拾える。
+    body = (
+        b"<CompleteMultipartUpload>"
+        b"<Part><PartNumber>5</PartNumber></Part>"
+        b"<Part><PartNumber>7</PartNumber></Part>"
+        b"</CompleteMultipartUpload>"
+    )
+    assert parse_complete_multipart(body) == [5, 7]

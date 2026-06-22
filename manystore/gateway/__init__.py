@@ -5,7 +5,9 @@
 extra を流用＝新依存ゼロ）。S3 XML は stdlib `xml.etree.ElementTree` で生成する。
 
 S1 で対応する操作: GetObject / PutObject / HeadObject / DeleteObject / ListObjectsV2。
-S2 multipart・S3 passthrough・継続トークンページングはバックログ（progress.md M021）。
+S2 で追加: Multipart Upload（Create/UploadPart/Complete/Abort・[multipart] 参照）。
+S3 passthrough・継続トークンページング・ListParts/ListMultipartUploads はバックログ
+（progress.md M021）。
 """
 
 from .app import create_gateway

@@ -2,6 +2,36 @@
 
 ## 現在のフォーカス
 
+**M021 S2（Multipart Upload）実装完了（2026-06-23・supervisor 指示）。** スコープは S2 のみ
+（S3 passthrough / S4 実機は対象外）。S3 の multipart API を**コア IF 不変**で `StorageService` の上に薄く合成した。
+
+- **新規/変更ファイル**: `manystore/gateway/multipart.py`（新・状態保持と create/upload/complete/abort のオーケストレーション）／
+  `manystore/implement/s3map.py`（multipart XML 補助 = `render_initiate_multipart` / `render_complete_multipart` /
+  `parse_complete_multipart` を追加・HTTP 非依存）／`manystore/gateway/routes.py`（PUT/POST/DELETE を query で多重化分岐・
+  ListObjectsV2 から予約プレフィクス除外）／`manystore/gateway/__init__.py`（docstring）。
+- **実装した API**: CreateMultipartUpload（`POST /{bucket}/{key}?uploads`・uploadId=uuid4 hex）／UploadPart
+  （`PUT /{bucket}/{key}?partNumber=N&uploadId=X`・一時キーへ put・part の MD5 を ETag）／CompleteMultipartUpload
+  （`POST /{bucket}/{key}?uploadId=X`＋本文 Part 列・**指定順**結合→**1 回の put（all-or-nothing）**→一時 part 掃除・
+  ETag=`<concat-md5>-N`）／AbortMultipartUpload（`DELETE /{bucket}/{key}?uploadId=X`・冪等）。**ListParts /
+  ListMultipartUploads は YAGNI で見送り**（progress バックログ）。
+- **状態の保持方式 = ストア上の予約キー空間** `.manystore-mpu/{uploadId}/{partNumber:05d}`（インメモリ辞書ではない）。
+  理由: **サーバ再起動耐性・複数プロセス/ワーカ耐性**（落ちても part が残り、どのワーカでも同じストアに積む）。予約
+  プレフィクスは `validate_safe_path` を通る安全キー。ListObjectsV2 は予約プレフィクスを **gateway 側で除外**（service 不変）。
+- **並行/上書き/順序**: 同一 (uploadId, partNumber) への再 UploadPart は **last-writer-wins**（put 自体がアトミック＝
+  半端に混ざらない）。結合順は **Complete リクエスト本文の partNumber 順**を尊重（クライアント責務・サーバは再ソートしない）。
+- **コア IF 変更 = なし**（`KeyValueStore` / `FileStore` / `StorageService` 公開 API いずれも不変）。新依存ゼロ
+  （aiobotocore=コア依存・uvicorn=既存）。
+- **追加テスト**: `tests/ui/test_gateway_s3client.py` +2（`test_real_s3_client_multipart_roundtrip`=Create→UploadPart×3
+  （1MiB+0.5MiB+端数）→Complete→GET 結合一致＋ETag 末尾 `-3`＋一覧に予約キー非露出／
+  `test_real_s3_client_multipart_abort_discards_parts`=Abort 後に本オブジェクト未作成＝NoSuchKey＋一時 part 掃除）。
+  in-process route 分岐は `test_gateway.py` +5（Create/UploadPart/Complete/GET 一致・Abort・NoSuchUpload・partNumber 0=
+  InvalidArgument・unknown bucket=NoSuchBucket）。XML 純ロジックは `test_s3map.py` +4。
+- **検証**: `make check` 緑（**87 passed, 1 skipped**・S1 の 76 から +11）。format-check / lint clean。
+- **残課題**: S3 passthrough（`SupportsPresign` + redirect/proxy）／S4 SeaweedFS 実機 backend 疎通／繰延ページング／
+  見送った multipart 補助 API（ListParts / ListMultipartUploads）。
+
+## （旧フォーカス）
+
 **M021 S1 を「実 S3 クライアント往復」で検証補強（2026-06-23 後続サイクル・supervisor 指示）。**
 S1 の既存テストは gateway 生成の S3 XML を stdlib ElementTree でパースするだけで**実 S3 クライアント往復が無かった**。
 直前実装者は「実 client = 同期 boto3 は新依存」として S4 へ繰越したが、**manystore はコア依存に `aiobotocore>=2.0.0`
