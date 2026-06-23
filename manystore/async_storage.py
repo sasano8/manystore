@@ -114,33 +114,27 @@ class FileObject(Protocol):
     async def __aexit__(self, *exc: object) -> None: ...
 
 
-class FileStore(Protocol):
-    """ファイルオブジェクト（[FileObject]）を取得するストリーム指向のストア（バイナリ専用）。
+class FileStore(KeyValueStore, Protocol):
+    """[KeyValueStore] にストリーム IO（open_reader/open_writer）を足したストア（バイナリ専用）。
 
-    `mode` 文字列を解釈する `open` ではなく、方向が型に出る 2 メソッドに分ける:
+    モデル: **FileStore = KeyValueStore + {open_reader, open_writer}**。put/get/get_or_raise・
+    iter/list/exists/delete/cp/mv・connect/aclose は KeyValueStore からそのまま継承（流用）し、
+    FileStore は方向が型に出る IO 2 メソッドだけを足す。逆に言えば **KeyValueStore は FileStore
+    から IO を除いた部分集合**。
+
     - `open_reader(filename)` … 読み取り用（write は `io.UnsupportedOperation`）。
     - `open_writer(filename)` … 書き込み用（read は `io.UnsupportedOperation`）。
+    どちらもバイナリ（bytes）専用。テキストの符号化は利用側の責務にする。
 
-    どちらもバイナリ（bytes）だけを扱う。テキストの符号化は利用側の責務にし、ストアは
-    バイト列の入出力に専念する（テスト時もモード分岐が無く意図が明確）。
-
-    open_reader/open_writer に加え、ファイル名前空間の操作（iter/list/exists/delete/cp/mv）と
-    ライフサイクル（connect/aclose）も契約に含む。これにより FileStore は「真実の実装」を担え、
-    [KeyValueFromFileStore] で KVS ビューを派生できる（filesystem-native な
-    [backends.LocalFileStore] が代表例）。純粋にストリーム入出力だけの backend（S3/NATS/HTTP）は
-    この名前空間操作を段階的に備える（未実装なら呼び出し時に AttributeError／非対応エラー）。
+    変換: **KVS→FileStore** は無い IO の埋め合わせが要る（[KeyValueFileStore] が get/put から
+    open_reader/open_writer を合成）。**FileStore→KVS** は IO を落とすだけ
+    （[KeyValueFromFileStore]＝残りはそのまま流用）。filesystem-native な [backends.LocalFileStore]
+    が「真実の実装」の代表例。S3/NATS/HTTP の FileStore は IO 以外（put/get/iter 等）を段階的に
+    備える（未実装なら呼び出し時に AttributeError／非対応エラー）。
     """
 
     async def open_reader(self, filename: str) -> FileObject: ...
     async def open_writer(self, filename: str) -> FileObject: ...
-    def iter(self) -> AsyncIterator[FileInfo]: ...
-    async def list(self, limit: int = 10) -> list[FileInfo]: ...
-    async def exists(self, filename: str) -> bool: ...
-    async def delete(self, filename: str) -> None: ...
-    async def cp(self, src: str, dst: str) -> None: ...
-    async def mv(self, src: str, dst: str) -> None: ...
-    async def connect(self) -> None: ...
-    async def aclose(self) -> None: ...
 
 
 # ── KeyValueStore を FileStore として被せる汎用アダプタ ──
@@ -197,56 +191,80 @@ class _KvWriteFileObject:
         await self.close()
 
 
-class KeyValueFileStore:
-    """[KeyValueStore] を [FileStore]（open）として被せる汎用アダプタ。
+class KeyValueFileStore(KeyValueStoreBase):
+    """[KeyValueStore] を [FileStore] として被せる汎用アダプタ＝**IO の埋め合わせ**。
 
-    S3 / NATS のような全体 get/put のオブジェクトストアに open ベースのアクセスを与える
-    （`KeyValueFileStore(S3KeyValueStore(...))` で S3 の FileStore になる）。真のストリーミング/
-    ランダムアクセスではなく、read は全体取得、write は close 時に全体 put（メモリにバッファ）。
-    backend 固有のストリーミング実装は [backends] の各 FileStore を参照。
+    KVS は FileStore から open_reader/open_writer を除いた部分集合なので、KVS→FileStore は
+    その 2 つを合成すれば済む（put/get/get_or_raise・iter/list/exists/delete/cp/mv・connect/aclose
+    は下層 KVS へそのまま委譲＝流用）。例 `KeyValueFileStore(S3KeyValueStore(...))`＝S3 を FileStore
+    化。合成する IO は真のストリーミングではなく、read=全体取得・write=close で全体 put（メモリに
+    バッファ）。backend 固有のストリーミング実装は [backends] の各 FileStore を参照。
     """
 
     def __init__(self, store: KeyValueStore) -> None:
         self._store = store
 
+    # ── 合成する IO（KVS に無い分の埋め合わせ） ──
+
     async def open_reader(self, filename: str) -> FileObject:
-        data = await self._store.get(filename)
-        if data is None:
-            raise FileNotFoundError(filename)
-        return _KvReadFileObject(data)
+        return _KvReadFileObject(await self._store.get_or_raise(filename))
 
     async def open_writer(self, filename: str) -> FileObject:
         return _KvWriteFileObject(self._store, filename)
+
+    # ── KVS 面は下層へ委譲（FileStore = KVS + IO の KVS 部分） ──
+
+    async def put(self, key: str, value: bytes) -> None:
+        await self._store.put(key, value)
+
+    async def get_or_raise(self, key: str) -> bytes:
+        return await self._store.get_or_raise(key)
+
+    def iter(self) -> AsyncIterator[FileInfo]:
+        return self._store.iter()
+
+    async def list(self, limit: int = 10) -> list[FileInfo]:
+        return await self._store.list(limit)
+
+    async def exists(self, key: str) -> bool:
+        return await self._store.exists(key)
+
+    async def delete(self, key: str) -> None:
+        await self._store.delete(key)
+
+    async def cp(self, src: str, dst: str) -> None:
+        await self._store.cp(src, dst)
+
+    async def mv(self, src: str, dst: str) -> None:
+        await self._store.mv(src, dst)
+
+    async def connect(self) -> None:
+        await self._store.connect()
+
+    async def aclose(self) -> None:
+        await self._store.aclose()
 
 
 class KeyValueFromFileStore(KeyValueStoreBase):
     """[FileStore] を [KeyValueStore] として被せる汎用アダプタ（[KeyValueFileStore] の逆向き）。
 
-    get/put は下層の `open_reader` / `open_writer` 越しの**全体 read / 全体 write**＝KV 層で
-    バッファする（「みせかけのストリーム」。真のストリーム性は下層 FileStore を直接使う）。
-    iter/list/exists/delete/cp/mv は下層 FileStore のメソッドへ**素通し委譲**するので、下層は
-    これらを提供している前提（filesystem-native な [backends.LocalFileStore] 等）。純粋に
-    `open_reader`/`open_writer` だけの FileStore（S3/NATS/HTTP）に被せた場合は get/put のみ有効。
+    **FileStore = KeyValueStore + IO** なので、FileStore→KVS は **IO（open_reader/open_writer）を
+    落とすだけ**＝put/get/get_or_raise・iter/list/exists/delete/cp/mv・connect/aclose を下層
+    FileStore へそのまま委譲（流用）する。`get(key, default=None)` は基底 [KeyValueStoreBase] が
+    get_or_raise を捕捉して与える。
 
-    get の primitive は `get_or_raise`＝下層 `open_reader`（欠損で `FileNotFoundError`）を
-    コンテキストマネージャで開いて全体 read する。`get(key, default=None)` は基底
-    [KeyValueStoreBase] が get_or_raise を捕捉して与える。
-
-    用途: ローカルのように「真実の実装が FileStore 側」にある backend で、KV ビューをそこから
-    派生させる（実装の二重持ちを避ける）。
+    用途: ローカルのように「真実の実装が FileStore 側」にある backend で、open_reader/open_writer を
+    隠した KVS ビューを得る（`LocalKeyValueStore = KeyValueFromFileStore(LocalFileStore)`）。
     """
 
     def __init__(self, store: FileStore) -> None:
         self._store = store
 
     async def put(self, key: str, value: bytes) -> None:
-        async with await self._store.open_writer(key) as w:
-            await w.write(value)  # close（__aexit__）で確定＝下層の原子性に従う
+        await self._store.put(key, value)
 
     async def get_or_raise(self, key: str) -> bytes:
-        # 下層 open_reader を CM で開く（欠損なら FileNotFoundError が伝播）。
-        async with await self._store.open_reader(key) as r:
-            return await r.read()
+        return await self._store.get_or_raise(key)
 
     def iter(self) -> AsyncIterator[FileInfo]:
         return self._store.iter()

@@ -18,6 +18,7 @@ from ..async_storage import (
     FileInfo,
     FileObject,
     KeyValueFromFileStore,
+    KeyValueStoreBase,
     _atomic_write_bytes,
     _kv_copy,
     _take,
@@ -91,13 +92,15 @@ class _LocalAtomicWriter:
             await self.close()
 
 
-class LocalFileStore:
-    """ローカルファイルシステムの「真実の実装」（[FileStore]＝ストリーム入出力＋名前空間操作）。
+class LocalFileStore(KeyValueStoreBase):
+    """ローカルファイルシステムの「真実の実装」（完全な [FileStore]＝KeyValueStore + IO）。
 
-    `open_reader`/`open_writer` のストリーム入出力に加え、put/get（全体）・iter/list/exists/delete・
-    cp/mv・vacuum までを filesystem-native に提供する。KVS ビューが要るときは
-    `KeyValueFromFileStore(LocalFileStore(...))`（＝[LocalKeyValueStore]）で被せる＝実装の二重持ちを避ける。
-    書き込みは temp+rename で原子的（all-or-nothing）。バイナリ専用。
+    `open_reader`/`open_writer` のストリーム IO に加え、put/get/get_or_raise（全体）・
+    iter/list/exists/delete・cp/mv・vacuum までを filesystem-native に提供する＝KeyValueStore も
+    そのまま満たす。KVS ビュー（IO を隠したもの）が要るときは
+    `KeyValueFromFileStore(LocalFileStore(...))`（＝[LocalKeyValueStore]）で被せる＝実装の二重持ちを
+    避ける。get は基底 [KeyValueStoreBase] が get_or_raise から与える。書き込みは temp+rename で
+    原子的（all-or-nothing）。バイナリ専用。
     """
 
     def __init__(self, directory: Path) -> None:
@@ -124,10 +127,8 @@ class LocalFileStore:
         # temp+rename で原子的に書く（途中失敗で既存値が壊れない＝all-or-nothing）。
         _atomic_write_bytes(path, value)
 
-    async def get(self, key: str) -> bytes | None:
-        if not await self.exists(key):
-            return None  # 欠損キーは None（KVS 規約）
-        # 自身の open_reader を流用＝ストリーム入出力の上に全体 get を表現する。
+    async def get_or_raise(self, key: str) -> bytes:
+        # 自身の open_reader を流用（欠損なら open("rb") が FileNotFoundError）。
         async with await self.open_reader(key) as f:
             return await f.read()
 

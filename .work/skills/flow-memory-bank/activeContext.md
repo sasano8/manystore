@@ -177,6 +177,17 @@ dotfiles は `workers_dir: workers` を宣言した **supervisor**（自身も M
 
 ## 直近の変更
 
+- **Protocol 関係を整理＝FileStore = KeyValueStore + IO（2026-06-23 後続・ユーザー要望/対話）**: ユーザー提案
+  「FileStore Protocol に put/get/get_or_raise を含めてよい。KVS は FileStore から open_reader/open_writer を
+  除いた部分集合で、それ以外はそのまま流用。KVS→FileStore は IO の埋め合わせ（ラッパ）が要る」を実装。
+  (1) `class FileStore(KeyValueStore, Protocol)` に整理＝IO 2 メソッドだけ足す（put/get/get_or_raise・名前空間操作・
+  ライフサイクルは KVS から継承＝重複宣言を削除）。(2) `KeyValueFileStore`(KVS→FileStore) を**完全な FileStore**に＝
+  open_reader/open_writer を合成し、KVS 面（put/get_or_raise/iter/…）は下層 KVS へ委譲（open_reader は get_or_raise 経由で
+  欠損 FileNotFoundError）。(3) `KeyValueFromFileStore`(FileStore→KVS) を**純委譲**に＝FileStore が put/get_or_raise を
+  持つので IO 合成をやめ下層へそのまま委譲（IO を落とすだけ）。(4) `LocalFileStore` を `KeyValueStoreBase` 継承＋
+  `get`→`get_or_raise`（open_reader 流用）に＝**完全な FileStore（KVS+IO）の真実の実装**。tests +2（LocalFileStore を
+  KVS として／KeyValueFileStore が完全 FileStore）。`make check` 緑（**96 passed, 1 skipped**）。M027b の波及範囲は
+  「FileStore の KVS 面（put/get/iter 等）を S3/NATS/HTTP/Safe FileStore にも備える」に拡大（progress 更新）。
 - **KVS の get を get_or_raise primitive ＋ get(default) に再設計（2026-06-23 後続・ユーザー要望/対話）**:
   ユーザー要望「get はデフォルト値を取れる／get_or_raise（例外を上げる）を用意し、get は get_or_raise を
   捕捉する形に」を実装。**共有基底 `KeyValueStoreBase`** を新設し `get(key, default=None)` を get_or_raise から

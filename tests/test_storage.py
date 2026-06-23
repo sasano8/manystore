@@ -247,9 +247,49 @@ def test_kvs_get_default_and_get_or_raise(tmp_path: Path) -> None:
     asyncio.run(scenario())
 
 
+def test_local_file_store_is_full_kvs(tmp_path: Path) -> None:
+    # FileStore = KeyValueStore + IO。LocalFileStore は IO を持ちつつ KVS としても完全に働く。
+    fs = LocalFileStore(tmp_path)
+
+    async def scenario() -> None:
+        # KVS 面: put / get(default) / get_or_raise / iter
+        await fs.put("a/b.bin", b"hello")
+        assert await fs.get("a/b.bin") == b"hello"
+        assert await fs.get("missing") is None
+        assert await fs.get("missing", b"def") == b"def"
+        with pytest.raises(FileNotFoundError):
+            await fs.get_or_raise("missing")
+        assert [i["filename"] async for i in fs.iter()] == ["a/b.bin"]
+        # IO 面: open_reader でも同じ真実が読める
+        async with await fs.open_reader("a/b.bin") as r:
+            assert await r.read() == b"hello"
+
+    asyncio.run(scenario())
+
+
+def test_key_value_file_store_is_full_file_store(tmp_path: Path) -> None:
+    # KVS→FileStore は IO の埋め合わせ＝KVS 面は委譲しつつ open_reader/open_writer を合成。
+    fs = KeyValueFileStore(LocalKeyValueStore(tmp_path))
+
+    async def scenario() -> None:
+        # IO 面（合成）
+        async with await fs.open_writer("k.bin") as w:
+            await w.write(b"xyz")
+        async with await fs.open_reader("k.bin") as r:
+            assert await r.read() == b"xyz"
+        # KVS 面（下層へ委譲）も使える＝完全な FileStore
+        assert await fs.get_or_raise("k.bin") == b"xyz"
+        assert await fs.get("missing", b"d") == b"d"
+        assert [i["filename"] async for i in fs.iter()] == ["k.bin"]
+        # 欠損キーの open_reader は FileNotFoundError（get_or_raise 経由）
+        with pytest.raises(FileNotFoundError):
+            await fs.open_reader("missing")
+
+    asyncio.run(scenario())
+
+
 def test_key_value_from_file_store_derives_kvs(tmp_path: Path) -> None:
-    # FileStore を KVS として被せる逆向きアダプタ（KeyValueFileStore の対称）。
-    # get/put は open_reader/open_writer 越し、名前空間操作は下層 FileStore へ素通し委譲。
+    # FileStore を KVS として被せる逆向きアダプタ（IO を落とすだけ・残りは下層へ委譲）。
     kv = KeyValueFromFileStore(LocalFileStore(tmp_path))
 
     async def scenario() -> None:
