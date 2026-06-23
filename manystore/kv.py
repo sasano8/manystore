@@ -8,6 +8,7 @@ from .array_storage import DEFAULT_CACHE_DIR, ArrayKeyValueStore, DownloadCache
 from .async_storage import FileInfo, KeyValueFromFileStore, KeyValueStore, KeyValueStoreBase
 from .async_to_sync_storage import AsyncToSyncKeyValueStore
 from .backends import (
+    DictKeyValueStore,
     HttpKeyValueStore,
     LocalKeyValueStore,
     NatsObjectKeyValueStore,
@@ -25,6 +26,7 @@ __all__ = [
     "KeyValueStore",
     "KeyValueStoreBase",
     # backends
+    "DictKeyValueStore",
     "LocalKeyValueStore",
     "S3KeyValueStore",
     "NatsObjectKeyValueStore",

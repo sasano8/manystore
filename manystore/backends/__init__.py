@@ -9,10 +9,13 @@ from pathlib import Path
 from ..async_storage import KeyValueStore
 from .http_store import HttpFileStore, HttpKeyValueStore
 from .local import LocalFileObject, LocalFileStore, LocalKeyValueStore
+from .memory import DictFileStore, DictKeyValueStore
 from .nats import NatsFileStore, NatsObjectKeyValueStore
 from .s3 import S3FileStore, S3KeyValueStore
 
 __all__ = [
+    "DictKeyValueStore",
+    "DictFileStore",
     "LocalKeyValueStore",
     "LocalFileStore",
     "LocalFileObject",
@@ -40,7 +43,9 @@ def create_key_value_store(
     http_base_url: str = "",
     http_headers: dict[str, str] | None = None,
 ) -> KeyValueStore:
-    if backend == "local":
+    if backend == "memory":
+        return DictKeyValueStore()  # プロセス内 dict（揮発・接続不要）
+    elif backend == "local":
         if local_dir is None:
             raise ValueError("local backend requires local_dir")
         return LocalKeyValueStore(local_dir)

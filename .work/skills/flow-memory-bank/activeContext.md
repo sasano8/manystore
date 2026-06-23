@@ -177,6 +177,15 @@ dotfiles は `workers_dir: workers` を宣言した **supervisor**（自身も M
 
 ## 直近の変更
 
+- **設計原則の正本を repo へ移設＋適合性ツール（M022 P1）＋dict backend（2026-06-23 後続・ユーザー要望/対話）**:
+  ユーザー指摘「正式原則を一時記憶（systemPatterns）に置くのは変／ruff では Protocol 準拠を検査できない／サード
+  パーティ backend 用の仕様テスト（まずメソッド存在）が欲しい／辞書 backend が欲しい」に対応。(1) **設計原則の正本を
+  `docs/architecture.md`（repo）へ移設**＝Memory Bank は圧縮される一時記憶なので systemPatterns 原則7 はポインタに縮退。
+  (2) **`manystore/conformance.py`**＝`typing.get_protocol_members` で Protocol メソッドの存在を横断チェック
+  （`assert_key_value_store`/`assert_file_store`）。ruff は型/Protocol を検査できない（linter/formatter）ので実行時
+  conformance で代替。挙動契約は未実装（開発途上）＝M022 P1。(3) **`backends/memory.py`**＝`DictKeyValueStore`/
+  `DictFileStore`（依存ゼロ・揮発・`create_key_value_store("memory")`）。kv 寄りなので IO は buffer 合成。
+  `tests/test_conformance.py`(+4) で全 backend を横断チェック。`make check` 緑（**103 passed, 1 skipped**）。
 - **核を kv/file どちらに寄せるか方針を原則7 に明文化＋HTTP FileStore を完全準拠化（2026-06-23 後続・ユーザー要望/対話）**:
   ユーザー要望「核を寄せる方針を正式ドキュメント化」→ `systemPatterns.md` **原則7**（核は native primitive 側・逆派生で
   性能が落ちる方を核に・kv 寄り=`XFileStore(XKeyValueStore)`／file 寄り=`KeyValueFromFileStore`）として正式記述。あわせて

@@ -7,6 +7,7 @@
 
 from .async_storage import FileInfo, FileObject, FileStore, KeyValueFileStore
 from .backends import (
+    DictFileStore,
     HttpFileStore,
     LocalFileObject,
     LocalFileStore,
@@ -23,6 +24,7 @@ __all__ = [
     "FileStore",
     "FileObject",
     # backends
+    "DictFileStore",
     "LocalFileStore",
     "LocalFileObject",
     "S3FileStore",

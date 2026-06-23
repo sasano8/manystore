@@ -11,9 +11,13 @@
 - `sync_storage.py` — 同期 IF（`SyncKeyValueStore` / `SyncFileStore` / `SyncFileObject`）。
 - `async_to_sync_storage.py` — `AsyncToSyncKeyValueStore`（専属ループを `run_until_complete` で駆動する
   ゼロ依存ブリッジ）。
-- `backends/` — `local.py` / `s3.py` / `nats.py` / `http_store.py` ＋ `__init__` の `create_key_value_store`。
-  `http_store.py` は **read-only**（GET/HEAD のみ。書き込み・一覧は `io.UnsupportedOperation`）。ファイル名は
-  stdlib `http` パッケージと紛れないよう `http_store`（backend 識別子は `"http"`）。
+- `backends/` — `local.py` / `s3.py` / `nats.py` / `http_store.py` / `memory.py` ＋ `__init__` の
+  `create_key_value_store`（"memory"/"local"/"s3"/"nats"/"http"）。`http_store.py` は **read-only**（GET/HEAD のみ。
+  書き込み・一覧は `io.UnsupportedOperation`）。`memory.py`＝`DictKeyValueStore`/`DictFileStore`（依存ゼロ・揮発の
+  参照 backend）。
+- `conformance.py` — 適合性ツール（`assert_key_value_store`/`assert_file_store`＝Protocol メソッド存在チェック。
+  サードパーティ backend が pytest で横断準拠確認。挙動契約は未実装＝M022 P1）。
+- `docs/architecture.md`（repo）— **設計原則の正本**（FileStore=KVS+IO・核配置/寄り・get_or_raise・conformance）。
 - `connect.py` — `connect_key_value_store` / `connecting` / `ConnectPolicy`。
 - `safe_path.py` — `validate_safe_path` ＋ `SafeKeyValueStore`（download/キャッシュも担う唯一の KVS wrapper）/
   `SafeFileStore`。
@@ -67,21 +71,12 @@
    得る＝真髄はクライアントプログラムにある**（サーバ越しに無理にストリームを通さない）。これは M026 stream IF の
    設計指針にも効く（HTTP 公開＝buffered 前提、真の streaming は client wrap）。
 
-7. **核（真実の実装）は backend の native primitive 側に置き、他方は薄い派生ビューにする（2026-06-23・ユーザー方針）** —
-   `FileStore = KeyValueStore + IO`（原則 above）を踏まえ、backend ごとに **kv 寄り / file 寄り**を見極め、
-   **逆向きに派生すると性能が落ちる方を核**にする（二重実装しない）。判断と実装の 2 形:
-   - **kv 寄り（核 = KVS）= `XFileStore(XKeyValueStore)`** — backend の native primitive が **whole get/put** の場合。
-     KVS クラスに真実の実装を置き、FileStore は KVS を継承して **IO だけ足す**。足す IO は:
-     - backend が真の streaming を持てば **native streaming**（**S3** = `S3FileStore(S3KeyValueStore)`、open_reader=range
-       body / open_writer=multipart＝大オブジェクトを定メモリ。whole get/put は get_object/put_object のまま native）。
-     - 持たなければ **whole の上に buffer 合成**（**NATS/HTTP**、共有 `_KvReadFileObject`/`_KvWriteFileObject` を流用）。
-     - ※ whole を streaming から逆派生すると小さい値で multipart 過剰＝遅い。だから S3 でも核は KVS（whole）側。
-   - **file 寄り（核 = FileStore）= `XKeyValueStore = KeyValueFromFileStore(XFileStore)`** — native primitive が
-     **stream IO（open/read/write）** の場合。FileStore に真実の実装を置き、KVS は IO を隠した派生ビュー
-     （**Local** = `LocalFileStore` が真実、`LocalKeyValueStore = KeyValueFromFileStore(LocalFileStore)`）。
-   - 共通: 派生側（薄いビュー）に backend 固有ロジックを重複させない。`vacuum` のような片側固有操作だけ薄いビューに
-     足す（[[原則3]] と整合）。read-only backend（HTTP）は write 系が `io.UnsupportedOperation` を投げる（Protocol で
-     read-only を静的に表せない点は M027b の課題）。
+7. **核（真実の実装）は native primitive 側に置く** — 設計原則の**正本はリポジトリの `docs/architecture.md`**
+   （Memory Bank は一時記憶なのでここには要約のみ／正式原則を置かない）。要約: backend ごとに kv 寄り/file 寄りを
+   見極め、逆派生で性能が落ちる方を核に。kv 寄り＝`XFileStore(XKeyValueStore)`（S3=native streaming / NATS・HTTP・dict
+   =buffer 合成）、file 寄り＝`KeyValueFromFileStore(XFileStore)`（Local）。`FileStore = KeyValueStore + IO`。
+   準拠は `manystore.conformance`（メソッド存在チェック）で横断確認。read-only（HTTP）は write 系が
+   `io.UnsupportedOperation`。**詳細・backend 別表・conformance の使い方は `docs/architecture.md` を見ること。**
 
 ## コンポーネント関係 / 重要な実装経路
 
