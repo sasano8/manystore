@@ -177,6 +177,12 @@ dotfiles は `workers_dir: workers` を宣言した **supervisor**（自身も M
 
 ## 直近の変更
 
+- **核を kv/file どちらに寄せるか方針を原則7 に明文化＋HTTP FileStore を完全準拠化（2026-06-23 後続・ユーザー要望/対話）**:
+  ユーザー要望「核を寄せる方針を正式ドキュメント化」→ `systemPatterns.md` **原則7**（核は native primitive 側・逆派生で
+  性能が落ちる方を核に・kv 寄り=`XFileStore(XKeyValueStore)`／file 寄り=`KeyValueFromFileStore`）として正式記述。あわせて
+  M027b の問題を詳説し、**HTTP のみ先行・read-only は実行時 `UnsupportedOperation` 許容**で確定して着手。
+  `HttpFileStore(HttpKeyValueStore)`＝KVS 面継承＋open_reader を whole get の buffer 合成（get_or_raise 再利用で旧 GET 重複
+  解消）。test +1。`make check` 緑（**99 passed, 1 skipped**）。残: Safe/Sync は M027b。
 - **S3/NATS FileStore を完全準拠化＝「寄り」で核を配置（2026-06-23 後続・ユーザー要望/対話）**: ユーザー要望
   「s3/nats を完全準拠に。file 寄り/kv 寄りを意識し、性能が出る方に核の実装を」を実装。**S3=file 寄り**
   （streaming が強み）→ `S3FileStore(S3KeyValueStore)`＝KVS 核（native whole get/put）を継承し、open_reader/

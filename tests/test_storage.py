@@ -935,6 +935,34 @@ def test_http_kvs_get_and_exists() -> None:
     asyncio.run(scenario())
 
 
+def test_http_file_store_is_full_read_only_kvs() -> None:
+    # HttpFileStore = HttpKeyValueStore + read IO。KVS 面（read-only）も持つ完全な FileStore。
+    objects = {"a.txt": b"hello"}
+    store = HttpFileStore(base_url=_HTTP_BASE)
+    store._client = lambda: _FakeHttpClient(objects, _HTTP_BASE)
+
+    async def scenario() -> None:
+        # read IO（whole get の buffer 合成）
+        async with await store.open_reader("a.txt") as f:
+            assert await f.read() == b"hello"
+        with pytest.raises(FileNotFoundError):
+            await store.open_reader("missing")
+        # KVS 面（継承）も使える
+        assert await store.get("a.txt") == b"hello"
+        assert await store.get("missing", b"d") == b"d"
+        assert await store.exists("a.txt") is True
+        # write 系は read-only ＝ io.UnsupportedOperation（型上は存在するが実行時に拒否）
+        for call in (
+            store.put("x", b"v"),
+            store.delete("x"),
+            store.open_writer("x"),
+        ):
+            with pytest.raises(io.UnsupportedOperation):
+                await call
+
+    asyncio.run(scenario())
+
+
 def test_http_kvs_is_read_only() -> None:
     store = HttpKeyValueStore(base_url=_HTTP_BASE)
 

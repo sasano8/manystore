@@ -86,20 +86,17 @@ class HttpKeyValueStore(KeyValueStoreBase, _HttpBase):
         _read_only("mv")
 
 
-class HttpFileStore(_HttpBase):
-    """HTTP 越しの read-only [FileStore]。`open_reader` のみ。`open_writer` は非対応。
+class HttpFileStore(HttpKeyValueStore):
+    """HTTP 越しの read-only な完全 [FileStore]（= [HttpKeyValueStore] ＋ read IO）。
 
-    read は GET で全体を取得してバッファから返す（NATS backend と同じ方式）。真のストリーミングが
-    要るなら将来 httpx の streaming（`client.stream`）で逐次化する余地がある。
+    HTTP は **kv 寄り**（GET=whole get）かつ read-only。KVS 面（get/get_or_raise/exists・
+    write 系は `io.UnsupportedOperation`）は HttpKeyValueStore から継承する。open_reader は
+    **whole get の上に buffer 合成**（[_KvReadFileObject] で get_or_raise を再利用）。
+    open_writer は非対応。真の streaming が要るなら将来 httpx の `client.stream` で逐次化できる。
     """
 
     async def open_reader(self, filename: str) -> FileObject:
-        async with self._client() as client:
-            resp = await client.get(self._url(filename))
-            if resp.status_code == 404:
-                raise FileNotFoundError(filename)
-            resp.raise_for_status()
-            return _KvReadFileObject(resp.content)
+        return _KvReadFileObject(await self.get_or_raise(filename))  # 欠損は FileNotFoundError
 
     async def open_writer(self, filename: str) -> FileObject:
         _read_only("open_writer")
