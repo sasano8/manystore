@@ -55,28 +55,40 @@ Protocol は read-only を静的に表せない。read-only backend（HTTP）は
 
 ## 準拠の確認（conformance）
 
-サードパーティ backend は `manystore.conformance` で横断的に検査できる。2 段階:
+サードパーティ backend は `manystore.conformance` で検査できる。2 段階:
+
+### ① メソッド存在チェック
+
+`typing.get_protocol_members` が返す Protocol メンバが callable な属性として在るかを見る。
+
+```python
+from manystore.conformance import assert_key_value_store, assert_file_store
+assert_key_value_store(MyKeyValueStore())   # KVS のメソッドが揃うか
+assert_file_store(MyFileStore())            # FileStore（= KVS + IO）が揃うか
+```
+
+### ② 挙動契約テスト（`FileStoreTester`・辞書ストアをオラクルに差分比較）
+
+**辞書ストア（`DictFileStore`）を正（オラクル）**とし、同じ操作列を reference（辞書）と target の両方に適用して
+**観測一致を観点ごとに**検証する。段階実行 `run_light` < `run_middle` < `run_heavy` < `run_full`（まず run_light）。
 
 ```python
 import asyncio
-from manystore.conformance import (
-    assert_key_value_store, assert_file_store,            # ① メソッド存在チェック
-    check_key_value_store_contract, check_file_store_contract,  # ② 挙動契約チェック
-)
+from manystore import DictFileStore
+from manystore.conformance import FileStoreTester
 
-def test_my_backend():
-    assert_key_value_store(MyKeyValueStore())             # メソッドが揃うか
-    async def run():
-        async with open_my_store() as store:               # 接続済みの空ストア
-            await check_key_value_store_contract(store)     # 振る舞いが契約どおりか
-    asyncio.run(run())
+def test_my_file_store():
+    tester = FileStoreTester(DictFileStore(), MyFileStore())   # 正=辞書, 対象
+    result = asyncio.run(tester.run_light())                   # open_reader/open_writer/exists
+    assert result["summary"]["failed"] == 0
+    tester.save_json("my_file_store.conformance.json")         # 結果を全保存
 ```
 
-1. **メソッド存在チェック** — `typing.get_protocol_members` が返す Protocol メンバが callable な属性として在るか。
-2. **挙動契約チェック** — 実際に put/get/get_or_raise/exists/list/iter/cp/mv・open_reader/open_writer を叩いて
-   backend 非依存の振る舞い（欠損は None / get_or_raise は FileNotFoundError / 上書き / cp は src 残存 / mv は src 消失 /
-   delete は冪等 / バイナリ・ネストキー安全 / IO ラウンドトリップ）を検証。read-only backend は `writable=False`
-   （書き込みが `io.UnsupportedOperation`）。list/iter は共有 backend を考慮し**部分集合**で確認。
+- **run_light** = open_reader / open_writer / exists（＋欠損）を 8 観点で差分検証。
+- **delete_all** はクリーンな初期状態を作る基盤操作（ジェネシス＝検証困難なので run_light の対象外・使うだけ）。
+- 結果（`result()` / `save_json`）は観点ごとの `op` / `args` / `expected` / `actual` / `passed` を持ち、
+  **将来リプレイ**（保存結果を別実装へ再適用）に使える JSON 構造。
+- `spec`（file 寄り / kv 寄り 等）の出力で**特性表**をまとめる。**自動検出は別タスク（M022 P3・現状 placeholder）**。
 
-`tests/test_e2e_backends.py` は実 backend（local/nats/s3）に対しこの契約スイートを注入して回す（重複を作らない）。
-**シグネチャ検査は未実装**（必要になってから）。
+実 backend（local/nats/s3）の KVS ラウンドトリップは `tests/test_e2e_backends.py`（`make e2e-up`）。
+**run_middle/heavy/full・シグネチャ検査・spec 自動検出は未実装**（M022 P3）。

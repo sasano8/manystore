@@ -27,6 +27,7 @@ import contextlib
 import os
 import socket
 import tempfile
+import uuid
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
@@ -35,7 +36,6 @@ from pathlib import Path
 import pytest
 
 from manystore import ConnectPolicy, connect_key_value_store
-from manystore.conformance import check_key_value_store_contract
 
 S3_HOST, S3_PORT = "localhost", 8333
 NATS_HOST, NATS_PORT = "localhost", 4222
@@ -69,8 +69,25 @@ def _always() -> bool:
     return True
 
 
-# 全 backend 共通の挙動契約は `manystore.conformance.check_key_value_store_contract` を使う
-# （第三者 backend が同じスイートで「IF 準拠か」を証明できる再利用可能スイート。重複を増やさない）。
+async def _crud_roundtrip(store) -> None:
+    """全 backend 共通の CRUD ラウンドトリップ（put→get→exists→list→cp→delete）。"""
+    key = f"e2e/{uuid.uuid4().hex}"
+    payload = b"hello-manystore"
+
+    await store.put(key, payload)
+    assert await store.get(key) == payload
+    assert await store.exists(key) is True
+
+    names = [info["filename"] for info in await store.list(limit=100)]
+    assert key in names
+
+    dst = key + ".cp"
+    await store.cp(key, dst)
+    assert await store.get(dst) == payload
+
+    await store.delete(key)
+    await store.delete(dst)
+    assert await store.exists(key) is False
 
 
 # ── backend ごとの「ストアを開く」context manager（中身は同じテストに注入される） ──
@@ -145,7 +162,7 @@ CASES = [
 
 async def _run(opener: Callable[[], object]) -> None:
     async with opener() as store:
-        await check_key_value_store_contract(store)  # 共通の挙動契約スイート
+        await _crud_roundtrip(store)
 
 
 @pytest.mark.parametrize("case", CASES, ids=[c.id for c in CASES])

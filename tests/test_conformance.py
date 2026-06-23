@@ -1,9 +1,8 @@
-"""横断的な準拠テスト（メソッド存在チェック）。
+"""横断的な準拠テスト。
 
-全 backend が `KeyValueStore` / `FileStore` Protocol のメソッドを揃えているかを 1 か所で確認する。
-挙動の一致（契約スイート）は未実装＝ここは「前提メソッドが在るか」だけを見る。サードパーティ
-backend も `manystore.conformance` の assert_key_value_store / assert_file_store を import すれば
-同じ検査を回せる。
+(1) 全 backend が `KeyValueStore` / `FileStore` Protocol のメソッドを揃えているか（存在チェック）、
+(2) `FileStoreTester` が辞書ストアをオラクルに対象の挙動（run_light）を差分検証できるか、を確認。
+サードパーティ backend も `manystore.conformance` を import すれば同じ検査を回せる。
 """
 
 import asyncio
@@ -23,10 +22,9 @@ from manystore import (
     S3KeyValueStore,
 )
 from manystore.conformance import (
+    FileStoreTester,
     assert_file_store,
     assert_key_value_store,
-    check_file_store_contract,
-    check_key_value_store_contract,
     missing_members,
     required_members,
 )
@@ -75,32 +73,60 @@ def test_file_store_requires_io_on_top_of_kvs() -> None:
     assert fs - kvs == {"open_reader", "open_writer"}
 
 
-# ── 挙動契約（インプロセス backend で実際に叩く） ──
+# ── 挙動契約テストツール（辞書ストアをオラクルに run_light） ──
 
 
-def test_dict_kvs_satisfies_behavior_contract() -> None:
-    asyncio.run(check_key_value_store_contract(DictKeyValueStore()))
+def test_run_light_local_file_store_matches_oracle(tmp_path) -> None:
+    # 辞書ストアを正として LocalFileStore の open_reader/open_writer/exists を差分検証。
+    tester = FileStoreTester(DictFileStore(), LocalFileStore(tmp_path))
+    result = asyncio.run(tester.run_light())
+    assert result["summary"]["failed"] == 0, result["steps"]
+    assert result["summary"]["total"] == 8
+    assert result["target"] == "LocalFileStore"
+    assert result["reference"] == "DictFileStore"
 
 
-def test_dict_file_store_satisfies_behavior_contract() -> None:
-    asyncio.run(check_file_store_contract(DictFileStore()))
+def test_run_light_dict_self_consistent() -> None:
+    # 正=対象=辞書ストアなら全観点一致（ツールの健全性）。
+    tester = FileStoreTester(DictFileStore(), DictFileStore())
+    result = asyncio.run(tester.run_light())
+    assert result["summary"]["failed"] == 0
 
 
-def test_local_kvs_satisfies_behavior_contract(tmp_path) -> None:
-    asyncio.run(check_key_value_store_contract(LocalKeyValueStore(tmp_path)))
+def test_run_light_detects_divergence(tmp_path) -> None:
+    # 壊れた実装（書いても保存されない）は観点が fail する＝ツールが差分を検出する。
+    class _NoopWriter:
+        async def write(self, data):
+            return len(data)
+
+        async def close(self): ...
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *exc): ...
+
+    broken = LocalFileStore(tmp_path)
+
+    async def open_writer(filename):  # 書き込みを握り潰す壊れた open_writer
+        return _NoopWriter()
+
+    broken.open_writer = open_writer
+    tester = FileStoreTester(DictFileStore(), broken)
+    result = asyncio.run(tester.run_light())
+    assert result["summary"]["failed"] > 0  # 書けていない→read/exists がオラクルと食い違う
 
 
-def test_local_file_store_satisfies_behavior_contract(tmp_path) -> None:
-    asyncio.run(check_file_store_contract(LocalFileStore(tmp_path)))
+def test_run_light_saves_json(tmp_path) -> None:
+    import json
 
-
-def test_http_read_only_satisfies_contract() -> None:
-    # read-only backend は writable=False＝write 系が io.UnsupportedOperation を投げることを確認
-    # （ネットワーク不要＝put/delete/cp/mv/open_writer は接続前に拒否する）。
-    asyncio.run(
-        check_key_value_store_contract(HttpKeyValueStore(base_url="http://x"), writable=False)
-    )
-    asyncio.run(check_file_store_contract(HttpFileStore(base_url="http://x"), writable=False))
+    tester = FileStoreTester(DictFileStore(), LocalFileStore(tmp_path))
+    asyncio.run(tester.run_light())
+    out = tmp_path / "result.json"
+    tester.save_json(out)
+    saved = json.loads(out.read_text(encoding="utf-8"))
+    assert saved["steps"][0]["op"] == "exists"  # op/args/expected が残る（リプレイ素材）
+    assert "expected" in saved["steps"][0]
+    assert saved["spec"] == {"leaning": None}
 
 
 def test_conformance_detects_missing_method() -> None:

@@ -175,15 +175,15 @@ dotfiles は `workers_dir: workers` を宣言した **supervisor**（自身も M
 `dotfiles/workers/manystore` → 本 repo の symlink 配下に manystore を worker として束ねる。
 下り（dotfiles→manystore interrupt 投函）／上り（manystore→dotfiles interrupt エスカレ）の双方向運用。
 
-## 直近の変更
-
-- **M022 P2 挙動契約スイートを実装（2026-06-23 後続・ユーザー要望「m022」）**: `manystore/conformance.py` に
-  `check_key_value_store_contract(store, *, writable=True)` / `check_file_store_contract(...)` を追加＝接続済みストアを
-  実際に叩き backend 非依存の振る舞い（欠損 None / get_or_raise FileNotFoundError / get(default) / 上書き / list・iter
-  部分集合 / cp src 残存 / mv src 消失 / delete 冪等 / バイナリ・ネストキー / IO 全体・部分 read）を検証。read-only は
-  `writable=False`。**既存 `test_e2e_backends.py` の `_crud_roundtrip` をこの契約に置換**＝実 backend へ契約注入・重複解消。
-  `tests/test_conformance.py` で Dict/Local（KVS+FileStore）・HTTP read-only を契約検証。docs/architecture.md の
-  conformance 節も 2 段階に更新。`make check` 緑（**108 passed, 1 skipped**）。残: シグネチャ検査／必須 vs optional 境界の精緻化。
+- **M022 を FileStoreTester（オラクル方式）に作り直し＋run_light 実装（2026-06-23 後続・ユーザー要望「m022」/対話）**:
+  ユーザーの「イメージが合わない」指摘で、前段の loose な `check_*_contract` 関数版を**廃止**し、オラクル方式の
+  **`FileStoreTester(reference=DictFileStore, target)`** に作り直した。同一操作列を辞書（正）と対象に適用し観測一致を
+  観点ごとに記録。`run_light`（open_reader/open_writer/exists・8 観点）を実装、`run_middle/heavy/full` は stub。`delete_all`
+  （iter+delete・ジェネシス・light 検証対象外）。結果は `result()`/`save_json`＝`op`/`args`/`expected`/`actual`/`passed`
+  を JSON 保存（**操作ログ＝将来リプレイ素材**・ユーザー選択）。spec（file/kv 寄り）自動検出は placeholder＝**M022b**
+  に起票（特性表用）。`test_e2e_backends.py` は `_crud_roundtrip` に戻した（run_light は FileStore 専用の別レイヤ）。
+  `tests/test_conformance.py` で Local を辞書オラクルに run_light・自己一致・差分検出・JSON 保存を検証。docs/architecture.md
+  conformance 節を FileStoreTester に更新。`make check` 緑（**107 passed, 1 skipped**）。
 - **設計原則の正本を repo へ移設＋適合性ツール（M022 P1）＋dict backend（2026-06-23 後続・ユーザー要望/対話）**:
   ユーザー指摘「正式原則を一時記憶（systemPatterns）に置くのは変／ruff では Protocol 準拠を検査できない／サード
   パーティ backend 用の仕様テスト（まずメソッド存在）が欲しい／辞書 backend が欲しい」に対応。(1) **設計原則の正本を
