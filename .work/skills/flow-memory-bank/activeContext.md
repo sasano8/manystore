@@ -175,6 +175,11 @@ dotfiles は `workers_dir: workers` を宣言した **supervisor**（自身も M
 `dotfiles/workers/manystore` → 本 repo の symlink 配下に manystore を worker として束ねる。
 下り（dotfiles→manystore interrupt 投函）／上り（manystore→dotfiles interrupt エスカレ）の双方向運用。
 
+- **`iter`→`iter_all` 改名＋run_light に iter_all 追加／run 系を外部レポート追記式に（2026-06-23 後続・ユーザー要望/対話）**:
+  (1) コア `iter` を **`iter_all`** に一括改名（list_all は iter_all を呼ぶ形＝整合）。run_light に iter_all(empty/after_write)
+  を追加＝10→**12 観点**。(2) `FileStoreTester` の **run 系（run_light 等）が呼び出し側の「レポート（list）」を受け取り
+  操作順に追記する形**に変更し、**ツールは状態（steps/spec/result/save_json）を保持しない**＝モジュール関数 `save_report(report, path)`
+  で保存。レポートは呼び出し側が所有。テスト/docs/Protocol コメント追従。`make check` 緑（**107 passed, 1 skipped**）。
 - **コア `list`→`list_all` に改名（意味を厳格化）＋run_light に list_all 追加（2026-06-23 後続・ユーザー要望/対話）**:
   ユーザー指摘「list の意味が曖昧（全ファイル平坦 vs 1 階層）」に対応。コアの `list(limit)` を **`list_all(limit)`** に
   一括改名し、**全キーを平坦に列挙（'/' ネストも再帰・1 階層概念は持たない＝KVS はフラット）／limit は安全上限**と

@@ -134,7 +134,7 @@ class LocalFileStore(KeyValueStoreBase):
 
     # ── 名前空間操作（filesystem-native） ──
 
-    async def iter(self) -> AsyncIterator[FileInfo]:
+    async def iter_all(self) -> AsyncIterator[FileInfo]:
         # 再帰列挙（rglob）。キーは self._dir からの相対 posix パスにし、'/' を含む
         # ネストキーも列挙する（s3/nats のフラットキー列挙と規約を揃える）。
         files = sorted(
@@ -146,7 +146,7 @@ class LocalFileStore(KeyValueStoreBase):
             yield FileInfo(filename=f.relative_to(self._dir).as_posix(), size=f.stat().st_size)
 
     async def list_all(self, limit: int = 10) -> list[FileInfo]:
-        return await _take(self.iter(), limit)
+        return await _take(self.iter_all(), limit)
 
     async def exists(self, filename: str) -> bool:
         return (self._dir / filename).is_file()

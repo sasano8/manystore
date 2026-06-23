@@ -1,7 +1,7 @@
 """service — protocol を manystore の [KeyValueStore] へ写す中核（[StorageService]）。
 
 config の各 context を `create_key_value_store` で生成し、[SafeKeyValueStore] で包んで
-（キー検証）保持する。一覧は backend の `iter()` を prefix で絞り込む（`list(limit)` は
+（キー検証）保持する。一覧は backend の `iter_all()` を prefix で絞り込む（`list_all(limit)` は
 prefix を持たないため）。各 context に [PollingWatcher] を 1 本張り、WS 購読へ fan-out する。
 
 HTTP には一切依存しない＝この層だけで単体テストできる。
@@ -96,10 +96,10 @@ class StorageService:
     async def list_entries(
         self, context: str, prefix: str = "", limit: int = 1000
     ) -> list[EntryInfo]:
-        """context 内のエントリを prefix で絞って返す（`iter()` を走査）。"""
+        """context 内のエントリを prefix で絞って返す（`iter_all()` を走査）。"""
         store = self._store(context)
         out: list[EntryInfo] = []
-        async for info in store.iter():
+        async for info in store.iter_all():
             key = info["filename"]
             if prefix and not key.startswith(prefix):
                 continue

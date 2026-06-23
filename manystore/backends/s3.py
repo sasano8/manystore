@@ -66,7 +66,7 @@ class S3KeyValueStore(KeyValueStoreBase, _S3Base):
             async with resp["Body"] as stream:
                 return await stream.read()
 
-    async def iter(self) -> AsyncIterator[FileInfo]:
+    async def iter_all(self) -> AsyncIterator[FileInfo]:
         async with self._session() as client:
             paginator = client.get_paginator("list_objects_v2")
             objects: list[dict] = []
@@ -77,7 +77,7 @@ class S3KeyValueStore(KeyValueStoreBase, _S3Base):
             yield FileInfo(filename=o["Key"], size=o["Size"])
 
     async def list_all(self, limit: int = 10) -> list[FileInfo]:
-        return await _take(self.iter(), limit)
+        return await _take(self.iter_all(), limit)
 
     async def exists(self, key: str) -> bool:
         async with self._session() as client:

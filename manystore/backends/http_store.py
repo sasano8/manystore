@@ -64,7 +64,7 @@ class HttpKeyValueStore(KeyValueStoreBase, _HttpBase):
             resp.raise_for_status()
             return resp.content
 
-    async def iter(self) -> AsyncIterator[FileInfo]:
+    async def iter_all(self) -> AsyncIterator[FileInfo]:
         raise io.UnsupportedOperation("http backend is read-only: list/iter")
         yield  # 未到達（この関数を async generator にするため）
 

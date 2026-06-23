@@ -98,7 +98,7 @@ class RemoteKeyValueStore:
     async def get(self, key: str) -> bytes | None:
         return await self._client.get(self._context, key)
 
-    async def iter(self) -> AsyncIterator[FileInfo]:
+    async def iter_all(self) -> AsyncIterator[FileInfo]:
         for e in await self._client.list_entries(self._context, limit=10_000):
             yield FileInfo(filename=e.key, size=e.size)
 

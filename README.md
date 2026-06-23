@@ -81,7 +81,7 @@ async with connect_key_value_store(
 ```
 
 > **HTTP backend は read-only**: `get` / `exists` と `FileStore.open_reader(...)` のみ。`put` / `delete` /
-> `cp` / `mv` / `list_all` / `iter` / `open_writer` は `io.UnsupportedOperation` を投げる。
+> `cp` / `mv` / `list_all` / `iter_all` / `open_writer` は `io.UnsupportedOperation` を投げる。
 
 接続を挟まず実体を直接作るなら `create_key_value_store(backend, **opts)` も使える。
 

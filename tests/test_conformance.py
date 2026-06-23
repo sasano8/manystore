@@ -27,6 +27,7 @@ from manystore.conformance import (
     assert_key_value_store,
     missing_members,
     required_members,
+    save_report,
 )
 from manystore.kv import KeyValueStore
 
@@ -73,24 +74,26 @@ def test_file_store_requires_io_on_top_of_kvs() -> None:
     assert fs - kvs == {"open_reader", "open_writer"}
 
 
-# ── 挙動契約テストツール（辞書ストアをオラクルに run_light） ──
+# ── 挙動契約テストツール（辞書ストアをオラクルに run_light・report に追記） ──
 
 
 def test_run_light_local_file_store_matches_oracle(tmp_path) -> None:
-    # 辞書ストアを正として LocalFileStore の open_reader/open_writer/exists を差分検証。
+    # 辞書ストアを正に LocalFileStore の IO/exists/list_all/iter_all を差分検証。
     tester = FileStoreTester(DictFileStore(), LocalFileStore(tmp_path))
-    result = asyncio.run(tester.run_light())
-    assert result["summary"]["failed"] == 0, result["steps"]
-    assert result["summary"]["total"] == 10
-    assert result["target"] == "LocalFileStore"
-    assert result["reference"] == "DictFileStore"
+    report: list = []
+    asyncio.run(tester.run_light(report))
+    assert all(s["passed"] for s in report), report
+    assert len(report) == 12  # 観点数
+    aspects = {s["aspect"] for s in report}
+    assert {"list_all:after_write", "iter_all:after_write"} <= aspects
 
 
 def test_run_light_dict_self_consistent() -> None:
     # 正=対象=辞書ストアなら全観点一致（ツールの健全性）。
     tester = FileStoreTester(DictFileStore(), DictFileStore())
-    result = asyncio.run(tester.run_light())
-    assert result["summary"]["failed"] == 0
+    report: list = []
+    asyncio.run(tester.run_light(report))
+    assert all(s["passed"] for s in report)
 
 
 def test_run_light_detects_divergence(tmp_path) -> None:
@@ -112,21 +115,25 @@ def test_run_light_detects_divergence(tmp_path) -> None:
 
     broken.open_writer = open_writer
     tester = FileStoreTester(DictFileStore(), broken)
-    result = asyncio.run(tester.run_light())
-    assert result["summary"]["failed"] > 0  # 書けていない→read/exists がオラクルと食い違う
+    report: list = []
+    asyncio.run(tester.run_light(report))
+    assert any(
+        not s["passed"] for s in report
+    )  # 書けていない→read/exists/list がオラクルと食い違う
 
 
-def test_run_light_saves_json(tmp_path) -> None:
+def test_run_light_report_is_external_and_saves(tmp_path) -> None:
     import json
 
+    # ツールはレポートを保持しない＝呼び出し側の list に操作順で追記される。
     tester = FileStoreTester(DictFileStore(), LocalFileStore(tmp_path))
-    asyncio.run(tester.run_light())
-    out = tmp_path / "result.json"
-    tester.save_json(out)
-    saved = json.loads(out.read_text(encoding="utf-8"))
-    assert saved["steps"][0]["op"] == "exists"  # op/args/expected が残る（リプレイ素材）
-    assert "expected" in saved["steps"][0]
-    assert saved["spec"] == {"leaning": None}
+    report: list = []
+    asyncio.run(tester.run_light(report))
+    assert report[0]["op"] == "exists"  # 操作順・op/args/expected が残る（リプレイ素材）
+    assert "expected" in report[0]
+    out = tmp_path / "report.json"
+    save_report(report, out)
+    assert json.loads(out.read_text(encoding="utf-8"))[0]["aspect"] == "exists:missing"
 
 
 def test_conformance_detects_missing_method() -> None:
@@ -136,6 +143,6 @@ def test_conformance_detects_missing_method() -> None:
 
     missing = missing_members(_Broken(), KeyValueStore)
     assert "get_or_raise" in missing
-    assert "iter" in missing
+    assert "iter_all" in missing
     with pytest.raises(AssertionError):
         assert_key_value_store(_Broken())

@@ -45,8 +45,8 @@ class SafeKeyValueStore(KeyValueStoreBase):
     async def get_or_raise(self, key: str) -> bytes:
         return await self._store.get_or_raise(validate_safe_path(key))
 
-    def iter(self) -> AsyncIterator[FileInfo]:
-        return self._store.iter()
+    def iter_all(self) -> AsyncIterator[FileInfo]:
+        return self._store.iter_all()
 
     async def list_all(self, limit: int = 10) -> list[FileInfo]:
         return await self._store.list_all(limit)

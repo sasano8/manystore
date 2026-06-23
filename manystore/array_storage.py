@@ -72,14 +72,14 @@ class ArrayKeyValueStore(KeyValueStoreBase):
         store, subkey = self._route(key)  # 不明な mount は KeyError（欠損ではない）
         return await store.get_or_raise(subkey)
 
-    async def iter(self) -> AsyncIterator[FileInfo]:
+    async def iter_all(self) -> AsyncIterator[FileInfo]:
         # 各 backend のエントリを論理名で prefix して横断する。
         for name in sorted(self._mounts, reverse=True):
-            async for info in self._mounts[name].iter():
+            async for info in self._mounts[name].iter_all():
                 yield FileInfo(filename=f"{name}/{info['filename']}", size=info["size"])
 
     async def list_all(self, limit: int = 10) -> list[FileInfo]:
-        return await _take(self.iter(), limit)
+        return await _take(self.iter_all(), limit)
 
     async def exists(self, key: str) -> bool:
         # 論理名そのもの（ディレクトリ扱い）はマウントされていれば存在とみなす。
@@ -139,8 +139,8 @@ class DownloadCache(KeyValueStoreBase):
     async def get_or_raise(self, key: str) -> bytes:
         return await self._store.get_or_raise(key)
 
-    def iter(self) -> AsyncIterator[FileInfo]:
-        return self._store.iter()
+    def iter_all(self) -> AsyncIterator[FileInfo]:
+        return self._store.iter_all()
 
     async def list_all(self, limit: int = 10) -> list[FileInfo]:
         return await self._store.list_all(limit)

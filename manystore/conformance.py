@@ -5,25 +5,27 @@
 
 1. **メソッド存在チェック**（`assert_key_value_store` / `assert_file_store`）— Protocol メンバが
    callable な属性として在るか。`typing.get_protocol_members`（継承を含む）が対象。
-2. **挙動契約テスト**（`FileStoreTester`）— **辞書ストアを正（オラクル）**とし、同じ操作列を
-   reference（辞書）と target の両方に適用して観測一致を観点ごとに検証する。結果は JSON 保存でき、
-   将来リプレイ（保存結果を別実装へ再適用）に使える。段階実行 run_light < middle < heavy < full。
+2. **挙動契約テスト**（`FileStoreTester`）— **辞書ストアを正（オラクル）**とし、同じ操作を
+   reference（辞書）と target に適用して観測一致を観点ごとに検証する。run 系に
+   **レポート（list）を渡す**と操作順に結果を追記する（ツールはレポートを保持しない）。
+   `save_report` で JSON 保存でき将来リプレイに使える。段階実行 run_light<middle<heavy<full。
 
-**シグネチャ検査・spec 自動検出（file/kv 寄り）は未実装**（別タスク M022 P3）。
+**シグネチャ検査・spec 自動検出（file/kv 寄り）は未実装**（別タスク M022b）。
 
 使い方（サードパーティ backend のテスト例）::
 
     import asyncio
     from manystore import DictFileStore
-    from manystore.conformance import assert_file_store, FileStoreTester
+    from manystore.conformance import assert_file_store, FileStoreTester, save_report
 
     def test_my_file_store():
         target = MyFileStore()
         assert_file_store(target)                              # メソッドが揃っているか
         tester = FileStoreTester(DictFileStore(), target)     # 正=辞書, 対象=target
-        result = asyncio.run(tester.run_light())              # open_reader/open_writer/exists
-        assert result["summary"]["failed"] == 0
-        tester.save_json("my_file_store.conformance.json")    # 結果を全保存
+        report = []                                            # 呼び出し側がレポートを所有
+        asyncio.run(tester.run_light(report))                 # 操作順に結果を追記
+        assert all(s["passed"] for s in report)
+        save_report(report, "my_file_store.conformance.json") # 全保存
 """
 
 import base64
@@ -111,7 +113,11 @@ async def _op_open_reader_read(store: object, args: dict) -> object:
 
 
 async def _op_list_all(store: object, args: dict) -> object:
-    return await store.list_all(args.get("limit", 1000))  # 全ファイル平坦（filename 列で観測）
+    return await store.list_all(args.get("limit", 1000))  # 全キー平坦（filename 列で観測）
+
+
+async def _op_iter_all(store: object, args: dict) -> object:
+    return [info async for info in store.iter_all()]  # 全キー平坦を materialize して観測
 
 
 _OPS = {
@@ -119,6 +125,7 @@ _OPS = {
     "open_writer_write": _op_open_writer_write,
     "open_reader_read": _op_open_reader_read,
     "list_all": _op_list_all,
+    "iter_all": _op_iter_all,
 }
 
 
@@ -134,89 +141,77 @@ class StepResult:
     passed: bool  # expected == actual
 
 
+def save_report(report: list, path: str | Path) -> None:
+    """run 系が追記したレポート（ステップ列）を JSON ファイルへ保存する（将来リプレイの素材）。"""
+    Path(path).write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
 class FileStoreTester:
     """辞書ストアを**正（オラクル）**とし、対象 [FileStore] の挙動を差分比較するテストツール。
 
-    同じ操作列を reference（辞書）と target に適用し、観測結果が一致するかを観点ごとに記録する。
-    結果は `result()`（dict）/`save_json(path)` で取り出せ、`op`/`args`/`expected` を含むので将来
-    リプレイ（保存結果を別実装へ再適用）に使える。段階実行: `run_light` < `run_middle` < `run_heavy`
-    < `run_full`。**まず `run_light`**＝open_reader / open_writer / exists / list_all を検証する。
+    run 系（run_light 等）に**レポート（list）を渡す**と、同じ操作を reference（辞書）と target に
+    適用し操作順に観測結果（[StepResult] を dict 化）を**追記**する。
+    **ツール自身はレポートを保持しない**（呼び出し側が所有し、`save_report(report, path)` で JSON
+    保存できる。各エントリは `op`/`args`/`expected`/`actual`/`passed` を含み将来リプレイに使える）。
+    段階実行 run_light < middle < heavy < full。**まず run_light**＝
+    open_reader/open_writer/exists/list_all/iter_all を検証する。
 
-    `delete_all` はクリーンな初期状態を作る基盤操作（ジェネシス＝自己循環で検証困難なので
-    run_light の検証対象外。使うだけ）。spec（file/kv 寄り 等）の自動検出は別タスク（placeholder）。
+    `delete_all` はクリーンな初期状態を作る基盤操作（ジェネシス＝検証困難なので light 対象外）。
+    spec（file/kv 寄り 等）の自動検出は別タスク（M022b）。
     """
 
     def __init__(self, reference: object, target: object) -> None:
         self._reference = reference  # 辞書ファイルストア（正）
         self._target = target  # テスト対象ファイルストア
-        self._ns = f"_conformance/{uuid.uuid4().hex}"  # 衝突回避の名前空間
-        self.steps: list[StepResult] = []
-        self.spec: dict = {"leaning": None}  # TODO(M022): file寄り/kv寄りの自動検出は別タスク
 
     async def delete_all(self, store: object) -> None:
         """`store` の全キーを消してクリーンにする（ジェネシス・run_light では検証対象外）。"""
-        keys = [info["filename"] async for info in store.iter()]
+        keys = [info["filename"] async for info in store.iter_all()]
         for key in keys:
             with contextlib.suppress(Exception):
                 await store.delete(key)
 
-    async def _check(self, aspect: str, op: str, args: dict) -> None:
-        """同一操作を reference / target に適用し、観測一致を 1 観点として記録する。"""
+    async def _check(self, report: list, aspect: str, op: str, args: dict) -> None:
+        """同一操作を reference / target に適用し、観測一致を 1 観点として report に追記する。"""
         expected = await _apply(self._reference, op, args)
         actual = await _apply(self._target, op, args)
-        self.steps.append(StepResult(aspect, op, dict(args), expected, actual, expected == actual))
+        step = StepResult(aspect, op, dict(args), expected, actual, expected == actual)
+        report.append(asdict(step))
 
-    async def run_light(self) -> dict:
-        """light ティア: open_reader / open_writer / exists / list_all（＋欠損）を検証する。"""
+    async def run_light(self, report: list) -> None:
+        """light: open_reader/open_writer/exists/list_all/iter_all（欠損含む）を report に追記。"""
         await self.delete_all(self._reference)
         await self.delete_all(self._target)
 
-        key = f"{self._ns}/a"
+        ns = f"_conformance/{uuid.uuid4().hex}"  # 衝突回避の名前空間
+        key = f"{ns}/a"
         payload = base64.b64encode(b"hello\x00\xffworld").decode("ascii")
         v2 = base64.b64encode(b"v2").decode("ascii")
 
-        await self._check("exists:missing", "exists", {"key": key})
-        await self._check("open_reader:missing", "open_reader_read", {"key": key, "n": -1})
-        await self._check("list_all:empty", "list_all", {})  # クリーン後は空
+        await self._check(report, "exists:missing", "exists", {"key": key})
+        await self._check(report, "open_reader:missing", "open_reader_read", {"key": key, "n": -1})
+        await self._check(report, "list_all:empty", "list_all", {})  # クリーン後は空
+        await self._check(report, "iter_all:empty", "iter_all", {})
         await self._check(
-            "open_writer:write", "open_writer_write", {"key": key, "data_b64": payload}
+            report, "open_writer:write", "open_writer_write", {"key": key, "data_b64": payload}
         )
-        await self._check("exists:after_write", "exists", {"key": key})
-        await self._check("list_all:after_write", "list_all", {})  # 書いたキーが全件に現れる
-        await self._check("open_reader:full", "open_reader_read", {"key": key, "n": -1})
-        await self._check("open_reader:partial", "open_reader_read", {"key": key, "n": 5})
+        await self._check(report, "exists:after_write", "exists", {"key": key})
+        await self._check(report, "list_all:after_write", "list_all", {})  # 全件にキーが現れる
+        await self._check(report, "iter_all:after_write", "iter_all", {})
+        await self._check(report, "open_reader:full", "open_reader_read", {"key": key, "n": -1})
+        await self._check(report, "open_reader:partial", "open_reader_read", {"key": key, "n": 5})
         await self._check(
-            "open_writer:overwrite", "open_writer_write", {"key": key, "data_b64": v2}
+            report, "open_writer:overwrite", "open_writer_write", {"key": key, "data_b64": v2}
         )
-        await self._check("open_reader:after_overwrite", "open_reader_read", {"key": key, "n": -1})
-        return self.result()
-
-    async def run_middle(self) -> dict:
-        raise NotImplementedError("run_middle は未実装（M022 P3）")
-
-    async def run_heavy(self) -> dict:
-        raise NotImplementedError("run_heavy は未実装（M022 P3）")
-
-    async def run_full(self) -> dict:
-        raise NotImplementedError("run_full は未実装（M022 P3）")
-
-    def result(self) -> dict:
-        """これまでの観点結果をまとめた JSON 可能な dict（対象のテスト結果）。"""
-        passed = sum(1 for s in self.steps if s.passed)
-        return {
-            "target": type(self._target).__name__,
-            "reference": type(self._reference).__name__,
-            "spec": self.spec,
-            "summary": {
-                "total": len(self.steps),
-                "passed": passed,
-                "failed": len(self.steps) - passed,
-            },
-            "steps": [asdict(s) for s in self.steps],
-        }
-
-    def save_json(self, path: str | Path) -> None:
-        """対象のテスト結果を JSON ファイルへ全て保存する（将来リプレイの素材）。"""
-        Path(path).write_text(
-            json.dumps(self.result(), ensure_ascii=False, indent=2), encoding="utf-8"
+        await self._check(
+            report, "open_reader:after_overwrite", "open_reader_read", {"key": key, "n": -1}
         )
+
+    async def run_middle(self, report: list) -> None:
+        raise NotImplementedError("run_middle は未実装（M022b）")
+
+    async def run_heavy(self, report: list) -> None:
+        raise NotImplementedError("run_heavy は未実装（M022b）")
+
+    async def run_full(self, report: list) -> None:
+        raise NotImplementedError("run_full は未実装（M022b）")

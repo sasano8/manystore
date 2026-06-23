@@ -64,7 +64,7 @@ class NatsObjectKeyValueStore(KeyValueStoreBase, _NatsBase):
             raise FileNotFoundError(key) from e  # 欠損は FileNotFoundError に正規化
         return result.data or b""
 
-    async def iter(self) -> AsyncIterator[FileInfo]:
+    async def iter_all(self) -> AsyncIterator[FileInfo]:
         obs = await self._get_obs()
         try:
             entries = await obs.list()
@@ -76,7 +76,7 @@ class NatsObjectKeyValueStore(KeyValueStoreBase, _NatsBase):
             yield FileInfo(filename=e.name, size=e.size or 0)
 
     async def list_all(self, limit: int = 10) -> list[FileInfo]:
-        return await _take(self.iter(), limit)
+        return await _take(self.iter_all(), limit)
 
     async def exists(self, key: str) -> bool:
         obs = await self._get_obs()

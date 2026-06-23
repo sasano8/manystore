@@ -45,7 +45,7 @@ def test_async_to_sync_kvs_roundtrip(tmp_path: Path) -> None:
         assert store.get("missing.txt") is None
         store.put("b.txt", b"x")
         # iter は async ジェネレータを同期イテレータとして流す（名前降順）。
-        assert [i["filename"] for i in store.iter()] == ["b.txt", "a.txt"]
+        assert [i["filename"] for i in store.iter_all()] == ["b.txt", "a.txt"]
         assert [i["filename"] for i in store.list_all(limit=1)] == ["b.txt"]
         store.delete("a.txt")
         assert store.exists("a.txt") is False
@@ -84,7 +84,7 @@ def test_local_kvs_iter_and_list(tmp_path: Path) -> None:
         for name in ("a", "b", "c"):
             await store.put(name, name.encode())
         # iter は全件を名前降順で yield する。
-        names = [info["filename"] async for info in store.iter()]
+        names = [info["filename"] async for info in store.iter_all()]
         assert names == ["c", "b", "a"]
         # list は iter の先頭 limit 件。
         assert [i["filename"] for i in await store.list_all(limit=2)] == ["c", "b"]
@@ -206,7 +206,7 @@ def test_local_kvs_iter_is_recursive(tmp_path: Path) -> None:
         await store.put("top.txt", b"1")
         await store.put("a/b/c.bin", b"2")
         # iter はサブディレクトリ配下のキーも相対 posix パスで列挙する。
-        names = [info["filename"] async for info in store.iter()]
+        names = [info["filename"] async for info in store.iter_all()]
         assert names == ["top.txt", "a/b/c.bin"]  # 名前降順
 
     asyncio.run(scenario())
@@ -259,7 +259,7 @@ def test_local_file_store_is_full_kvs(tmp_path: Path) -> None:
         assert await fs.get("missing", b"def") == b"def"
         with pytest.raises(FileNotFoundError):
             await fs.get_or_raise("missing")
-        assert [i["filename"] async for i in fs.iter()] == ["a/b.bin"]
+        assert [i["filename"] async for i in fs.iter_all()] == ["a/b.bin"]
         # IO 面: open_reader でも同じ真実が読める
         async with await fs.open_reader("a/b.bin") as r:
             assert await r.read() == b"hello"
@@ -280,7 +280,7 @@ def test_key_value_file_store_is_full_file_store(tmp_path: Path) -> None:
         # KVS 面（下層へ委譲）も使える＝完全な FileStore
         assert await fs.get_or_raise("k.bin") == b"xyz"
         assert await fs.get("missing", b"d") == b"d"
-        assert [i["filename"] async for i in fs.iter()] == ["k.bin"]
+        assert [i["filename"] async for i in fs.iter_all()] == ["k.bin"]
         # 欠損キーの open_reader は FileNotFoundError（get_or_raise 経由）
         with pytest.raises(FileNotFoundError):
             await fs.open_reader("missing")
@@ -297,7 +297,7 @@ def test_key_value_from_file_store_derives_kvs(tmp_path: Path) -> None:
         assert await kv.get("a/b.bin") == b"hello"
         assert await kv.get("missing") is None  # 欠損キーは None（KVS 規約）
         assert await kv.exists("a/b.bin") is True
-        names = [info["filename"] async for info in kv.iter()]
+        names = [info["filename"] async for info in kv.iter_all()]
         assert names == ["a/b.bin"]
         await kv.cp("a/b.bin", "c.bin")
         assert await kv.get("c.bin") == b"hello"
@@ -551,7 +551,7 @@ def test_nats_file_store_is_full_kvs() -> None:
         with pytest.raises(FileNotFoundError):
             await store.get_or_raise("missing")
         assert await store.exists("kv") is True
-        assert [i["filename"] async for i in store.iter()] == ["kv"]
+        assert [i["filename"] async for i in store.iter_all()] == ["kv"]
 
     asyncio.run(scenario())
 
@@ -826,7 +826,7 @@ def test_array_kvs_mount_and_route(tmp_path: Path) -> None:
         assert await arr.exists("nope") is False
         assert arr.mounts() == ["docs", "imgs"]
         # iter は論理名を prefix して全 backend を横断する。
-        names = sorted([i["filename"] async for i in arr.iter()])
+        names = sorted([i["filename"] async for i in arr.iter_all()])
         assert names == ["docs/a.txt", "imgs/p/q.bin"]
         # 未知 mount / 形式不正はエラー。
         with pytest.raises(KeyError):
@@ -978,7 +978,7 @@ def test_http_kvs_is_read_only() -> None:
         with pytest.raises(io.UnsupportedOperation):
             await store.list_all()
         with pytest.raises(io.UnsupportedOperation):
-            async for _ in store.iter():
+            async for _ in store.iter_all():
                 pass
 
     asyncio.run(scenario())

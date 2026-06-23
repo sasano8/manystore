@@ -28,7 +28,7 @@ class Watcher(Protocol):
 async def _snapshot(store: KeyValueStore) -> dict[str, int]:
     """ストアを列挙して `key -> size` のスナップショットを作る。"""
     snap: dict[str, int] = {}
-    async for info in store.iter():
+    async for info in store.iter_all():
         snap[info["filename"]] = info["size"]
     return snap
 

@@ -6,7 +6,7 @@
 ## 2 つのストア抽象と包含関係
 
 ```
-KeyValueStore : put / get / get_or_raise / iter / list_all / exists / delete / cp / mv / connect / aclose
+KeyValueStore : put / get / get_or_raise / iter_all / list_all / exists / delete / cp / mv / connect / aclose
 FileStore     : KeyValueStore を継承 ＋ open_reader / open_writer（ストリーム IO）
 ```
 
@@ -75,22 +75,25 @@ assert_file_store(MyFileStore())            # FileStore（= KVS + IO）が揃う
 ```python
 import asyncio
 from manystore import DictFileStore
-from manystore.conformance import FileStoreTester
+from manystore.conformance import FileStoreTester, save_report
 
 def test_my_file_store():
     tester = FileStoreTester(DictFileStore(), MyFileStore())   # 正=辞書, 対象
-    result = asyncio.run(tester.run_light())                   # open_reader/open_writer/exists
-    assert result["summary"]["failed"] == 0
-    tester.save_json("my_file_store.conformance.json")         # 結果を全保存
+    report = []                                                # 呼び出し側がレポートを所有
+    asyncio.run(tester.run_light(report))                      # 操作順に結果を追記
+    assert all(s["passed"] for s in report)
+    save_report(report, "my_file_store.conformance.json")      # 全保存
 ```
 
-- **run_light** = open_reader / open_writer / exists / **list_all**（＋欠損）を 10 観点で差分検証。
-  `list_all` は**全キーを平坦に**列挙する（'/' を含むネストキーも再帰的に。1 階層だけを返す概念は持たない＝
-  KVS はフラット。`limit` は安全上限）。
+- run 系（`run_light` 等）は**レポート（list）を受け取り操作順に観測結果を追記**する。**ツールはレポートを保持
+  しない**（呼び出し側が所有・`save_report` で保存）。
+- **run_light** = open_reader / open_writer / exists / **list_all** / **iter_all**（＋欠損）を 12 観点で差分検証。
+  `list_all` は **`iter_all` を呼ぶ**形（materialize）。どちらも**全キーを平坦に**列挙する（'/' ネストも再帰的に。
+  1 階層だけを返す概念は持たない＝KVS はフラット。`limit` は安全上限）。
 - **delete_all** はクリーンな初期状態を作る基盤操作（ジェネシス＝検証困難なので run_light の対象外・使うだけ）。
-- 結果（`result()` / `save_json`）は観点ごとの `op` / `args` / `expected` / `actual` / `passed` を持ち、
-  **将来リプレイ**（保存結果を別実装へ再適用）に使える JSON 構造。
-- `spec`（file 寄り / kv 寄り 等）の出力で**特性表**をまとめる。**自動検出は別タスク（M022 P3・現状 placeholder）**。
+- 各エントリは `op` / `args` / `expected` / `actual` / `passed` を持ち、**将来リプレイ**（保存結果を別実装へ
+  再適用）に使える JSON 構造。
+- `spec`（file 寄り / kv 寄り 等）の出力で**特性表**をまとめる。**自動検出は別タスク（M022b）**。
 
 実 backend（local/nats/s3）の KVS ラウンドトリップは `tests/test_e2e_backends.py`（`make e2e-up`）。
 **run_middle/heavy/full・シグネチャ検査・spec 自動検出は未実装**（M022 P3）。

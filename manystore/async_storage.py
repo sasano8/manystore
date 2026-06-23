@@ -31,7 +31,7 @@ class KeyValueStore(Protocol):
     async def put(self, key: str, value: bytes) -> None: ...
     async def get_or_raise(self, key: str) -> bytes: ...
     async def get(self, key: str, default: bytes | None = None) -> bytes | None: ...
-    def iter(self) -> AsyncIterator[FileInfo]: ...
+    def iter_all(self) -> AsyncIterator[FileInfo]: ...
     # list_all は **全キーを平坦に**列挙する（'/' を含むネストキーも再帰的に＝1 階層だけではない）。
     # `limit` は安全のための件数上限。階層の 1 段だけを返す概念は持たない（KVS はフラット）。
     async def list_all(self, limit: int = 10) -> list[FileInfo]: ...
@@ -120,8 +120,8 @@ class FileStore(KeyValueStore, Protocol):
     """[KeyValueStore] にストリーム IO（open_reader/open_writer）を足したストア（バイナリ専用）。
 
     モデル: **FileStore = KeyValueStore + {open_reader, open_writer}**。put/get/get_or_raise・
-    iter/list/exists/delete/cp/mv・connect/aclose は KeyValueStore からそのまま継承（流用）し、
-    FileStore は方向が型に出る IO 2 メソッドだけを足す。逆に言えば **KeyValueStore は FileStore
+    iter_all/list_all/exists/delete/cp/mv・connect/aclose は KeyValueStore からそのまま継承（流用）
+    し、FileStore は方向が型に出る IO 2 メソッドだけを足す。逆に言えば **KeyValueStore は FileStore
     から IO を除いた部分集合**。
 
     - `open_reader(filename)` … 読み取り用（write は `io.UnsupportedOperation`）。
@@ -197,9 +197,10 @@ class KeyValueFileStore(KeyValueStoreBase):
     """[KeyValueStore] を [FileStore] として被せる汎用アダプタ＝**IO の埋め合わせ**。
 
     KVS は FileStore から open_reader/open_writer を除いた部分集合なので、KVS→FileStore は
-    その 2 つを合成すれば済む（put/get/get_or_raise・iter/list/exists/delete/cp/mv・connect/aclose
-    は下層 KVS へそのまま委譲＝流用）。例 `KeyValueFileStore(S3KeyValueStore(...))`＝S3 を FileStore
-    化。合成する IO は真のストリーミングではなく、read=全体取得・write=close で全体 put（メモリに
+    その 2 つを合成すれば済む（put/get/get_or_raise・iter_all/list_all/exists/delete/cp/mv・
+    connect/aclose は下層 KVS へそのまま委譲＝流用）。例 `KeyValueFileStore(S3KeyValueStore(...))`＝
+    S3 を FileStore 化。合成する IO は真のストリーミングではなく、read=全体取得・write=close で
+    全体 put（メモリに
     バッファ）。backend 固有のストリーミング実装は [backends] の各 FileStore を参照。
     """
 
@@ -222,8 +223,8 @@ class KeyValueFileStore(KeyValueStoreBase):
     async def get_or_raise(self, key: str) -> bytes:
         return await self._store.get_or_raise(key)
 
-    def iter(self) -> AsyncIterator[FileInfo]:
-        return self._store.iter()
+    def iter_all(self) -> AsyncIterator[FileInfo]:
+        return self._store.iter_all()
 
     async def list_all(self, limit: int = 10) -> list[FileInfo]:
         return await self._store.list_all(limit)
@@ -268,8 +269,8 @@ class KeyValueFromFileStore(KeyValueStoreBase):
     async def get_or_raise(self, key: str) -> bytes:
         return await self._store.get_or_raise(key)
 
-    def iter(self) -> AsyncIterator[FileInfo]:
-        return self._store.iter()
+    def iter_all(self) -> AsyncIterator[FileInfo]:
+        return self._store.iter_all()
 
     async def list_all(self, limit: int = 10) -> list[FileInfo]:
         return await self._store.list_all(limit)

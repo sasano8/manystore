@@ -39,12 +39,12 @@ class DictKeyValueStore(KeyValueStoreBase):
         except KeyError as e:
             raise FileNotFoundError(key) from e  # 欠損は FileNotFoundError に正規化
 
-    async def iter(self) -> AsyncIterator[FileInfo]:
+    async def iter_all(self) -> AsyncIterator[FileInfo]:
         for key in sorted(self._data, reverse=True):  # 名前降順（他 backend と整合）
             yield FileInfo(filename=key, size=len(self._data[key]))
 
     async def list_all(self, limit: int = 10) -> list[FileInfo]:
-        return await _take(self.iter(), limit)
+        return await _take(self.iter_all(), limit)
 
     async def exists(self, key: str) -> bool:
         return key in self._data

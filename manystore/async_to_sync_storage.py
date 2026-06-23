@@ -35,12 +35,12 @@ class AsyncToSyncKeyValueStore:
     def get(self, key: str, default: bytes | None = None) -> bytes | None:
         return self._run(self._store.get(key, default))
 
-    def iter(self) -> Iterator[FileInfo]:
+    def iter_all(self) -> Iterator[FileInfo]:
         # async イテレータを 1 回のループ実行で全件取得してから同期的に流す。
         # __anext__ を毎回駆動する方式は async ジェネレータの finalize が厄介なため、
         # comprehension で取り切る（async ジェネレータはこの実行内で確実に閉じられる）。
         async def _collect() -> list[FileInfo]:
-            return [info async for info in self._store.iter()]
+            return [info async for info in self._store.iter_all()]
 
         yield from self._run(_collect())
 
