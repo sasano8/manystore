@@ -156,6 +156,13 @@ dotfiles は `workers_dir: workers` を宣言した **supervisor**（自身も M
 
 ## 直近の変更
 
+- **バッファ性方針の確定＋Local KV 派生方向をバックログ起票（2026-06-23・ユーザー要望/対話）**: 対話入力を
+  interrupt（`20260623-local-kv-from-filestore-and-buffer-semantics.md`）へ funnel→トリアージ→archive。(1) 設計方針
+  **「KV=バッファ概念／FileStore=バッファ無し概念。adapter でどちら向きに被せても KV 層でバッファ＝みせかけのストリーム。
+  真にバッファ無しは生ストレージを素通し露出した時だけ。サーバ越しに真の streaming は出せず、真髄はクライアント wrap」**
+  を **systemPatterns 原則6** に昇格。(2) 具体要望「Local の KV を `KeyValueFromFileStore(LocalFileStore)` で派生
+  （メイン実装を LocalFileStore に集約）」を **progress M027（設計先行・相談）** に起票。設計の壁＝FileStore Protocol に
+  list/exists/delete が無く get/put しか派生できない＝doc-first 合意要。
 - **stream インターフェース（第3の族）をバックログ起票（2026-06-23・ユーザー要望/対話）**: storage/kv に加え
   **stream**＝単一ターゲットに接続を張り続け追記/追従するチャネル族（jsonl 追記・NATS トピック=ファイル・MVP=バイト）。
   FileStore で表現できない **tail/subscribe＋継続 append**＝**新コア IF**ゆえ facade では済まず doc-first 合意が要る。
