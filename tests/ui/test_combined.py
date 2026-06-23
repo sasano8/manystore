@@ -3,9 +3,9 @@
 統合アプリ（[create_combined_app]）が 2 系統を 1 プロセス・1 共有 [StorageService] で
 公開することを検証する:
 
-- `/manystore/...` … manystore ネイティブ REST（in-process TestClient で疎通）。
-- `/s3/...`        … S3 互換ゲートウェイ。**実 S3 クライアント（aiobotocore）**を
-  `endpoint_url=<host>/s3` に向け、PUT/GET/HEAD/List/DELETE/multipart を実往復で検証する。
+- `/kv/raw/...`     … manystore ネイティブ REST（buffered・in-process TestClient で疎通）。
+- `/storage/s3/...` … S3 互換ゲートウェイ（streaming）。**実 S3 クライアント（aiobotocore）**を
+  `endpoint_url=<host>/storage/s3` に向け、PUT/GET/HEAD/List/DELETE/multipart を実往復で検証する。
 
 実 S3 クライアントは実ソケットを使うので、in-process ASGI ではなく uvicorn を
 ephemeral port で別スレッド起動する（既存 `test_gateway_s3client.py` と同型の `_ThreadedServer`）。
@@ -43,46 +43,43 @@ def _make_config(tmp_path: Path):
     )
 
 
-# ── /manystore ネイティブ REST 疎通（in-process）──
+# ── /kv/raw ネイティブ REST 疎通（in-process）──
 
 
 def test_manystore_native_rest_roundtrip(tmp_path: Path) -> None:
-    """`/manystore` プレフィクスで manystore ネイティブ REST が疎通する（共有 service）。"""
+    """`/kv/raw` プレフィクスで manystore ネイティブ REST が疎通する（共有 service）。"""
     from fastapi.testclient import TestClient
 
     service = StorageService(_make_config(tmp_path), watch_interval=0.05)
     with TestClient(create_combined_app(service)) as client:
         # contexts 一覧（lifespan で service.connect が一度だけ走っていることの証左）。
-        meta = client.get("/manystore/contexts").json()
+        meta = client.get("/kv/raw/contexts").json()
         assert {c["name"] for c in meta["contexts"]} == {"work", "ro"}
         assert meta["default_context"] == "work"
 
-        # PUT → GET → DELETE が `/manystore` 配下で通る。
-        assert (
-            client.put("/manystore/contexts/work/objects/a/b.txt", content=b"hi").status_code == 204
-        )
-        r = client.get("/manystore/contexts/work/objects/a/b.txt")
+        # PUT → GET → DELETE が `/kv/raw` 配下で通る。
+        assert client.put("/kv/raw/contexts/work/objects/a/b.txt", content=b"hi").status_code == 204
+        r = client.get("/kv/raw/contexts/work/objects/a/b.txt")
         assert r.status_code == 200 and r.content == b"hi"
-        assert client.delete("/manystore/contexts/work/objects/a/b.txt").status_code == 204
-        assert client.get("/manystore/contexts/work/objects/a/b.txt").status_code == 404
+        assert client.delete("/kv/raw/contexts/work/objects/a/b.txt").status_code == 204
+        assert client.get("/kv/raw/contexts/work/objects/a/b.txt").status_code == 404
 
 
 def test_native_and_s3_share_service(tmp_path: Path) -> None:
-    """同一オブジェクトが `/manystore` PUT 後に `/s3` GET でも見える（service 一本化の証左）。"""
+    """`/kv/raw` PUT 後に `/storage/s3` GET でも同じ object が見える（service 一本化）。"""
     from fastapi.testclient import TestClient
 
     service = StorageService(_make_config(tmp_path), watch_interval=0.05)
     with TestClient(create_combined_app(service)) as client:
         assert (
-            client.put("/manystore/contexts/work/objects/shared.txt", content=b"X").status_code
-            == 204
+            client.put("/kv/raw/contexts/work/objects/shared.txt", content=b"X").status_code == 204
         )
-        # S3 側（path-style）から同じ context=bucket / key で取得できる。
-        r = client.get("/s3/work/shared.txt")
+        # storage/s3 側（path-style）から同じ context=bucket / key で取得できる。
+        r = client.get("/storage/s3/work/shared.txt")
         assert r.status_code == 200 and r.content == b"X"
 
 
-# ── /s3 実 S3 クライアント往復 ──
+# ── /storage/s3 実 S3 クライアント往復 ──
 
 
 def _free_port() -> int:
@@ -125,13 +122,13 @@ def combined_endpoint(tmp_path) -> Iterator[str]:
 
 
 def _make_client(endpoint: str):
-    """S3 クライアントは `endpoint_url=<host>/s3` を向ける（統合アプリの S3 プレフィクス）。"""
+    """S3 クライアントは `endpoint_url=<host>/storage/s3` を向ける（統合アプリの S3 prefix）。"""
     from aiobotocore.config import AioConfig
     from aiobotocore.session import get_session
 
     return get_session().create_client(
         "s3",
-        endpoint_url=f"{endpoint}/s3",
+        endpoint_url=f"{endpoint}/storage/s3",
         region_name="us-east-1",
         aws_access_key_id=_ACCESS_KEY,
         aws_secret_access_key=_SECRET_KEY,
@@ -140,7 +137,7 @@ def _make_client(endpoint: str):
 
 
 async def test_combined_s3_client_roundtrip(combined_endpoint: str) -> None:
-    """統合アプリの `/s3` 経由で実 S3 クライアント PUT→GET→HEAD→List→DELETE が往復する。"""
+    """統合 `/storage/s3` 経由で実 S3 クライアント PUT→GET→HEAD→List→DELETE が往復する。"""
     payload = b"hello-via-combined-s3"
     key = "dir/sub/object.bin"
 
@@ -168,7 +165,7 @@ async def test_combined_s3_client_roundtrip(combined_endpoint: str) -> None:
 
 
 async def test_combined_s3_client_multipart_roundtrip(combined_endpoint: str) -> None:
-    """統合アプリの `/s3` 経由で multipart（Create→UploadPart×3→Complete→GET 一致）が往復する。"""
+    """統合 `/storage/s3` 経由で multipart（Create→UploadPart×3→Complete→GET 一致）が往復する。"""
     key = "big/object.bin"
     part1 = b"A" * (1024 * 1024)
     part2 = b"B" * (512 * 1024)

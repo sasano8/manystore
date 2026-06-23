@@ -1,11 +1,13 @@
 """combined — 2 つのフロント（manystore ネイティブ REST と S3 互換）を 1 つの FastAPI
-アプリに束ねる統合エントリポイント（M023）。
+アプリに束ねる統合エントリポイント（M023・名前空間は M025 で再編）。
 
-クライアントから見たパス第一階層で 2 系統を分ける:
+クライアントから見たパス第一階層を **バッファリング性**で分ける（M025）:
 
-- `/manystore/...` → manystore ネイティブ REST/WS（[server] 層）。
-- `/s3/...`        → S3 互換ゲートウェイ（[gateway] 層）。S3 クライアントは
-  `endpoint_url=<host>/s3` を向ければ `/s3/{bucket}/{key}` に解決される（path-style）。
+- `/kv/...`      → バッファする（値まるごと get/put・辞書オブジェクト的）系。
+  - `/kv/raw/...` → manystore ネイティブ REST/WS（[server] 層・生バイト素通し）。
+- `/storage/...` → ストリーミング（バッファしない・ファイルオープン的）系。
+  - `/storage/s3/...` → S3 互換ゲートウェイ（[gateway] 層）。S3 クライアントは
+    `endpoint_url=<host>/storage/s3` を向ければ `/storage/s3/{bucket}/{key}` に解決（path-style）。
 
 設計（要点）:
 - **`include_router(router, prefix=...)` で 1 アプリに束ねる**。`app.mount()` のサブアプリは
@@ -33,9 +35,9 @@ from .server.routes import build_router as build_native_router
 def create_combined_app(service: StorageService):
     """`service` を共有する統合 FastAPI アプリを返す。
 
-    `/manystore` に manystore ネイティブ REST/WS、`/s3` に S3 互換ゲートウェイを
-    マウントする。アプリのライフサイクルで共有 `service` を 1 回だけ
-    `connect()` / `aclose()` する。
+    `/kv/raw` に manystore ネイティブ REST/WS（buffered）、`/storage/s3` に S3 互換
+    ゲートウェイ（streaming）を include する。アプリのライフサイクルで共有 `service` を
+    1 回だけ `connect()` / `aclose()` する。
     """
     from fastapi import FastAPI
 
@@ -50,6 +52,7 @@ def create_combined_app(service: StorageService):
 
     app = FastAPI(title="manystore combined (REST + S3)", lifespan=lifespan)
     # APIRouter を prefix 付きで include（mount ではない＝lifespan は統合アプリが一本化）。
-    app.include_router(build_native_router(service), prefix="/manystore")
-    app.include_router(build_s3_router(service), prefix="/s3")
+    # 第1階層は buffer 性で分ける: /kv=バッファ系・/storage=ストリーミング系（M025）。
+    app.include_router(build_native_router(service), prefix="/kv/raw")
+    app.include_router(build_s3_router(service), prefix="/storage/s3")
     return app

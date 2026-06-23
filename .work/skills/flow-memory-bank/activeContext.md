@@ -2,6 +2,27 @@
 
 ## 現在のフォーカス
 
+**M025 名前空間再編・フェーズ1（移設）完了（2026-06-23・ユーザー要望/対話）。** 統合アプリの HTTP 第1階層を
+**バッファリング性**で再編する設計をユーザーと確定（設計 `m025-namespace-restructure-plan.md`）。軸＝`kv/*`(バッファ・
+辞書的・全体 get/put) / `storage/*`(ストリーミング・ファイルオープン的・ラージ)。S3 は意味的に kv（key→bytes）だが
+ラージ＋multipart で**ファイルオープン寄り**ゆえ storage 側。4 ルート＝`kv/raw`(既存=native 生バイト) / `kv/json`(新規=
+JSON 検証 facade) / `storage/s3`(既存=S3 GW) / `storage/manystore`(新規=FileStore streaming over HTTP)。全て server
+facade 層に閉じる＝**コア IF 不変**。
+
+- **フェーズ1 = 移設（既存 2 ルートの再配置）を実装**。combined アプリの `include_router` prefix を
+  `/manystore`→`/kv/raw`・`/s3`→`/storage/s3` に付け替えただけ（`combined.py`/`__main__.py` docstring・
+  `tests/ui/test_combined.py` の URL・S3 `endpoint_url=<host>/storage/s3`）。native 内部パス（`/contexts/.../objects/...`）
+  は不変＝prefix 付け替えのみ（最小・可逆）。kv が深く s3 がフラットなのは native がリッチなプロトコル（contexts/keys/events）
+  だから（無理に平坦化しない）。
+- **後方互換エイリアスは張らずクリーン移設**（M023 は昨日入ったばかりで未リリース＝外部利用者ゼロ）。standalone
+  （`create_app`/`create_gateway`・`python -m manystore.server`/`.gateway`）は不変＝旧パスが要る人はそちら。
+- **コア IF 不変・新依存ゼロ・テスト数不変**。`make check` 緑（**91 passed, 1 skipped**）。
+- **残**: フェーズ2 `kv/json`（PUT で json 検証→不正 400 / GET は必ず `application/json`・保存方式=素通し vs 正規化 未決）／
+  フェーズ3 `storage/manystore`（FileStore ストリーミング HTTP 公開＝一番重い新規・range/chunked 設計要）／
+  README・examples の起動例パス追従確認。
+
+## （旧フォーカス）
+
 **M023 統合エントリポイント化 実装完了（2026-06-23・supervisor 指示）。** S1/S2 で並存していた 2 アプリ
 （`gateway`=S3 互換 / `server`=manystore native REST）を**単一 FastAPI に束ね**、パス第一階層で
 `/s3`（S3 互換）と `/manystore`（native REST/WS）に分けた。スコープは統合＋テスト追従のみ
@@ -135,6 +156,11 @@ dotfiles は `workers_dir: workers` を宣言した **supervisor**（自身も M
 
 ## 直近の変更
 
+- **M025 名前空間再編フェーズ1（移設）を実装（2026-06-23・ユーザー要望/対話）**: 対話で要望を受け interrupt
+  （`20260623-namespace-restructure-kv-storage.md`）へ funnel→トリアージ→`interrupt/archive/` へ退避。設計を
+  `m025-namespace-restructure-plan.md` に確定（buffer 性で `kv`/`storage` に二分・4 ルート）。フェーズ1＝combined の
+  prefix を `/manystore`→`/kv/raw`・`/s3`→`/storage/s3` に付け替え（上記「現在のフォーカス」）。progress に M025 起票。
+  変更ファイル: `combined.py`・`__main__.py`・`tests/ui/test_combined.py`。`make check` 緑（91/1）。
 - **interrupt 受信箱を取り込み（2026-06-23・M023 着手時）**: 2 件をトリアージ。(1)
   `20260622-stage2-quality-resolved-and-pull-migration.md`（info+low）= quality エスカレ解決の共有は受領（追加作業なし）、
   pull 型移行＋層エイリアス統一の残タスクを **progress.md M024（priority low）**へ起こした。(2)

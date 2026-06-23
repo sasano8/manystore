@@ -1,8 +1,9 @@
 """`python -m manystore --config <toml>` で統合アプリを uvicorn 起動する CLI（M023）。
 
-manystore ネイティブ REST/WS（`/manystore/...`）と S3 互換ゲートウェイ（`/s3/...`）を
-1 つのプロセス・1 つの共有 [StorageService] で公開する。S3 クライアントは
-`endpoint_url=<host>/s3` を向ける（path-style）。
+manystore ネイティブ REST/WS（`/kv/raw/...`＝buffered）と S3 互換ゲートウェイ
+（`/storage/s3/...`＝streaming）を 1 つのプロセス・1 つの共有 [StorageService] で公開する
+（名前空間は M025 で buffer 性ごとに再編）。S3 クライアントは
+`endpoint_url=<host>/storage/s3` を向ける（path-style）。
 
 既定 bind は localhost（127.0.0.1）。S3 側は SigV4 を検証せず gateway 認証へ委ねるため、
 外部公開は明示的に `--host 0.0.0.0` を要求する（フル CRUD / S3 を晒すため自ホストに閉じる）。
