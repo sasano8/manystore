@@ -11,14 +11,22 @@
 from collections.abc import AsyncIterator
 from pathlib import Path
 
-from .async_storage import FileInfo, KeyValueStore, _atomic_write_bytes, _kv_copy, _kv_move, _take
+from .async_storage import (
+    FileInfo,
+    KeyValueStore,
+    KeyValueStoreBase,
+    _atomic_write_bytes,
+    _kv_copy,
+    _kv_move,
+    _take,
+)
 from .safe_path import validate_safe_path
 
 # ダウンロードキャッシュのデフォルト先（ホーム配下）。
 DEFAULT_CACHE_DIR = Path.home() / ".cache" / "manystore"
 
 
-class ArrayKeyValueStore:
+class ArrayKeyValueStore(KeyValueStoreBase):
     """論理名 → [KeyValueStore] のマウント表で複数 backend を束ねる合成 [KeyValueStore]。"""
 
     def __init__(self) -> None:
@@ -60,9 +68,9 @@ class ArrayKeyValueStore:
         store, subkey = self._route(key)
         await store.put(subkey, value)
 
-    async def get(self, key: str) -> bytes | None:
-        store, subkey = self._route(key)
-        return await store.get(subkey)
+    async def get_or_raise(self, key: str) -> bytes:
+        store, subkey = self._route(key)  # 不明な mount は KeyError（欠損ではない）
+        return await store.get_or_raise(subkey)
 
     async def iter(self) -> AsyncIterator[FileInfo]:
         # 各 backend のエントリを論理名で prefix して横断する。
@@ -112,7 +120,7 @@ class ArrayKeyValueStore:
             await store.aclose()
 
 
-class DownloadCache:
+class DownloadCache(KeyValueStoreBase):
     """[KeyValueStore]（典型的には [ArrayKeyValueStore]）を包み、`download` でローカルへ取得する層。
 
     KVS 操作は委譲しつつ、`download(key)` で値をローカルキャッシュへ落としてパスを返す（PyTorch の
@@ -128,8 +136,8 @@ class DownloadCache:
     async def put(self, key: str, value: bytes) -> None:
         await self._store.put(key, value)
 
-    async def get(self, key: str) -> bytes | None:
-        return await self._store.get(key)
+    async def get_or_raise(self, key: str) -> bytes:
+        return await self._store.get_or_raise(key)
 
     def iter(self) -> AsyncIterator[FileInfo]:
         return self._store.iter()
@@ -170,9 +178,7 @@ class DownloadCache:
         dst = self._cache_dir / safe
         if dst.is_file() and not force:
             return dst  # cache hit（存在ベース）
-        data = await self._store.get(key)
-        if data is None:
-            raise FileNotFoundError(key)
+        data = await self._store.get_or_raise(key)  # 上流に無ければ FileNotFoundError
         dst.parent.mkdir(parents=True, exist_ok=True)
         _atomic_write_bytes(dst, data)  # 原子的に書く
         return dst

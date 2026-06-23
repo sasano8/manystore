@@ -29,8 +29,11 @@ class AsyncToSyncKeyValueStore:
     def put(self, key: str, value: bytes) -> None:
         self._run(self._store.put(key, value))
 
-    def get(self, key: str) -> bytes | None:
-        return self._run(self._store.get(key))
+    def get_or_raise(self, key: str) -> bytes:
+        return self._run(self._store.get_or_raise(key))
+
+    def get(self, key: str, default: bytes | None = None) -> bytes | None:
+        return self._run(self._store.get(key, default))
 
     def iter(self) -> Iterator[FileInfo]:
         # async イテレータを 1 回のループ実行で全件取得してから同期的に流す。

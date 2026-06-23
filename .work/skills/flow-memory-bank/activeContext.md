@@ -177,6 +177,18 @@ dotfiles は `workers_dir: workers` を宣言した **supervisor**（自身も M
 
 ## 直近の変更
 
+- **KVS の get を get_or_raise primitive ＋ get(default) に再設計（2026-06-23 後続・ユーザー要望/対話）**:
+  ユーザー要望「get はデフォルト値を取れる／get_or_raise（例外を上げる）を用意し、get は get_or_raise を
+  捕捉する形に」を実装。**共有基底 `KeyValueStoreBase`** を新設し `get(key, default=None)` を get_or_raise から
+  1 か所で実装（欠損は `FileNotFoundError` に正規化＝既存 open_reader/_kv_copy と一貫）。primitive を get_or_raise に
+  反転＝`KeyValueFromFileStore`(Local)・`S3KeyValueStore`・`NatsObjectKeyValueStore`・`HttpKeyValueStore`・
+  `SafeKeyValueStore`・`ArrayKeyValueStore`・`DownloadCache` を基底継承＋get_or_raise 実装に変更（各 backend の
+  try/except 重複を解消）。sync ブリッジ（`AsyncToSyncKeyValueStore`）＋ Protocol（`KeyValueStore`/`SyncKeyValueStore`）も
+  両メソッドに追従。`KeyValueStoreBase` を `manystore.kv` 公開（第三者 backend 実装の足場）。`_KvReadFileObject`/
+  `_KvWriteFileObject` は既に CM 提供済＝get_or_raise の `async with await open_reader` 経路で活用。get_or_raise が
+  下層 open_reader を**コンテキストマネージャ**で開く点も明示。tests +1（get default/get_or_raise）。`make check` 緑
+  （**94 passed, 1 skipped**）。**follow-up**: `RemoteKeyValueStore`(client)・`implement/service.py` は今回スコープ外＝
+  get_or_raise 未実装で Protocol 部分準拠（progress M027b に併記）。
 - **M027 Local KV を FileStore から派生を実装（2026-06-23 後続・ユーザー要望/対話で設計確定）**: 前セッションで
   funnel をすり抜けて未コミットで残っていた `KeyValueFromFileStore`（壊れていた＝委譲先 LocalFileStore に
   iter/list 等が無く AttributeError、type:ignore で隠蔽）を出発点に、対話で設計を確定して完成させた。選択肢(b)

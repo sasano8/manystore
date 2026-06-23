@@ -29,7 +29,8 @@ class FileInfo(TypedDict):
 
 class KeyValueStore(Protocol):
     async def put(self, key: str, value: bytes) -> None: ...
-    async def get(self, key: str) -> bytes | None: ...
+    async def get_or_raise(self, key: str) -> bytes: ...
+    async def get(self, key: str, default: bytes | None = None) -> bytes | None: ...
     def iter(self) -> AsyncIterator[FileInfo]: ...
     async def list(self, limit: int = 10) -> list[FileInfo]: ...
     async def exists(self, key: str) -> bool: ...
@@ -38,6 +39,25 @@ class KeyValueStore(Protocol):
     async def mv(self, src: str, dst: str) -> None: ...
     async def connect(self) -> None: ...
     async def aclose(self) -> None: ...
+
+
+class KeyValueStoreBase:
+    """KVS の `get` 既定実装を与える基底（backend は `get_or_raise` だけ実装すればよい）。
+
+    primitive は **`get_or_raise`**（キーが無ければ `FileNotFoundError` を上げる）。全体取得の
+    `get(key, default=None)` は get_or_raise を捕捉して、欠損時に `default` を返す既定実装を
+    ここで 1 か所だけ提供する（各 backend で try/except を重複させない）。サブクラスは
+    get_or_raise を override する。
+    """
+
+    async def get_or_raise(self, key: str) -> bytes:
+        raise NotImplementedError
+
+    async def get(self, key: str, default: bytes | None = None) -> bytes | None:
+        try:
+            return await self.get_or_raise(key)
+        except FileNotFoundError:
+            return default
 
 
 async def _take(entries: AsyncIterator[FileInfo], limit: int) -> list[FileInfo]:
@@ -199,7 +219,7 @@ class KeyValueFileStore:
         return _KvWriteFileObject(self._store, filename)
 
 
-class KeyValueFromFileStore:
+class KeyValueFromFileStore(KeyValueStoreBase):
     """[FileStore] を [KeyValueStore] として被せる汎用アダプタ（[KeyValueFileStore] の逆向き）。
 
     get/put は下層の `open_reader` / `open_writer` 越しの**全体 read / 全体 write**＝KV 層で
@@ -207,6 +227,10 @@ class KeyValueFromFileStore:
     iter/list/exists/delete/cp/mv は下層 FileStore のメソッドへ**素通し委譲**するので、下層は
     これらを提供している前提（filesystem-native な [backends.LocalFileStore] 等）。純粋に
     `open_reader`/`open_writer` だけの FileStore（S3/NATS/HTTP）に被せた場合は get/put のみ有効。
+
+    get の primitive は `get_or_raise`＝下層 `open_reader`（欠損で `FileNotFoundError`）を
+    コンテキストマネージャで開いて全体 read する。`get(key, default=None)` は基底
+    [KeyValueStoreBase] が get_or_raise を捕捉して与える。
 
     用途: ローカルのように「真実の実装が FileStore 側」にある backend で、KV ビューをそこから
     派生させる（実装の二重持ちを避ける）。
@@ -219,13 +243,9 @@ class KeyValueFromFileStore:
         async with await self._store.open_writer(key) as w:
             await w.write(value)  # close（__aexit__）で確定＝下層の原子性に従う
 
-    async def get(self, key: str) -> bytes | None:
-        try:
-            reader = await self._store.open_reader(key)
-        except FileNotFoundError:
-            return None  # 欠損キーは None（KVS 規約）
-
-        async with reader as r:
+    async def get_or_raise(self, key: str) -> bytes:
+        # 下層 open_reader を CM で開く（欠損なら FileNotFoundError が伝播）。
+        async with await self._store.open_reader(key) as r:
             return await r.read()
 
     def iter(self) -> AsyncIterator[FileInfo]:

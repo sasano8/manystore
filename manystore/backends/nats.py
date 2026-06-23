@@ -7,7 +7,15 @@ import contextlib
 import io
 from collections.abc import AsyncIterator
 
-from ..async_storage import FileInfo, FileObject, _kv_copy, _kv_move, _KvReadFileObject, _take
+from ..async_storage import (
+    FileInfo,
+    FileObject,
+    KeyValueStoreBase,
+    _kv_copy,
+    _kv_move,
+    _KvReadFileObject,
+    _take,
+)
 
 
 class _NatsBase:
@@ -43,18 +51,18 @@ class _NatsBase:
             self._obs = None
 
 
-class NatsObjectKeyValueStore(_NatsBase):
+class NatsObjectKeyValueStore(KeyValueStoreBase, _NatsBase):
     async def put(self, key: str, value: bytes) -> None:
         obs = await self._get_obs()
         await obs.put(key, value)
 
-    async def get(self, key: str) -> bytes | None:
+    async def get_or_raise(self, key: str) -> bytes:
         obs = await self._get_obs()
         try:
             result = await obs.get(key)
-            return result.data
-        except Exception:
-            return None
+        except Exception as e:
+            raise FileNotFoundError(key) from e  # 欠損は FileNotFoundError に正規化
+        return result.data or b""
 
     async def iter(self) -> AsyncIterator[FileInfo]:
         obs = await self._get_obs()

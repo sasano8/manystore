@@ -229,6 +229,24 @@ def test_key_value_file_store_open_over_kvs(tmp_path: Path) -> None:
     asyncio.run(scenario())
 
 
+def test_kvs_get_default_and_get_or_raise(tmp_path: Path) -> None:
+    # get は欠損時にデフォルト値（既定 None）を返し、get_or_raise は FileNotFoundError を上げる。
+    store = LocalKeyValueStore(tmp_path)
+
+    async def scenario() -> None:
+        # 欠損キー
+        assert await store.get("missing") is None  # 既定デフォルト
+        assert await store.get("missing", b"fallback") == b"fallback"  # 明示デフォルト
+        with pytest.raises(FileNotFoundError):
+            await store.get_or_raise("missing")
+        # 存在キーは default を無視して実値を返す（get / get_or_raise とも）。
+        await store.put("k", b"v")
+        assert await store.get("k", b"fallback") == b"v"
+        assert await store.get_or_raise("k") == b"v"
+
+    asyncio.run(scenario())
+
+
 def test_key_value_from_file_store_derives_kvs(tmp_path: Path) -> None:
     # FileStore を KVS として被せる逆向きアダプタ（KeyValueFileStore の対称）。
     # get/put は open_reader/open_writer 越し、名前空間操作は下層 FileStore へ素通し委譲。

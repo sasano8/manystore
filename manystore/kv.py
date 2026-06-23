@@ -5,7 +5,7 @@
 """
 
 from .array_storage import DEFAULT_CACHE_DIR, ArrayKeyValueStore, DownloadCache
-from .async_storage import FileInfo, KeyValueFromFileStore, KeyValueStore
+from .async_storage import FileInfo, KeyValueFromFileStore, KeyValueStore, KeyValueStoreBase
 from .async_to_sync_storage import AsyncToSyncKeyValueStore
 from .backends import (
     HttpKeyValueStore,
@@ -23,6 +23,7 @@ __all__ = [
     "FileInfo",
     # abstraction
     "KeyValueStore",
+    "KeyValueStoreBase",
     # backends
     "LocalKeyValueStore",
     "S3KeyValueStore",

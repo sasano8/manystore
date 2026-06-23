@@ -7,7 +7,7 @@
 
 from collections.abc import AsyncIterator
 
-from .async_storage import FileInfo, FileObject, FileStore, KeyValueStore
+from .async_storage import FileInfo, FileObject, FileStore, KeyValueStore, KeyValueStoreBase
 
 
 class UnsafePathError(ValueError):
@@ -33,7 +33,7 @@ def validate_safe_path(path: str) -> str:
     return path
 
 
-class SafeKeyValueStore:
+class SafeKeyValueStore(KeyValueStoreBase):
     """キーを [validate_safe_path] で検証してから委譲する [KeyValueStore] ラッパ。"""
 
     def __init__(self, store: KeyValueStore) -> None:
@@ -42,8 +42,8 @@ class SafeKeyValueStore:
     async def put(self, key: str, value: bytes) -> None:
         await self._store.put(validate_safe_path(key), value)
 
-    async def get(self, key: str) -> bytes | None:
-        return await self._store.get(validate_safe_path(key))
+    async def get_or_raise(self, key: str) -> bytes:
+        return await self._store.get_or_raise(validate_safe_path(key))
 
     def iter(self) -> AsyncIterator[FileInfo]:
         return self._store.iter()
