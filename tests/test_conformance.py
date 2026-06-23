@@ -88,6 +88,25 @@ def test_run_light_local_file_store_matches_oracle(tmp_path) -> None:
     assert {"list_all:after_write", "iter_all:after_write"} <= aspects
 
 
+def test_run_light_records_state_per_op(tmp_path) -> None:
+    # op 毎に「適用後の状態」（iter_all のファイル名・昇順）が返り値とは別に記録される。
+    tester = FileStoreTester(DictFileStore(), LocalFileStore(tmp_path))
+    report: list = []
+    asyncio.run(tester.run_light(report))
+    by_aspect = {s["aspect"]: s for s in report}
+
+    # 全ステップが状態を持ち、昇順で reference/target 一致。
+    for s in report:
+        assert "expected_state" in s and "actual_state" in s
+        assert s["expected_state"] == sorted(s["expected_state"])  # 昇順
+        assert s["expected_state"] == s["actual_state"]
+
+    # クリーン直後の missing 観点は空状態、書き込み後はキーが状態に現れる（副作用の検証）。
+    assert by_aspect["exists:missing"]["actual_state"] == []
+    written = by_aspect["iter_all:after_write"]["actual_state"]
+    assert len(written) == 1 and written[0].endswith("/a")
+
+
 def test_run_light_dict_self_consistent() -> None:
     # 正=対象=辞書ストアなら全観点一致（ツールの健全性）。
     tester = FileStoreTester(DictFileStore(), DictFileStore())
@@ -131,6 +150,7 @@ def test_run_light_report_is_external_and_saves(tmp_path) -> None:
     asyncio.run(tester.run_light(report))
     assert report[0]["op"] == "exists"  # 操作順・op/args/expected が残る（リプレイ素材）
     assert "expected" in report[0]
+    assert "expected_state" in report[0] and "actual_state" in report[0]  # 状態も保存される
     out = tmp_path / "report.json"
     save_report(report, out)
     assert json.loads(out.read_text(encoding="utf-8"))[0]["aspect"] == "exists:missing"

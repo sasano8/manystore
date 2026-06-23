@@ -2,6 +2,20 @@
 
 ## 現在のフォーカス
 
+**M022 FileStoreTester に op 毎の状態スナップショットを追加（実装完了・2026-06-24・ユーザー要望/対話）。**
+「メソッドが返り値を返すだけでなく、その後ストアがどんな状態になるかの検証が重要」というユーザー指摘に対応。
+`conformance.py` の `_check` が op を reference/target に適用するたびに、**返り値**（expected/actual）に加えて
+**op 適用後の状態**（新 `_state`＝`iter_all` のファイル名一覧・**昇順**）を両ストアで取得し、`StepResult` に
+`expected_state`/`actual_state` を追加。`passed` は**返り値と状態の両方**が一致して初めて真にした（副作用の
+取りこぼし防止）。`save_report` の JSON にも state が乗る＝リプレイ素材が強化。test +1
+（`test_run_light_records_state_per_op`＝全ステップが昇順 state を持ち reference 一致／missing は空状態／
+write 後はキーが state に現れる）。`make check` 緑（**108 passed, 1 skipped**）。
+
+**M028 のスコープをユーザー合意（2026-06-24）**: (1) behavior-preserving リファクタで進める＝はい、
+(2) 動的 mount 公開（M028b）は今回スコープ外＝はい。着手は本タスク（state スナップショット）の後。
+
+## （旧フォーカス）
+
 **M027 Local KV を FileStore から派生（実装完了・2026-06-23 後続・ユーザー要望/対話で設計確定）。**
 M027 の「設計の壁」（FileStore Protocol に list/exists/delete が無く get/put しか派生できない）を、
 ユーザーとの対話で **選択肢(b)＋汎用アダプタ＋Protocol 拡張** に確定し実装した。
@@ -41,6 +55,16 @@ facade 層に閉じる＝**コア IF 不変**。
 - **残**: フェーズ2 `kv/json`（PUT で json 検証→不正 400 / GET は必ず `application/json`・保存方式=素通し vs 正規化 未決）／
   フェーズ3 `storage/manystore`（FileStore ストリーミング HTTP 公開＝一番重い新規・range/chunked 設計要）／
   README・examples の起動例パス追従確認。
+
+## （直近の起票・未着手）
+
+**M028「HTTP の context を ArrayStorage に寄せる」を起票（2026-06-24・ユーザー要望/対話）。** 要望を interrupt へ
+funnel→トリアージ→`interrupt/archive/2026-06-24-expose-arraystorage-as-contexts.md` へ退避。指摘＝HTTP の `contexts` は
+ArrayStorage の第一階層＝`ArrayKeyValueStore` をそのまま公開すればよい。`StorageService` の context 振り分けが
+ArrayStorage の routing/横断列挙/跨ぎ cp/mv を焼き直しているので、composition を ArrayStorage に委譲し
+`array["{ctx}/{key}"]` に合成する behavior-preserving リファクタとして **progress M028（設計先行・相談）**に起票。
+writable ポリシー/watcher/メタ/featured は core を汚さず service 層に残す。動的 mount 公開は **M028b（相談・M011 連動）**に分離。
+設計は `m028-expose-arraystorage-plan.md`。**実装・コミットはせず計画のみ**（指示どおり）。
 
 ## （旧フォーカス）
 

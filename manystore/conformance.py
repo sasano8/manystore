@@ -6,7 +6,8 @@
 1. **メソッド存在チェック**（`assert_key_value_store` / `assert_file_store`）— Protocol メンバが
    callable な属性として在るか。`typing.get_protocol_members`（継承を含む）が対象。
 2. **挙動契約テスト**（`FileStoreTester`）— **辞書ストアを正（オラクル）**とし、同じ操作を
-   reference（辞書）と target に適用して観測一致を観点ごとに検証する。run 系に
+   reference（辞書）と target に適用して観測一致を観点ごとに検証する。各観点は**返り値**だけでなく
+   **op 適用後の状態**（iter_all のファイル名一覧・昇順）も取り、両方の一致を見る。run 系に
    **レポート（list）を渡す**と操作順に結果を追記する（ツールはレポートを保持しない）。
    `save_report` で JSON 保存でき将来リプレイに使える。段階実行 run_light<middle<heavy<full。
 
@@ -120,6 +121,17 @@ async def _op_iter_all(store: object, args: dict) -> object:
     return [info async for info in store.iter_all()]  # 全キー平坦を materialize して観測
 
 
+async def _state(store: object) -> list:
+    """op 適用後の**状態** = `iter_all` で得たファイル名一覧の昇順（JSON 可能）。
+
+    各 op は「返り値」を観測するが、それとは別に「適用後にストアがどんな状態になったか」も
+    重要（例: write が値を返さなくても、その後 iter_all にキーが現れるべき）。返り値の一致だけでは
+    副作用を見落とすので、**op ごとに状態スナップショットを取り**返り値とあわせて検証する。
+    """
+    names = [info["filename"] async for info in store.iter_all()]
+    return sorted(names)
+
+
 _OPS = {
     "exists": _op_exists,
     "open_writer_write": _op_open_writer_write,
@@ -131,14 +143,20 @@ _OPS = {
 
 @dataclass
 class StepResult:
-    """1 観点（操作）の結果。`op`/`args`/`expected` はリプレイにそのまま使える。"""
+    """1 観点（操作）の結果。`op`/`args`/`expected` はリプレイにそのまま使える。
+
+    返り値（`expected`/`actual`）に加え、**op 適用後の状態**（`expected_state`/`actual_state`＝
+    iter_all のファイル名・昇順）も記録する。`passed` は返り値と状態の両方が一致して初めて真。
+    """
 
     aspect: str  # 観点ラベル（例 "exists:missing"）
     op: str  # リプレイ用の操作種別（_OPS のキー）
     args: dict  # リプレイ用の引数（JSON 可能）
-    expected: dict  # オラクル（辞書ストア）の観測
-    actual: dict  # 対象ストアの観測
-    passed: bool  # expected == actual
+    expected: dict  # オラクル（辞書ストア）の返り値観測
+    actual: dict  # 対象ストアの返り値観測
+    expected_state: list  # op 適用後のオラクルの状態（iter_all のファイル名・昇順）
+    actual_state: list  # op 適用後の対象の状態（同上）
+    passed: bool  # expected == actual かつ expected_state == actual_state
 
 
 def save_report(report: list, path: str | Path) -> None:
@@ -152,7 +170,8 @@ class FileStoreTester:
     run 系（run_light 等）に**レポート（list）を渡す**と、同じ操作を reference（辞書）と target に
     適用し操作順に観測結果（[StepResult] を dict 化）を**追記**する。
     **ツール自身はレポートを保持しない**（呼び出し側が所有し、`save_report(report, path)` で JSON
-    保存できる。各エントリは `op`/`args`/`expected`/`actual`/`passed` を含み将来リプレイに使える）。
+    保存できる。各エントリは返り値（`expected`/`actual`）と **op 適用後の状態**
+    （`expected_state`/`actual_state`＝iter_all ファイル名・昇順）を含み将来リプレイに使える）。
     段階実行 run_light < middle < heavy < full。**まず run_light**＝
     open_reader/open_writer/exists/list_all/iter_all を検証する。
 
@@ -172,10 +191,19 @@ class FileStoreTester:
                 await store.delete(key)
 
     async def _check(self, report: list, aspect: str, op: str, args: dict) -> None:
-        """同一操作を reference / target に適用し、観測一致を 1 観点として report に追記する。"""
+        """同一操作を reference / target に適用し、1 観点として report に追記する。
+
+        **返り値の観測**（expected/actual）に加え、**op 適用後の状態**（`_state`＝iter_all の
+        ファイル名昇順）も両ストアで取り、返り値と状態の両方が一致したときだけ `passed` を真にする。
+        """
         expected = await _apply(self._reference, op, args)
         actual = await _apply(self._target, op, args)
-        step = StepResult(aspect, op, dict(args), expected, actual, expected == actual)
+        expected_state = await _state(self._reference)
+        actual_state = await _state(self._target)
+        passed = expected == actual and expected_state == actual_state
+        step = StepResult(
+            aspect, op, dict(args), expected, actual, expected_state, actual_state, passed
+        )
         report.append(asdict(step))
 
     async def run_light(self, report: list) -> None:
