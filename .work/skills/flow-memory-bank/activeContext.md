@@ -156,6 +156,10 @@ dotfiles は `workers_dir: workers` を宣言した **supervisor**（自身も M
 
 ## 直近の変更
 
+- **stream インターフェース（第3の族）をバックログ起票（2026-06-23・ユーザー要望/対話）**: storage/kv に加え
+  **stream**＝単一ターゲットに接続を張り続け追記/追従するチャネル族（jsonl 追記・NATS トピック=ファイル・MVP=バイト）。
+  FileStore で表現できない **tail/subscribe＋継続 append**＝**新コア IF**ゆえ facade では済まず doc-first 合意が要る。
+  interrupt へ funnel→archive、progress に **M026（相談・設計先行）**として起票。
 - **M025 名前空間再編フェーズ1（移設）を実装（2026-06-23・ユーザー要望/対話）**: 対話で要望を受け interrupt
   （`20260623-namespace-restructure-kv-storage.md`）へ funnel→トリアージ→`interrupt/archive/` へ退避。設計を
   `m025-namespace-restructure-plan.md` に確定（buffer 性で `kv`/`storage` に二分・4 ルート）。フェーズ1＝combined の
