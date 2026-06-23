@@ -4,8 +4,10 @@
 
 `manystore/` パッケージ（wheel packages = `["manystore"]`）。主なモジュール：
 
-- `async_storage.py` — 一次実装。抽象（`KeyValueStore` / `FileStore` Protocol）＋共通ヘルパ
-  （`_take` / `_atomic_write_bytes` / `_kv_copy` / `_kv_move`）＋汎用アダプタ `KeyValueFileStore`。
+- `async_storage.py` — 一次実装。抽象（`KeyValueStore` / `FileStore` Protocol）＋基底 `KeyValueStoreBase`
+  （`get(key, default=None)` を `get_or_raise` から与える）＋共通ヘルパ（`_take` / `_atomic_write_bytes` /
+  `_kv_copy` / `_kv_move`）＋2 方向アダプタ `KeyValueFileStore`（KVS→FileStore）/ `KeyValueFromFileStore`
+  （FileStore→KVS）。**`FileStore(KeyValueStore, Protocol)` = KVS + open_reader/open_writer**（原則7）。
 - `sync_storage.py` — 同期 IF（`SyncKeyValueStore` / `SyncFileStore` / `SyncFileObject`）。
 - `async_to_sync_storage.py` — `AsyncToSyncKeyValueStore`（専属ループを `run_until_complete` で駆動する
   ゼロ依存ブリッジ）。
@@ -35,9 +37,11 @@
 - **FileStore はバイナリ専用の方向別 API**：`open(mode)` を廃止し `open_reader(filename)` / `open_writer(filename)`
   に置換（方向が型に出てテスト容易・テキスト符号化は利用側責務）。全 *FileStore・KeyValueFileStore・
   SafeFileStore・SyncFileStore Protocol を更新。HttpFileStore は read-only ＝ `open_writer` は `io.UnsupportedOperation`。
-- **2 ストア抽象**：`KeyValueStore`（put/get/list/exists/delete/cp/mv）と `FileStore`（`open_reader`/`open_writer`→`FileObject`）。
-  backend = `Local` / `S3` / `Nats…`。Local は init で絶対パス固定（cd 非依存）、put は親ディレクトリ作成、
-  list は再帰（rglob、相対 posix キー）で s3/nats のフラットキー規約に整合。
+- **2 ストア抽象は包含関係**：`FileStore = KeyValueStore + {open_reader, open_writer}`（`FileStore(KeyValueStore,
+  Protocol)`）。KVS は FileStore から IO を除いた部分集合。`get` の primitive は `get_or_raise`（欠損は
+  `FileNotFoundError` に正規化）で、`get(key, default=None)` は基底 `KeyValueStoreBase` が捕捉して与える
+  （各 backend は get_or_raise だけ実装）。backend = `Local` / `S3` / `Nats` / `Http`。Local は init で絶対パス固定
+  （cd 非依存）、put は親ディレクトリ作成、list は再帰（rglob、相対 posix キー）で s3/nats のフラットキー規約に整合。
 - **接続ライフサイクル**：init では接続せず `async with`（`connecting`）で接続。`verify` は接続確認の
   ON/OFF、`ConnectPolicy` は retry/timeout/deadline/backoff（プリセット `default()`/`fail_fast()`/`forever()`）。
   1 回の待機は timeout と残り deadline の小さい方で縛る。
@@ -62,6 +66,22 @@
    バッファ層を隠蔽したストレージが真のストリーム性を出せないのは仕方ない。**真の性能はクライアント側でラップして
    得る＝真髄はクライアントプログラムにある**（サーバ越しに無理にストリームを通さない）。これは M026 stream IF の
    設計指針にも効く（HTTP 公開＝buffered 前提、真の streaming は client wrap）。
+
+7. **核（真実の実装）は backend の native primitive 側に置き、他方は薄い派生ビューにする（2026-06-23・ユーザー方針）** —
+   `FileStore = KeyValueStore + IO`（原則 above）を踏まえ、backend ごとに **kv 寄り / file 寄り**を見極め、
+   **逆向きに派生すると性能が落ちる方を核**にする（二重実装しない）。判断と実装の 2 形:
+   - **kv 寄り（核 = KVS）= `XFileStore(XKeyValueStore)`** — backend の native primitive が **whole get/put** の場合。
+     KVS クラスに真実の実装を置き、FileStore は KVS を継承して **IO だけ足す**。足す IO は:
+     - backend が真の streaming を持てば **native streaming**（**S3** = `S3FileStore(S3KeyValueStore)`、open_reader=range
+       body / open_writer=multipart＝大オブジェクトを定メモリ。whole get/put は get_object/put_object のまま native）。
+     - 持たなければ **whole の上に buffer 合成**（**NATS/HTTP**、共有 `_KvReadFileObject`/`_KvWriteFileObject` を流用）。
+     - ※ whole を streaming から逆派生すると小さい値で multipart 過剰＝遅い。だから S3 でも核は KVS（whole）側。
+   - **file 寄り（核 = FileStore）= `XKeyValueStore = KeyValueFromFileStore(XFileStore)`** — native primitive が
+     **stream IO（open/read/write）** の場合。FileStore に真実の実装を置き、KVS は IO を隠した派生ビュー
+     （**Local** = `LocalFileStore` が真実、`LocalKeyValueStore = KeyValueFromFileStore(LocalFileStore)`）。
+   - 共通: 派生側（薄いビュー）に backend 固有ロジックを重複させない。`vacuum` のような片側固有操作だけ薄いビューに
+     足す（[[原則3]] と整合）。read-only backend（HTTP）は write 系が `io.UnsupportedOperation` を投げる（Protocol で
+     read-only を静的に表せない点は M027b の課題）。
 
 ## コンポーネント関係 / 重要な実装経路
 
