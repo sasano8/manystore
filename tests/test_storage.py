@@ -19,6 +19,7 @@ from manystore import (
     HttpFileStore,
     HttpKeyValueStore,
     KeyValueFileStore,
+    KeyValueFromFileStore,
     LocalFileStore,
     LocalKeyValueStore,
     NatsFileStore,
@@ -224,6 +225,44 @@ def test_key_value_file_store_open_over_kvs(tmp_path: Path) -> None:
         # 無いキーの読み取りは FileNotFoundError。
         with pytest.raises(FileNotFoundError):
             await fs.open_reader("missing")
+
+    asyncio.run(scenario())
+
+
+def test_key_value_from_file_store_derives_kvs(tmp_path: Path) -> None:
+    # FileStore を KVS として被せる逆向きアダプタ（KeyValueFileStore の対称）。
+    # get/put は open_reader/open_writer 越し、名前空間操作は下層 FileStore へ素通し委譲。
+    kv = KeyValueFromFileStore(LocalFileStore(tmp_path))
+
+    async def scenario() -> None:
+        await kv.put("a/b.bin", b"hello")  # 親ディレクトリは下層 writer が作る
+        assert await kv.get("a/b.bin") == b"hello"
+        assert await kv.get("missing") is None  # 欠損キーは None（KVS 規約）
+        assert await kv.exists("a/b.bin") is True
+        names = [info["filename"] async for info in kv.iter()]
+        assert names == ["a/b.bin"]
+        await kv.cp("a/b.bin", "c.bin")
+        assert await kv.get("c.bin") == b"hello"
+        await kv.mv("c.bin", "d.bin")
+        assert await kv.exists("c.bin") is False
+        assert await kv.get("d.bin") == b"hello"
+        await kv.delete("a/b.bin")
+        assert await kv.exists("a/b.bin") is False
+
+    asyncio.run(scenario())
+
+
+def test_local_kvs_is_thin_view_over_file_store(tmp_path: Path) -> None:
+    # LocalKeyValueStore は LocalFileStore を被せた薄い KVS ビュー（実装は FileStore 側に集約）。
+    store = LocalKeyValueStore(tmp_path)
+    assert isinstance(store, KeyValueFromFileStore)
+
+    async def scenario() -> None:
+        # KVS 経由の put は、同じ dir の FileStore から open_reader でも読める（同一の真実）。
+        await store.put("shared.bin", b"xyz")
+        fs = LocalFileStore(tmp_path)
+        async with await fs.open_reader("shared.bin") as f:
+            assert await f.read() == b"xyz"
 
     asyncio.run(scenario())
 

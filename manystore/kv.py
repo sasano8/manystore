@@ -5,7 +5,7 @@
 """
 
 from .array_storage import DEFAULT_CACHE_DIR, ArrayKeyValueStore, DownloadCache
-from .async_storage import FileInfo, KeyValueStore
+from .async_storage import FileInfo, KeyValueFromFileStore, KeyValueStore
 from .async_to_sync_storage import AsyncToSyncKeyValueStore
 from .backends import (
     HttpKeyValueStore,
@@ -29,6 +29,8 @@ __all__ = [
     "NatsObjectKeyValueStore",
     "HttpKeyValueStore",
     "create_key_value_store",
+    # FileStore → KVS アダプタ（KeyValueFileStore の逆向き）
+    "KeyValueFromFileStore",
     # sync / bridge
     "SyncKeyValueStore",
     "AsyncToSyncKeyValueStore",

@@ -6,8 +6,8 @@
 
 具体的な backend（Local / S3 / NATS）の実装は [backends] サブパッケージに置く。ここには
 抽象（Protocol）と、backend 横断で使う小さなヘルパ（`_take` / `_atomic_write_bytes` /
-`_kv_copy` / `_kv_move`）、および任意の KVS を FileStore 化する汎用アダプタ [KeyValueFileStore]
-だけを置く。
+`_kv_copy` / `_kv_move`）、および 2 方向の汎用アダプタ（KVS→FileStore の [KeyValueFileStore] /
+FileStore→KVS の [KeyValueFromFileStore]）だけを置く。
 """
 
 import contextlib
@@ -103,10 +103,24 @@ class FileStore(Protocol):
 
     どちらもバイナリ（bytes）だけを扱う。テキストの符号化は利用側の責務にし、ストアは
     バイト列の入出力に専念する（テスト時もモード分岐が無く意図が明確）。
+
+    open_reader/open_writer に加え、ファイル名前空間の操作（iter/list/exists/delete/cp/mv）と
+    ライフサイクル（connect/aclose）も契約に含む。これにより FileStore は「真実の実装」を担え、
+    [KeyValueFromFileStore] で KVS ビューを派生できる（filesystem-native な
+    [backends.LocalFileStore] が代表例）。純粋にストリーム入出力だけの backend（S3/NATS/HTTP）は
+    この名前空間操作を段階的に備える（未実装なら呼び出し時に AttributeError／非対応エラー）。
     """
 
     async def open_reader(self, filename: str) -> FileObject: ...
     async def open_writer(self, filename: str) -> FileObject: ...
+    def iter(self) -> AsyncIterator[FileInfo]: ...
+    async def list(self, limit: int = 10) -> list[FileInfo]: ...
+    async def exists(self, filename: str) -> bool: ...
+    async def delete(self, filename: str) -> None: ...
+    async def cp(self, src: str, dst: str) -> None: ...
+    async def mv(self, src: str, dst: str) -> None: ...
+    async def connect(self) -> None: ...
+    async def aclose(self) -> None: ...
 
 
 # ── KeyValueStore を FileStore として被せる汎用アダプタ ──
@@ -183,3 +197,57 @@ class KeyValueFileStore:
 
     async def open_writer(self, filename: str) -> FileObject:
         return _KvWriteFileObject(self._store, filename)
+
+
+class KeyValueFromFileStore:
+    """[FileStore] を [KeyValueStore] として被せる汎用アダプタ（[KeyValueFileStore] の逆向き）。
+
+    get/put は下層の `open_reader` / `open_writer` 越しの**全体 read / 全体 write**＝KV 層で
+    バッファする（「みせかけのストリーム」。真のストリーム性は下層 FileStore を直接使う）。
+    iter/list/exists/delete/cp/mv は下層 FileStore のメソッドへ**素通し委譲**するので、下層は
+    これらを提供している前提（filesystem-native な [backends.LocalFileStore] 等）。純粋に
+    `open_reader`/`open_writer` だけの FileStore（S3/NATS/HTTP）に被せた場合は get/put のみ有効。
+
+    用途: ローカルのように「真実の実装が FileStore 側」にある backend で、KV ビューをそこから
+    派生させる（実装の二重持ちを避ける）。
+    """
+
+    def __init__(self, store: FileStore) -> None:
+        self._store = store
+
+    async def put(self, key: str, value: bytes) -> None:
+        async with await self._store.open_writer(key) as w:
+            await w.write(value)  # close（__aexit__）で確定＝下層の原子性に従う
+
+    async def get(self, key: str) -> bytes | None:
+        try:
+            reader = await self._store.open_reader(key)
+        except FileNotFoundError:
+            return None  # 欠損キーは None（KVS 規約）
+
+        async with reader as r:
+            return await r.read()
+
+    def iter(self) -> AsyncIterator[FileInfo]:
+        return self._store.iter()
+
+    async def list(self, limit: int = 10) -> list[FileInfo]:
+        return await self._store.list(limit)
+
+    async def exists(self, key: str) -> bool:
+        return await self._store.exists(key)
+
+    async def delete(self, key: str) -> None:
+        await self._store.delete(key)
+
+    async def cp(self, src: str, dst: str) -> None:
+        await self._store.cp(src, dst)
+
+    async def mv(self, src: str, dst: str) -> None:
+        await self._store.mv(src, dst)
+
+    async def connect(self) -> None:
+        await self._store.connect()
+
+    async def aclose(self) -> None:
+        await self._store.aclose()

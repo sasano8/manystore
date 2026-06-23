@@ -2,7 +2,28 @@
 
 ## 現在のフォーカス
 
-**M025 名前空間再編・フェーズ1（移設）完了（2026-06-23・ユーザー要望/対話）。** 統合アプリの HTTP 第1階層を
+**M027 Local KV を FileStore から派生（実装完了・2026-06-23 後続・ユーザー要望/対話で設計確定）。**
+M027 の「設計の壁」（FileStore Protocol に list/exists/delete が無く get/put しか派生できない）を、
+ユーザーとの対話で **選択肢(b)＋汎用アダプタ＋Protocol 拡張** に確定し実装した。
+
+- **真実の実装を `LocalFileStore` に集約**: put/get・iter/list/exists/delete・vacuum・cp/mv を
+  filesystem-native に LocalFileStore へ移設（旧 `LocalKeyValueStore` から）。get は自身の
+  `open_reader` を流用してストリーム入出力の上に全体取得を表現。
+- **`LocalKeyValueStore` は薄いビュー**: `class LocalKeyValueStore(KeyValueFromFileStore)` で
+  `KeyValueFromFileStore(LocalFileStore(dir))` を構成。get/put は下層 open_reader/open_writer 越し、
+  iter/list/exists/delete/cp/mv は素通し委譲。vacuum だけ Local 固有として override（concrete 参照 `_fs`）。
+- **`FileStore` Protocol を拡張**（iter/list/exists/delete/cp/mv/connect/aclose を追加）＝
+  `KeyValueFromFileStore` の `# type: ignore[attr-defined]` を全廃。`KeyValueFromFileStore` を
+  `manystore.kv` から公開（KeyValueFileStore の逆向き）。
+- **テスト +2**（`test_storage.py`）: 汎用アダプタの直接往復（get/put/iter/exists/cp/mv/delete・欠損=None）／
+  LocalKeyValueStore が KeyValueFromFileStore の薄いビューであること（KVS put→FileStore open_reader で同一読取）。
+  既存の Local KVS テスト群は委譲経路をそのまま検証。`make check` 緑（**93 passed, 1 skipped**）。
+- **follow-up（取りこぼし防止）**: FileStore Protocol 拡張で `S3FileStore`/`NatsFileStore`/`HttpFileStore`/
+  `SafeFileStore`/`SyncFileStore` が新メソッド未実装＝**Protocol を部分的にしか満たさない**（CI に型チェッカが
+  無く破綻なし・呼べば AttributeError）。これらに名前空間操作を備える（または narrow Protocol に整理する）のは
+  別タスク＝**progress M027 follow-up** に記載。
+
+**（前サイクル）M025 名前空間再編・フェーズ1（移設）完了（2026-06-23・ユーザー要望/対話）。** 統合アプリの HTTP 第1階層を
 **バッファリング性**で再編する設計をユーザーと確定（設計 `m025-namespace-restructure-plan.md`）。軸＝`kv/*`(バッファ・
 辞書的・全体 get/put) / `storage/*`(ストリーミング・ファイルオープン的・ラージ)。S3 は意味的に kv（key→bytes）だが
 ラージ＋multipart で**ファイルオープン寄り**ゆえ storage 側。4 ルート＝`kv/raw`(既存=native 生バイト) / `kv/json`(新規=
@@ -156,6 +177,13 @@ dotfiles は `workers_dir: workers` を宣言した **supervisor**（自身も M
 
 ## 直近の変更
 
+- **M027 Local KV を FileStore から派生を実装（2026-06-23 後続・ユーザー要望/対話で設計確定）**: 前セッションで
+  funnel をすり抜けて未コミットで残っていた `KeyValueFromFileStore`（壊れていた＝委譲先 LocalFileStore に
+  iter/list 等が無く AttributeError、type:ignore で隠蔽）を出発点に、対話で設計を確定して完成させた。選択肢(b)
+  ＝LocalFileStore を真実の実装にし、LocalKeyValueStore を `KeyValueFromFileStore(LocalFileStore)` の薄いビューに。
+  FileStore Protocol を iter/list/exists/delete/cp/mv/connect/aclose で拡張し type:ignore 全廃。`KeyValueFromFileStore`
+  を `manystore.kv` 公開。変更: `async_storage.py`・`backends/local.py`（全面再構成）・`kv.py`・`tests/test_storage.py`(+2)。
+  `make check` 緑（93/1）。詳細は上記「現在のフォーカス」。
 - **バッファ性方針の確定＋Local KV 派生方向をバックログ起票（2026-06-23・ユーザー要望/対話）**: 対話入力を
   interrupt（`20260623-local-kv-from-filestore-and-buffer-semantics.md`）へ funnel→トリアージ→archive。(1) 設計方針
   **「KV=バッファ概念／FileStore=バッファ無し概念。adapter でどちら向きに被せても KV 層でバッファ＝みせかけのストリーム。
