@@ -177,6 +177,15 @@ dotfiles は `workers_dir: workers` を宣言した **supervisor**（自身も M
 
 ## 直近の変更
 
+- **S3/NATS FileStore を完全準拠化＝「寄り」で核を配置（2026-06-23 後続・ユーザー要望/対話）**: ユーザー要望
+  「s3/nats を完全準拠に。file 寄り/kv 寄りを意識し、性能が出る方に核の実装を」を実装。**S3=file 寄り**
+  （streaming が強み）→ `S3FileStore(S3KeyValueStore)`＝KVS 核（native whole get/put）を継承し、open_reader/
+  open_writer を **native streaming**（range body / multipart）で実装（核を IO 側に）。**NATS=kv 寄り**（whole
+  get/put が native・真の streaming は nats-py のスレッド安全性で deferred）→ `NatsFileStore(NatsObjectKeyValueStore)`
+  ＝KVS 核を継承し IO は **whole の上に buffer 合成**（共有 `_KvReadFileObject`/`_KvWriteFileObject` を流用＝専用
+  `_NatsBufferedWriter` を削除して重複解消）。両者とも `XFileStore(XKeyValueStore)`＝「FileStore = KVS + IO」を継承で
+  表現＝KVS 二重持ちなし。tests +2（fake で KVS 面 put/get/get_or_raise/iter/exists を検証・S3 fake に NoSuchKey 追加）。
+  `make check` 緑（**98 passed, 1 skipped**）。残: HTTP/Safe FileStore は M027b（HTTP は read-only・Safe は委譲設計要）。
 - **Protocol 関係を整理＝FileStore = KeyValueStore + IO（2026-06-23 後続・ユーザー要望/対話）**: ユーザー提案
   「FileStore Protocol に put/get/get_or_raise を含めてよい。KVS は FileStore から open_reader/open_writer を
   除いた部分集合で、それ以外はそのまま流用。KVS→FileStore は IO の埋め合わせ（ラッパ）が要る」を実装。

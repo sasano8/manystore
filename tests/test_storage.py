@@ -366,9 +366,18 @@ class _FakeBody:
     def close(self) -> None:
         self._buf.close()
 
+    async def __aenter__(self) -> _FakeBody:
+        return self
+
+    async def __aexit__(self, *exc: object) -> None:
+        self._buf.close()
+
 
 class _FakeS3:
     """S3FileStore を駆動する最小のインメモリ fake（async client 兼 context manager）。"""
+
+    class exceptions:  # noqa: N801  aiobotocore の client.exceptions.NoSuchKey 形に合わせる
+        class NoSuchKey(Exception): ...
 
     def __init__(self) -> None:
         self.objects: dict[str, bytes] = {}
@@ -402,6 +411,8 @@ class _FakeS3:
         return {}
 
     async def get_object(self, Bucket, Key) -> dict:
+        if Key not in self.objects:
+            raise self.exceptions.NoSuchKey  # 欠損は NoSuchKey（実 client と同形）
         return {"Body": _FakeBody(self.objects[Key])}
 
 
@@ -428,6 +439,25 @@ def test_s3_file_store_streams_multipart_write_and_read() -> None:
         async with await store.open_writer("empty") as f:
             pass
         assert fake.objects["empty"] == b""
+
+    asyncio.run(scenario())
+
+
+def test_s3_file_store_is_full_kvs() -> None:
+    # S3FileStore = S3KeyValueStore + streaming IO。KVS 面（whole get/put）も持つ完全 FileStore。
+    fake = _FakeS3()
+    store = S3FileStore("bucket")
+    store._session = lambda: fake
+
+    async def scenario() -> None:
+        await store.put("kv", b"data")  # 継承 put＝put_object（whole）
+        assert fake.objects["kv"] == b"data"
+        assert await store.get("kv") == b"data"  # 継承 get（whole get_object）
+        assert await store.get_or_raise("kv") == b"data"
+        assert await store.get("missing") is None  # 欠損は default
+        assert await store.get("missing", b"d") == b"d"
+        with pytest.raises(FileNotFoundError):
+            await store.get_or_raise("missing")
 
     asyncio.run(scenario())
 
@@ -502,6 +532,26 @@ def test_nats_file_store_buffered_read_write() -> None:
         # 無いキーは FileNotFoundError。
         with pytest.raises(FileNotFoundError):
             await store.open_reader("missing")
+
+    asyncio.run(scenario())
+
+
+def test_nats_file_store_is_full_kvs() -> None:
+    # NatsFileStore = NatsObjectKeyValueStore + buffer 合成 IO。KVS 面も使える完全な FileStore。
+    store = NatsFileStore("nats://x", "bucket")
+    fake = _FakeNatsObs()
+    _patch_obs(store, fake)
+
+    async def scenario() -> None:
+        await store.put("kv", b"data")  # 継承 put（whole）
+        assert fake.objects["kv"] == b"data"
+        assert await store.get("kv") == b"data"  # 継承 get（whole）
+        assert await store.get_or_raise("kv") == b"data"
+        assert await store.get("missing") is None
+        with pytest.raises(FileNotFoundError):
+            await store.get_or_raise("missing")
+        assert await store.exists("kv") is True
+        assert [i["filename"] async for i in store.iter()] == ["kv"]
 
     asyncio.run(scenario())
 

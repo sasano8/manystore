@@ -4,7 +4,6 @@ nats-py はメソッド内で遅延 import する。FileStore は read=全体取
 """
 
 import contextlib
-import io
 from collections.abc import AsyncIterator
 
 from ..async_storage import (
@@ -14,6 +13,7 @@ from ..async_storage import (
     _kv_copy,
     _kv_move,
     _KvReadFileObject,
+    _KvWriteFileObject,
     _take,
 )
 
@@ -98,59 +98,21 @@ class NatsObjectKeyValueStore(KeyValueStoreBase, _NatsBase):
         await _kv_move(self, src, dst)
 
 
-# ── FileStore（read=全体取得 / write=close で put） ──
+# ── FileStore（= KVS ＋ buffer 合成 IO） ──
 
 
-class _NatsBufferedWriter:
-    """書き込みをバッファし、close 時に `put` する書き込み [FileObject]。
+class NatsFileStore(NatsObjectKeyValueStore):
+    """NATS の完全な [FileStore]（= [NatsObjectKeyValueStore] ＋ buffer 合成 IO）。
 
-    nats-py の put は bytes/readable を受けて wire 上でチャンク化して送る。async の write を
-    そのまま流し込めないので、ここではメモリにバッファして close で一括 put する。
-    """
-
-    def __init__(self, base: _NatsBase, name: str) -> None:
-        self._base = base
-        self._name = name
-        self._buf = io.BytesIO()
-        self._closed = False
-
-    async def read(self, size: int = -1) -> bytes:
-        raise io.UnsupportedOperation("not readable")
-
-    async def write(self, data: bytes) -> int:
-        return self._buf.write(data)
-
-    async def close(self) -> None:
-        if self._closed:
-            return
-        self._closed = True
-        obs = await self._base._get_obs()
-        await obs.put(self._name, self._buf.getvalue())
-        self._buf.close()
-
-    async def __aenter__(self) -> _NatsBufferedWriter:
-        return self
-
-    async def __aexit__(self, *exc: object) -> None:
-        await self.close()
-
-
-class NatsFileStore(_NatsBase):
-    """NATS object store の [FileStore]（read=全体取得 / write=close で put）。
-
-    read は `obs.get(name)` で全体を受け取り（nats-py 自身がチャンクを集約する）バッファから
-    返す。`get(writeinto=...)` による逐次配送は nats-py が writeinto.write を executor スレッドで
-    呼ぶ仕様で、asyncio.Queue 等への受け渡しがスレッド安全でないため採用しない（真の bounded
-    ストリーミングはスレッド安全な受け渡しが要るので deferred）。write はバッファして close で put。
+    NATS Object Store は **kv 寄り**＝whole get/put が native（核は KVS 側）。真の bounded
+    ストリーミングは `get(writeinto=...)` の逐次配送が nats-py 仕様で executor スレッドから呼ばれ、
+    スレッド安全な受け渡しが要るため未採用＝deferred。よって open_reader/open_writer は **whole
+    get/put の上に buffer で被せた擬似ストリーム**（共有の [_KvReadFileObject]/[_KvWriteFileObject]
+    を流用）。KVS 面は継承。
     """
 
     async def open_reader(self, filename: str) -> FileObject:
-        obs = await self._get_obs()
-        try:
-            result = await obs.get(filename)
-        except Exception as e:
-            raise FileNotFoundError(filename) from e
-        return _KvReadFileObject(result.data or b"")
+        return _KvReadFileObject(await self.get_or_raise(filename))  # whole get を buffer 化
 
     async def open_writer(self, filename: str) -> FileObject:
-        return _NatsBufferedWriter(self, filename)
+        return _KvWriteFileObject(self, filename)  # close で whole put

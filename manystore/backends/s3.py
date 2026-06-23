@@ -214,11 +214,14 @@ class _S3MultipartWriter:
         await self.close()
 
 
-class S3FileStore(_S3Base):
-    """S3 の真のストリーミング [FileStore]（read=body 逐次 / write=multipart）。
+class S3FileStore(S3KeyValueStore):
+    """S3 の完全な [FileStore]（= [S3KeyValueStore] ＋ 真のストリーミング IO）。
 
-    全体をメモリに載せる KeyValueFileStore と違い、大きなオブジェクトでも一定メモリで扱える。
-    `part_size` は multipart の 1 パートサイズ（実 S3 は最終パート以外 5MB 以上が必要。既定 8MiB）。
+    S3 は **file 寄り**＝streaming（range body / multipart）が強みなので、open_reader/open_writer を
+    **native streaming** で実装し（核をこちらに置く）、大きなオブジェクトでも一定メモリで扱える。
+    KVS 面（whole get/put・iter/list/exists/delete/cp/mv・connect/aclose）は S3KeyValueStore から
+    継承＝小さい値は get_object/put_object の whole が最適（二重持ちしない）。`part_size` は
+    multipart の 1 パートサイズ（実 S3 は最終パート以外 5MB 以上が必要。既定 8MiB）。
     """
 
     def __init__(
