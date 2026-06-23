@@ -76,7 +76,7 @@ class S3KeyValueStore(KeyValueStoreBase, _S3Base):
         for o in objects:
             yield FileInfo(filename=o["Key"], size=o["Size"])
 
-    async def list(self, limit: int = 10) -> list[FileInfo]:
+    async def list_all(self, limit: int = 10) -> list[FileInfo]:
         return await _take(self.iter(), limit)
 
     async def exists(self, key: str) -> bool:

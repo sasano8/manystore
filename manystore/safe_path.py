@@ -48,8 +48,8 @@ class SafeKeyValueStore(KeyValueStoreBase):
     def iter(self) -> AsyncIterator[FileInfo]:
         return self._store.iter()
 
-    async def list(self, limit: int = 10) -> list[FileInfo]:
-        return await self._store.list(limit)
+    async def list_all(self, limit: int = 10) -> list[FileInfo]:
+        return await self._store.list_all(limit)
 
     async def exists(self, key: str) -> bool:
         return await self._store.exists(validate_safe_path(key))

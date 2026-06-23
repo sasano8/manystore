@@ -81,7 +81,7 @@ def test_run_light_local_file_store_matches_oracle(tmp_path) -> None:
     tester = FileStoreTester(DictFileStore(), LocalFileStore(tmp_path))
     result = asyncio.run(tester.run_light())
     assert result["summary"]["failed"] == 0, result["steps"]
-    assert result["summary"]["total"] == 8
+    assert result["summary"]["total"] == 10
     assert result["target"] == "LocalFileStore"
     assert result["reference"] == "DictFileStore"
 

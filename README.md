@@ -6,7 +6,7 @@
 ## 特徴
 
 - **2 つのストア抽象**（名前空間で分離: `manystore.kv` / `manystore.file`。トップからも再エクスポート）
-  - `KeyValueStore`（`manystore.kv`）— `put` / `get` / `list` / `exists` / `delete` / `cp` / `mv`（バイト列をキーで出し入れ）
+  - `KeyValueStore`（`manystore.kv`）— `put` / `get` / `get_or_raise` / `list_all` / `exists` / `delete` / `cp` / `mv`（バイト列をキーで出し入れ）
   - `FileStore`（`manystore.file`）— `open_reader` / `open_writer` で `FileObject`（ストリーム・**バイナリ専用**）を取得
 - **backend を差し替えるだけ** — `Local` / `S3` / `NATS Object Store` / `HTTP`（read-only）。ラッパは 1 枚に留め、下で backend を入れ替える。
 - **async が一次実装**、sync ブリッジ（`AsyncToSyncKeyValueStore`）も提供。
@@ -35,7 +35,7 @@ async def main():
         await store.put("greeting.txt", b"hello")
         data = await store.get("greeting.txt")        # b"hello"
         print(await store.exists("greeting.txt"))     # True
-        print(await store.list(limit=10))             # [{"filename": "greeting.txt", "size": 5}]
+        print(await store.list_all(limit=10))         # [{"filename": "greeting.txt", "size": 5}]（全キー平坦）
         await store.cp("greeting.txt", "copy.txt")
         await store.delete("greeting.txt")
 
@@ -81,7 +81,7 @@ async with connect_key_value_store(
 ```
 
 > **HTTP backend は read-only**: `get` / `exists` と `FileStore.open_reader(...)` のみ。`put` / `delete` /
-> `cp` / `mv` / `list` / `iter` / `open_writer` は `io.UnsupportedOperation` を投げる。
+> `cp` / `mv` / `list_all` / `iter` / `open_writer` は `io.UnsupportedOperation` を投げる。
 
 接続を挟まず実体を直接作るなら `create_key_value_store(backend, **opts)` も使える。
 

@@ -78,7 +78,7 @@ async def _crud_roundtrip(store) -> None:
     assert await store.get(key) == payload
     assert await store.exists(key) is True
 
-    names = [info["filename"] for info in await store.list(limit=100)]
+    names = [info["filename"] for info in await store.list_all(limit=100)]
     assert key in names
 
     dst = key + ".cp"

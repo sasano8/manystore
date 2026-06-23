@@ -75,7 +75,7 @@ class NatsObjectKeyValueStore(KeyValueStoreBase, _NatsBase):
         for e in entries:
             yield FileInfo(filename=e.name, size=e.size or 0)
 
-    async def list(self, limit: int = 10) -> list[FileInfo]:
+    async def list_all(self, limit: int = 10) -> list[FileInfo]:
         return await _take(self.iter(), limit)
 
     async def exists(self, key: str) -> bool:

@@ -46,7 +46,7 @@ def test_async_to_sync_kvs_roundtrip(tmp_path: Path) -> None:
         store.put("b.txt", b"x")
         # iter は async ジェネレータを同期イテレータとして流す（名前降順）。
         assert [i["filename"] for i in store.iter()] == ["b.txt", "a.txt"]
-        assert [i["filename"] for i in store.list(limit=1)] == ["b.txt"]
+        assert [i["filename"] for i in store.list_all(limit=1)] == ["b.txt"]
         store.delete("a.txt")
         assert store.exists("a.txt") is False
 
@@ -87,7 +87,7 @@ def test_local_kvs_iter_and_list(tmp_path: Path) -> None:
         names = [info["filename"] async for info in store.iter()]
         assert names == ["c", "b", "a"]
         # list は iter の先頭 limit 件。
-        assert [i["filename"] for i in await store.list(limit=2)] == ["c", "b"]
+        assert [i["filename"] for i in await store.list_all(limit=2)] == ["c", "b"]
 
     asyncio.run(scenario())
 
@@ -976,7 +976,7 @@ def test_http_kvs_is_read_only() -> None:
         with pytest.raises(io.UnsupportedOperation):
             await store.mv("a", "b")
         with pytest.raises(io.UnsupportedOperation):
-            await store.list()
+            await store.list_all()
         with pytest.raises(io.UnsupportedOperation):
             async for _ in store.iter():
                 pass

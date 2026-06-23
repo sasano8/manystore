@@ -44,9 +44,9 @@ class AsyncToSyncKeyValueStore:
 
         yield from self._run(_collect())
 
-    def list(self, limit: int = 10) -> list[FileInfo]:
+    def list_all(self, limit: int = 10) -> list[FileInfo]:
         # list は async 側の実装を 1 回のループ実行で取り切る（item 毎の駆動を避ける）。
-        return self._run(self._store.list(limit))
+        return self._run(self._store.list_all(limit))
 
     def exists(self, key: str) -> bool:
         return self._run(self._store.exists(key))

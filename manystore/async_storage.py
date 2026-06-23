@@ -32,7 +32,9 @@ class KeyValueStore(Protocol):
     async def get_or_raise(self, key: str) -> bytes: ...
     async def get(self, key: str, default: bytes | None = None) -> bytes | None: ...
     def iter(self) -> AsyncIterator[FileInfo]: ...
-    async def list(self, limit: int = 10) -> list[FileInfo]: ...
+    # list_all は **全キーを平坦に**列挙する（'/' を含むネストキーも再帰的に＝1 階層だけではない）。
+    # `limit` は安全のための件数上限。階層の 1 段だけを返す概念は持たない（KVS はフラット）。
+    async def list_all(self, limit: int = 10) -> list[FileInfo]: ...
     async def exists(self, key: str) -> bool: ...
     async def delete(self, key: str) -> None: ...
     async def cp(self, src: str, dst: str) -> None: ...
@@ -223,8 +225,8 @@ class KeyValueFileStore(KeyValueStoreBase):
     def iter(self) -> AsyncIterator[FileInfo]:
         return self._store.iter()
 
-    async def list(self, limit: int = 10) -> list[FileInfo]:
-        return await self._store.list(limit)
+    async def list_all(self, limit: int = 10) -> list[FileInfo]:
+        return await self._store.list_all(limit)
 
     async def exists(self, key: str) -> bool:
         return await self._store.exists(key)
@@ -269,8 +271,8 @@ class KeyValueFromFileStore(KeyValueStoreBase):
     def iter(self) -> AsyncIterator[FileInfo]:
         return self._store.iter()
 
-    async def list(self, limit: int = 10) -> list[FileInfo]:
-        return await self._store.list(limit)
+    async def list_all(self, limit: int = 10) -> list[FileInfo]:
+        return await self._store.list_all(limit)
 
     async def exists(self, key: str) -> bool:
         return await self._store.exists(key)

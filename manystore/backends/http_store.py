@@ -68,8 +68,8 @@ class HttpKeyValueStore(KeyValueStoreBase, _HttpBase):
         raise io.UnsupportedOperation("http backend is read-only: list/iter")
         yield  # 未到達（この関数を async generator にするため）
 
-    async def list(self, limit: int = 10) -> list[FileInfo]:
-        _read_only("list")
+    async def list_all(self, limit: int = 10) -> list[FileInfo]:
+        _read_only("list_all")
 
     async def exists(self, key: str) -> bool:
         async with self._client() as client:

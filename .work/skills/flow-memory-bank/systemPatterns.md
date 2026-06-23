@@ -45,7 +45,8 @@
   Protocol)`）。KVS は FileStore から IO を除いた部分集合。`get` の primitive は `get_or_raise`（欠損は
   `FileNotFoundError` に正規化）で、`get(key, default=None)` は基底 `KeyValueStoreBase` が捕捉して与える
   （各 backend は get_or_raise だけ実装）。backend = `Local` / `S3` / `Nats` / `Http`。Local は init で絶対パス固定
-  （cd 非依存）、put は親ディレクトリ作成、list は再帰（rglob、相対 posix キー）で s3/nats のフラットキー規約に整合。
+  （cd 非依存）、put は親ディレクトリ作成、**list_all は全キーを平坦に再帰列挙**（rglob、相対 posix キー・'/' ネストも。
+  1 階層概念は持たず KVS はフラット。limit は安全上限）で s3/nats のフラットキー規約に整合。
 - **接続ライフサイクル**：init では接続せず `async with`（`connecting`）で接続。`verify` は接続確認の
   ON/OFF、`ConnectPolicy` は retry/timeout/deadline/backoff（プリセット `default()`/`fail_fast()`/`forever()`）。
   1 回の待機は timeout と残り deadline の小さい方で縛る。

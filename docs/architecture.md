@@ -6,7 +6,7 @@
 ## 2 つのストア抽象と包含関係
 
 ```
-KeyValueStore : put / get / get_or_raise / iter / list / exists / delete / cp / mv / connect / aclose
+KeyValueStore : put / get / get_or_raise / iter / list_all / exists / delete / cp / mv / connect / aclose
 FileStore     : KeyValueStore を継承 ＋ open_reader / open_writer（ストリーム IO）
 ```
 
@@ -84,7 +84,9 @@ def test_my_file_store():
     tester.save_json("my_file_store.conformance.json")         # 結果を全保存
 ```
 
-- **run_light** = open_reader / open_writer / exists（＋欠損）を 8 観点で差分検証。
+- **run_light** = open_reader / open_writer / exists / **list_all**（＋欠損）を 10 観点で差分検証。
+  `list_all` は**全キーを平坦に**列挙する（'/' を含むネストキーも再帰的に。1 階層だけを返す概念は持たない＝
+  KVS はフラット。`limit` は安全上限）。
 - **delete_all** はクリーンな初期状態を作る基盤操作（ジェネシス＝検証困難なので run_light の対象外・使うだけ）。
 - 結果（`result()` / `save_json`）は観点ごとの `op` / `args` / `expected` / `actual` / `passed` を持ち、
   **将来リプレイ**（保存結果を別実装へ再適用）に使える JSON 構造。

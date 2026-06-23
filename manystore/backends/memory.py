@@ -43,7 +43,7 @@ class DictKeyValueStore(KeyValueStoreBase):
         for key in sorted(self._data, reverse=True):  # 名前降順（他 backend と整合）
             yield FileInfo(filename=key, size=len(self._data[key]))
 
-    async def list(self, limit: int = 10) -> list[FileInfo]:
+    async def list_all(self, limit: int = 10) -> list[FileInfo]:
         return await _take(self.iter(), limit)
 
     async def exists(self, key: str) -> bool:

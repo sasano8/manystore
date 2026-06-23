@@ -145,7 +145,7 @@ class LocalFileStore(KeyValueStoreBase):
         for f in files:
             yield FileInfo(filename=f.relative_to(self._dir).as_posix(), size=f.stat().st_size)
 
-    async def list(self, limit: int = 10) -> list[FileInfo]:
+    async def list_all(self, limit: int = 10) -> list[FileInfo]:
         return await _take(self.iter(), limit)
 
     async def exists(self, filename: str) -> bool:

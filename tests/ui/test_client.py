@@ -32,7 +32,7 @@ async def test_remote_kvs_roundtrip(tmp_path: Path) -> None:
         assert await store.exists("a.txt") is True
 
         await store.put("b.txt", b"world")
-        keys = {i["filename"] for i in await store.list(10)}
+        keys = {i["filename"] for i in await store.list_all(10)}
         assert keys == {"a.txt", "b.txt"}
 
         await store.cp("a.txt", "c.txt")

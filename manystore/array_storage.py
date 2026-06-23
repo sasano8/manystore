@@ -78,7 +78,7 @@ class ArrayKeyValueStore(KeyValueStoreBase):
             async for info in self._mounts[name].iter():
                 yield FileInfo(filename=f"{name}/{info['filename']}", size=info["size"])
 
-    async def list(self, limit: int = 10) -> list[FileInfo]:
+    async def list_all(self, limit: int = 10) -> list[FileInfo]:
         return await _take(self.iter(), limit)
 
     async def exists(self, key: str) -> bool:
@@ -142,8 +142,8 @@ class DownloadCache(KeyValueStoreBase):
     def iter(self) -> AsyncIterator[FileInfo]:
         return self._store.iter()
 
-    async def list(self, limit: int = 10) -> list[FileInfo]:
-        return await self._store.list(limit)
+    async def list_all(self, limit: int = 10) -> list[FileInfo]:
+        return await self._store.list_all(limit)
 
     async def exists(self, key: str) -> bool:
         return await self._store.exists(key)

@@ -175,6 +175,13 @@ dotfiles は `workers_dir: workers` を宣言した **supervisor**（自身も M
 `dotfiles/workers/manystore` → 本 repo の symlink 配下に manystore を worker として束ねる。
 下り（dotfiles→manystore interrupt 投函）／上り（manystore→dotfiles interrupt エスカレ）の双方向運用。
 
+- **コア `list`→`list_all` に改名（意味を厳格化）＋run_light に list_all 追加（2026-06-23 後続・ユーザー要望/対話）**:
+  ユーザー指摘「list の意味が曖昧（全ファイル平坦 vs 1 階層）」に対応。コアの `list(limit)` を **`list_all(limit)`** に
+  一括改名し、**全キーを平坦に列挙（'/' ネストも再帰・1 階層概念は持たない＝KVS はフラット）／limit は安全上限**と
+  Protocol コメントで厳格化。対象＝Protocol(KVS/Sync)・全 backend・ラッパ(Safe/Array/DownloadCache)・bridge・
+  client/remote＋全 call site／テスト（`obs.list()` と `_FakeNatsObs.list` 定義は除外）。`list_entries`(service/UI 層)は
+  別物で無関係。`FileStoreTester.run_light` に `list_all`(empty/after_write) を追加＝8→**10 観点**。README/docs 追従。
+  `make check` 緑（**107 passed, 1 skipped**）。
 - **M022 を FileStoreTester（オラクル方式）に作り直し＋run_light 実装（2026-06-23 後続・ユーザー要望「m022」/対話）**:
   ユーザーの「イメージが合わない」指摘で、前段の loose な `check_*_contract` 関数版を**廃止**し、オラクル方式の
   **`FileStoreTester(reference=DictFileStore, target)`** に作り直した。同一操作列を辞書（正）と対象に適用し観測一致を

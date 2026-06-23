@@ -102,7 +102,7 @@ class RemoteKeyValueStore:
         for e in await self._client.list_entries(self._context, limit=10_000):
             yield FileInfo(filename=e.key, size=e.size)
 
-    async def list(self, limit: int = 10) -> list[FileInfo]:
+    async def list_all(self, limit: int = 10) -> list[FileInfo]:
         entries = await self._client.list_entries(self._context, limit=limit)
         return [FileInfo(filename=e.key, size=e.size) for e in entries]
 

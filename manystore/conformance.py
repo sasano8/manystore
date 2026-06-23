@@ -110,10 +110,15 @@ async def _op_open_reader_read(store: object, args: dict) -> object:
         return await r.read(args.get("n", -1))
 
 
+async def _op_list_all(store: object, args: dict) -> object:
+    return await store.list_all(args.get("limit", 1000))  # 全ファイル平坦（filename 列で観測）
+
+
 _OPS = {
     "exists": _op_exists,
     "open_writer_write": _op_open_writer_write,
     "open_reader_read": _op_open_reader_read,
+    "list_all": _op_list_all,
 }
 
 
@@ -135,7 +140,7 @@ class FileStoreTester:
     同じ操作列を reference（辞書）と target に適用し、観測結果が一致するかを観点ごとに記録する。
     結果は `result()`（dict）/`save_json(path)` で取り出せ、`op`/`args`/`expected` を含むので将来
     リプレイ（保存結果を別実装へ再適用）に使える。段階実行: `run_light` < `run_middle` < `run_heavy`
-    < `run_full`。**まず `run_light`**＝open_reader / open_writer / exists を検証する。
+    < `run_full`。**まず `run_light`**＝open_reader / open_writer / exists / list_all を検証する。
 
     `delete_all` はクリーンな初期状態を作る基盤操作（ジェネシス＝自己循環で検証困難なので
     run_light の検証対象外。使うだけ）。spec（file/kv 寄り 等）の自動検出は別タスク（placeholder）。
@@ -162,7 +167,7 @@ class FileStoreTester:
         self.steps.append(StepResult(aspect, op, dict(args), expected, actual, expected == actual))
 
     async def run_light(self) -> dict:
-        """light ティア: open_reader / open_writer / exists（＋欠損）を検証する。"""
+        """light ティア: open_reader / open_writer / exists / list_all（＋欠損）を検証する。"""
         await self.delete_all(self._reference)
         await self.delete_all(self._target)
 
@@ -172,10 +177,12 @@ class FileStoreTester:
 
         await self._check("exists:missing", "exists", {"key": key})
         await self._check("open_reader:missing", "open_reader_read", {"key": key, "n": -1})
+        await self._check("list_all:empty", "list_all", {})  # クリーン後は空
         await self._check(
             "open_writer:write", "open_writer_write", {"key": key, "data_b64": payload}
         )
         await self._check("exists:after_write", "exists", {"key": key})
+        await self._check("list_all:after_write", "list_all", {})  # 書いたキーが全件に現れる
         await self._check("open_reader:full", "open_reader_read", {"key": key, "n": -1})
         await self._check("open_reader:partial", "open_reader_read", {"key": key, "n": 5})
         await self._check(
