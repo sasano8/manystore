@@ -6,6 +6,8 @@ backend も `manystore.conformance` の assert_key_value_store / assert_file_sto
 同じ検査を回せる。
 """
 
+import asyncio
+
 import pytest
 
 from manystore import (
@@ -23,6 +25,8 @@ from manystore import (
 from manystore.conformance import (
     assert_file_store,
     assert_key_value_store,
+    check_file_store_contract,
+    check_key_value_store_contract,
     missing_members,
     required_members,
 )
@@ -69,6 +73,34 @@ def test_file_store_requires_io_on_top_of_kvs() -> None:
     fs = required_members(FileStore)
     assert kvs <= fs
     assert fs - kvs == {"open_reader", "open_writer"}
+
+
+# ── 挙動契約（インプロセス backend で実際に叩く） ──
+
+
+def test_dict_kvs_satisfies_behavior_contract() -> None:
+    asyncio.run(check_key_value_store_contract(DictKeyValueStore()))
+
+
+def test_dict_file_store_satisfies_behavior_contract() -> None:
+    asyncio.run(check_file_store_contract(DictFileStore()))
+
+
+def test_local_kvs_satisfies_behavior_contract(tmp_path) -> None:
+    asyncio.run(check_key_value_store_contract(LocalKeyValueStore(tmp_path)))
+
+
+def test_local_file_store_satisfies_behavior_contract(tmp_path) -> None:
+    asyncio.run(check_file_store_contract(LocalFileStore(tmp_path)))
+
+
+def test_http_read_only_satisfies_contract() -> None:
+    # read-only backend は writable=False＝write 系が io.UnsupportedOperation を投げることを確認
+    # （ネットワーク不要＝put/delete/cp/mv/open_writer は接続前に拒否する）。
+    asyncio.run(
+        check_key_value_store_contract(HttpKeyValueStore(base_url="http://x"), writable=False)
+    )
+    asyncio.run(check_file_store_contract(HttpFileStore(base_url="http://x"), writable=False))
 
 
 def test_conformance_detects_missing_method() -> None:

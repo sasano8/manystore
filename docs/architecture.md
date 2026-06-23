@@ -55,13 +55,28 @@ Protocol は read-only を静的に表せない。read-only backend（HTTP）は
 
 ## 準拠の確認（conformance）
 
-サードパーティ backend は `manystore.conformance` で横断的に検査できる：
+サードパーティ backend は `manystore.conformance` で横断的に検査できる。2 段階:
 
 ```python
-from manystore.conformance import assert_key_value_store, assert_file_store
-assert_key_value_store(MyKeyValueStore(...))   # KVS のメソッドが揃うか
-assert_file_store(MyFileStore(...))            # FileStore（= KVS + IO）が揃うか
+import asyncio
+from manystore.conformance import (
+    assert_key_value_store, assert_file_store,            # ① メソッド存在チェック
+    check_key_value_store_contract, check_file_store_contract,  # ② 挙動契約チェック
+)
+
+def test_my_backend():
+    assert_key_value_store(MyKeyValueStore())             # メソッドが揃うか
+    async def run():
+        async with open_my_store() as store:               # 接続済みの空ストア
+            await check_key_value_store_contract(store)     # 振る舞いが契約どおりか
+    asyncio.run(run())
 ```
 
-**現状はメソッド存在チェックのみ**（`typing.get_protocol_members` が返す Protocol メンバが callable な属性として
-在るか）。シグネチャ・挙動の一致（契約スイート）は開発途上のため未実装＝必要になってから足す。
+1. **メソッド存在チェック** — `typing.get_protocol_members` が返す Protocol メンバが callable な属性として在るか。
+2. **挙動契約チェック** — 実際に put/get/get_or_raise/exists/list/iter/cp/mv・open_reader/open_writer を叩いて
+   backend 非依存の振る舞い（欠損は None / get_or_raise は FileNotFoundError / 上書き / cp は src 残存 / mv は src 消失 /
+   delete は冪等 / バイナリ・ネストキー安全 / IO ラウンドトリップ）を検証。read-only backend は `writable=False`
+   （書き込みが `io.UnsupportedOperation`）。list/iter は共有 backend を考慮し**部分集合**で確認。
+
+`tests/test_e2e_backends.py` は実 backend（local/nats/s3）に対しこの契約スイートを注入して回す（重複を作らない）。
+**シグネチャ検査は未実装**（必要になってから）。
