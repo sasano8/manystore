@@ -2,6 +2,22 @@
 
 ## 現在のフォーカス
 
+**HTTP addressing 再設計（M025改）＋ prefix capability（M030）を設計確定・起票（2026-06-24・ユーザー要望/対話・doc-first）。**
+M028（context=ArrayStorage 第一階層）を受けて HTTP 面を簡素化する方針を対話で確定。**実装は次サイクル**（今回は計画のみ）。
+
+- **addressing（M025改）**: `contexts/{ctx}/objects/{key}` → **`NS/{bucket}/{path}`**（先頭=bucket=ArrayStorage
+  第一階層、後続は不透明 `{path}`、`contexts`/`objects`/`keys` 飾り廃止、表層語を bucket に統一）。コレクション判別＝
+  空パス=一覧/非空=オブジェクト（prefix 廃止で末尾スラッシュ規則不要）。WS は同パス `WS NS/{bucket}/` を upgrade で判別。
+- **prefix を capability に移設（M030）**: native HTTP から prefix 撤去（フラット list-all）。prefix は
+  `SupportsPrefixListing`（`iter_prefix`）＋汎用フォールバックヘルパに移設＝S3 ネイティブ（list_objects_v2 Prefix）/
+  他は総なめ。`Safe`/`Array` ラッパーが委譲して native 効率を通す（**M027b と同じ伝播**）。S3 GW ListObjectsV2・
+  multipart 内部をこのヘルパ経由に。prefix は NATS 由来ではない（汎用 startswith）と判明。
+- 破壊的変更（未リリース＝互換エイリアス無し）。設計は `m025-namespace-restructure-plan.md`（改訂版）。
+- **未決**: M025改 と M030 の着手順（capability 先 or 同時に切る）／`GET NS/` に featured/default を載せるか／
+  フェーズ3 storage/manystore のストリーミング詳細／UI フラット化に伴う大規模 bucket の遅延ロード喪失。
+
+## （旧フォーカス）
+
 **G1 配布前提を整備（M005/M006/M008 完了・M007 見送り・2026-06-24・ユーザー要望）。** 配布できる状態に。
 
 - **M005**: 未使用依存 `redis` を `pyproject` から削除（import ゼロ＝juice 残骸）＋`uv lock`（Removed redis v8.0.0）。

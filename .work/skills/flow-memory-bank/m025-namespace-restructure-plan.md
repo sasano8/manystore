@@ -1,71 +1,89 @@
-# M025 名前空間再編: kv（buffered）/ storage（streaming）
+# M025 名前空間再編: kv（buffered）/ storage（streaming）＋ bucket/path addressing
 
-統合エントリポイント（M023）の HTTP 面を **バッファリング性**を第1軸に再編する計画。
-対話で確定した設計（2026-06-23）。
+統合エントリポイント（M023）の HTTP 面を **(A) バッファリング性**で名前空間に分け、
+**(B) bucket/path で ArrayStorage をそのまま公開**する計画。対話で確定（2026-06-23 初版 → 2026-06-24 改訂）。
 
-## 設計の核（なぜこの軸か）
+> **2026-06-24 改訂の要点**: フェーズ1（移設）は実装済。その後 M028 で context=ArrayStorage 第一階層に
+> したのを受け、addressing を `contexts/{ctx}/objects/{key}` → **`{bucket}/{path}`** に簡素化し、
+> **prefix を native API から撤去して backend/ラッパーの capability に移設**する方針を追記。
 
-manystore のコア抽象は 2 つ:
+## 設計の核
 
-- `KeyValueStore`（put/get/list…）= 値まるごと get/put＝**バッファ**。辞書オブジェクト的。
-- `FileStore`（open_reader/open_writer→FileObject）= **ストリーミング**。ファイルオープン的。
+### (A) 名前空間 = 転送セマンティクス（buffer vs stream）
 
-現状の `/manystore` ネイティブ REST は **KeyValueStore に 1:1 の薄い HTTP アダプタ**で、
-object の GET/PUT は **生バイトを素通し**（`application/octet-stream`、値の中身は解釈しない）、
-一覧/contexts/イベントだけ dataclass→JSON。＝実質すでに「kv の生バイト版」。
+- **kv** = バッファする（小さい値・辞書的・全体 get/put）。`KeyValueStore` 1:1。
+- **storage** = バッファしない（ストリーミング・ラージ・ファイルオープン）。`FileStore` / S3。
+- s3 は意味的に kv（key→bytes）だが、ラージ＋multipart で**ファイルオープン寄り**ゆえ storage 側。
 
-ユーザーの再編軸は「どの IF か」ではなく **buffer vs stream**:
+### (B) パス = 場所（ArrayStorage のキーそのまま）
 
-- **kv** = バッファする（小さい値・辞書的・全体 get/put）。
-- **storage** = バッファしない（ストリーミング・ラージファイル・ファイルオープン）。
-- s3 は意味的に kv（key→bytes）だが、ラージ＋multipart で**ファイルオープン寄り**ゆえ storage 側へ。
+M028 で `StorageService` は `ArrayKeyValueStore` バック＝context は第一階層 mount。よって HTTP も
+**`NS/{bucket}/{path}`** で十分（`{bucket}/{path}` がそのまま ArrayStorage キー `<mount>/<subkey>`）。
+`contexts`/`objects`/`keys` の飾りは廃止。表層語は **`bucket`** に統一（S3 と揃える。内部 `StorageService`
+の `context` 命名はそのままでも可）。
 
-## 4 ルート（第1階層=buffer性、第2階層=方言/エンコード）
+- **`{path}` は不透明**（`{path:path}` で丸ごと捕捉）。サーバは階層解釈しない。
+- コレクション判別：**空パス = 一覧 / 非空パス = オブジェクト**。prefix（仮想フォルダ）を廃止したので
+  末尾スラッシュ規則は不要（曖昧さが消える）。
+- 予約語（objects/keys/events）が消えるので、その名の bucket/キーがあっても衝突しない。
 
-| ルート | 族 | 方言/エンコード | 実体 | 状態 |
-|--------|----|---------------|------|------|
-| `kv/raw` | kv(buffered) | 生バイト・不透明 | 今の `/manystore` objects（KVS 1:1） | 既存 |
-| `kv/json` | kv(buffered) | JSON 検証（PUT で json 妥当性検証→不正 400 / GET は必ず `application/json`） | KVS + JSON codec facade | 新規 |
-| `storage/s3` | storage(stream) | S3（GET/PUT/HEAD/List + multipart） | 今の `/s3` ゲートウェイ | 既存 |
-| `storage/manystore` | storage(stream) | manystore 独自ストリーミング | FileStore over HTTP | 新規（未公開） |
+## エンドポイント（改訂版）
 
-すべて **server facade 層**に閉じる＝コア IF（KeyValueStore/FileStore/StorageService）不変。
-S3 ゲートウェイ・既存 native REST と同じ流儀（YAGNI と両立＝core を触らない）。
+native 系（`NS` = `/kv/raw` / `/kv/json` / `/storage/manystore`）共通形:
 
-## フェーズ
+| メソッド | パス | 意味 |
+|---|---|---|
+| `GET` | `NS/` | bucket(=mount) 一覧 |
+| `GET` | `NS/{bucket}/` | bucket 内の全キー（**フラット**・`?limit=`） |
+| `WS` | `NS/{bucket}/` | 変更イベント購読（同パスを WS upgrade で判別） |
+| `HEAD` | `NS/{bucket}/{path}` | 存在 |
+| `GET` | `NS/{bucket}/{path}` | 取得（storage は `Range:` で 206/streaming） |
+| `PUT` | `NS/{bucket}/{path}` | 書込（storage は chunked/large） |
+| `DELETE` | `NS/{bucket}/{path}` | 削除 |
 
-### フェーズ1: 移設（既存 2 ルートの再配置）← 着手中
+名前空間ごとの違い（HOW だけ）:
+- `/kv/raw` … 生バイト・whole get/put（既存 native REST 相当）。
+- `/kv/json` … PUT で JSON 検証（不正 400）／GET は `application/json`（フェーズ2）。
+- `/storage/manystore` … FileStore over HTTP・`Range`/chunked（フェーズ3・一番重い）。
 
-combined アプリ（`manystore/combined.py`）の `include_router` prefix を付け替えるだけ:
+S3 だけ別形（互換のため・ワイヤ形式は S3 クライアントが決める）:
+- `/storage/s3/{bucket}/{key}`（GET/PUT/HEAD/DELETE）＋ ListObjectsV2（`?list-type=2&prefix=&delimiter=`）＋ Multipart。
+- **S3 は prefix を保持**（ListObjectsV2 は S3 仕様）。ただし実装は下記 capability 経由にする。
 
-- `/manystore` → `/kv/raw`
-- `/s3` → `/storage/s3`
+## prefix を capability に移設（native から撤去）
 
-結果のパス:
-- `/kv/raw/contexts`、`/kv/raw/contexts/{ctx}/keys`、`/kv/raw/contexts/{ctx}/objects/{key}`、WS `/kv/raw/contexts/{ctx}/events`
-- `/storage/s3/{bucket}/{key}`（S3 クライアントは `endpoint_url=<host>/storage/s3`）
+prefix は NATS 由来ではなく `service.list_entries` の**汎用 startswith フィルタ**。これを:
 
-範囲:
-- 変更は **combined アプリに閉じる**。standalone（`create_app`/`create_gateway`・`python -m manystore.server`/`.gateway`）は不変＝旧パスが要る人はそちら。
-- **後方互換エイリアスは張らない**（M023 は未リリース＝外部利用者ゼロ。クリーンに移設）。
-- 触るファイル: `combined.py`（prefix・docstring）／`__main__.py`（docstring・help）／`tests/ui/test_combined.py`（URL 更新）。
-- native の内部パス（`/contexts/.../objects/...`）は**そのまま**＝prefix 付け替えのみ（最小・可逆）。
-  s3 がフラット（`/{bucket}/{key}`）なのに対し kv が深いのは、native が contexts/keys/events を持つ
-  リッチなプロトコルだから（無理に平坦化しない）。
-- コア IF 不変・新依存ゼロ。`make check` 緑維持（91/1）。
+- **native HTTP API から撤去**（bucket 単位フラット list-all のみ）。`service.list_entries` の prefix 引数も撤去
+  （または list-all に縮小）。
+- **optional capability に移設**（core IF は最小のまま）:
+  ```python
+  class SupportsPrefixListing(Protocol):
+      def iter_prefix(self, prefix: str) -> AsyncIterator[FileInfo]: ...
+  ```
+  汎用フォールバックヘルパ `iter_prefix(store, prefix)`＝store がネイティブ実装を持てばそれ、無ければ
+  `iter_all()` + `startswith` で総なめ。
+- backend 別: **S3 = ネイティブ**（`list_objects_v2(Prefix=…)`＝サーバ側で絞る）／NATS・HTTP・local・dict =
+  未実装（汎用フォールバック＝現状の総なめと同等）。
+- **伝播**: native 効率を活かすため `SafeKeyValueStore` / `ArrayKeyValueStore` が `iter_prefix` を委譲する
+  （Safe は prefix を validate して内側へ、Array は第一セグメントで mount にルーティング）。**M027b と同じ
+  capability 伝播パターン**。委譲が無いと S3 native が隠れて総なめに落ちる。
+- 使用元差し替え: **S3 ゲートウェイ ListObjectsV2** と **multipart 内部の part 列挙** を `iter_prefix` ヘルパ経由に。
 
-### フェーズ2: kv/json facade
+## フェーズ / タスク
 
-`kv/raw` の上に JSON codec を 1 枚。PUT body を `json.loads` で検証（不正→400）、
-GET は `application/json` を保証。保存方式（受信 bytes 素通し vs 正規化 re-serialize）は着手時に決める。
+- **フェーズ1: 移設**（`/manystore`→`/kv/raw`・`/s3`→`/storage/s3`）＝**実装済（2026-06-23・91/1）**。
+- **M025改: addressing 再設計**（`contexts/{ctx}/objects/{key}` → `{bucket}/{path}`・prefix 撤去・WS 同パス化）。
+  破壊的変更（未リリース＝互換エイリアス無し）。触る: `server/routes.py`・`combined.py`・`client/remote.py`・
+  `server/static/app.js`（フラット list-all + クライアント側畳み）・`tests/ui/*`・README/examples。
+- **M030: prefix capability**（`SupportsPrefixListing` + 汎用ヘルパ + S3 native + Safe/Array 伝播 +
+  gateway/multipart 差し替え）。
+- **フェーズ2: kv/json facade**（PUT で json 検証→400 / GET は application/json。保存方式=素通し vs 正規化 未決）。
+- **フェーズ3: storage/manystore**（FileStore streaming over HTTP・range/chunked・一番重い新規）。
 
-### フェーズ3: storage/manystore（FileStore streaming over HTTP）
-
-未公開の `FileStore`（open_reader/open_writer）をストリーミング HTTP で公開する新面。一番重い新規。
-チャンク転送・range・大容量を見据える。設計は着手時に deep think。
-
-## 残課題 / 未決
-
-- フェーズ2 の json 保存方式（素通し or 正規化）。
+## 未決
+- M025改 と M030 の着手順（addressing 先 / capability 先 / 並行）。capability は gateway が今 `service.list_entries`
+  経由なので、addressing 撤去と整合させて一度に切るのが安全か。
+- `GET NS/`（bucket 一覧）に featured/default を載せるか（簡素化に倣い storage には出さない案）。
 - フェーズ3 のストリーミングプロトコル詳細（range / chunked / multipart との関係）。
-- README / examples の起動例パス更新（移設に伴い `/manystore`→`/kv/raw` 等。フェーズ1 で追従するか確認）。
+- UI のフラット list-all 化に伴う大規模 bucket の遅延ロード喪失（後回し可）。
