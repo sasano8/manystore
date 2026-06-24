@@ -4,7 +4,7 @@
 （ファイル指向の [manystore.file] と名前空間で分離）。トップ `manystore` からも再エクスポートする。
 """
 
-from .array_storage import DEFAULT_CACHE_DIR, ArrayKeyValueStore, DownloadCache
+from .stores.array_storage import DEFAULT_CACHE_DIR, ArrayKeyValueStore, DownloadCache
 from .stores.async_storage import (
     FileInfo,
     KeyValueFromFileStore,

@@ -11,7 +11,7 @@
 from collections.abc import AsyncIterator
 from pathlib import Path
 
-from .stores.async_storage import (
+from .async_storage import (
     FileInfo,
     KeyValueStore,
     KeyValueStoreBase,
@@ -20,8 +20,8 @@ from .stores.async_storage import (
     _kv_move,
     _take,
 )
-from .stores.async_storage import iter_prefix as _iter_prefix
-from .safe_path import validate_safe_path
+from .async_storage import iter_prefix as _iter_prefix
+from ..safe_path import validate_safe_path
 
 # ダウンロードキャッシュのデフォルト先（ホーム配下）。
 DEFAULT_CACHE_DIR = Path.home() / ".cache" / "manystore"
