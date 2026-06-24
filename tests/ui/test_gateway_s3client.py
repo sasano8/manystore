@@ -32,9 +32,9 @@ pytestmark = pytest.mark.slow
 
 uvicorn = pytest.importorskip("uvicorn")
 
-from manystore.gateway.app import create_gateway  # noqa: E402
-from manystore.implement.config import parse_config  # noqa: E402
-from manystore.implement.service import StorageService  # noqa: E402
+from manystore.serving.gateway.app import create_gateway  # noqa: E402
+from manystore.serving.services.config import parse_config  # noqa: E402
+from manystore.serving.services.service import StorageService  # noqa: E402
 
 # 実 S3 クライアント（aiobotocore）への鍵。ゲートウェイは SigV4 を検証しないので任意値でよい。
 _ACCESS_KEY = "gw-test-access"

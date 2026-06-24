@@ -11,7 +11,7 @@ server 層との違いは「前段の protocol」だけ＝manystore REST → S3 
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
-from ..implement.service import StorageService
+from ..services.service import StorageService
 from .routes import register_routes
 
 

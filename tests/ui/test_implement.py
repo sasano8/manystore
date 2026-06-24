@@ -8,14 +8,14 @@ from pathlib import Path
 
 import pytest
 
-from manystore.backends import LocalKeyValueStore
-from manystore.implement.config import parse_config
-from manystore.implement.service import (
+from manystore.storage.backends import LocalKeyValueStore
+from manystore.serving.services.config import parse_config
+from manystore.serving.services.service import (
     ContextNotFound,
     ReadOnlyContext,
     StorageService,
 )
-from manystore.implement.watcher import PollingWatcher
+from manystore.serving.services.watcher import PollingWatcher
 
 
 def _config(tmp_path: Path) -> object:

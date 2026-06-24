@@ -9,10 +9,10 @@ from xml.etree.ElementTree import fromstring
 
 from fastapi.testclient import TestClient
 
-from manystore.gateway.app import create_gateway
-from manystore.implement.config import parse_config
-from manystore.implement.s3map import S3_NS
-from manystore.implement.service import StorageService
+from manystore.serving.gateway.app import create_gateway
+from manystore.serving.services.config import parse_config
+from manystore.serving.services.s3map import S3_NS
+from manystore.serving.services.service import StorageService
 
 _NS = {"s3": S3_NS}
 

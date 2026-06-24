@@ -35,10 +35,10 @@ def test_domain_exceptions_keep_stdlib_bases() -> None:
 
 def test_reexport_from_original_modules() -> None:
     # 集約しても元モジュール（safe_path / service / multipart）から import できる＝同一クラス。
-    from manystore.gateway.multipart import NoSuchUpload as MpNoSuchUpload
-    from manystore.implement.service import ContextNotFound as SvcCtx
-    from manystore.implement.service import ReadOnlyContext as SvcRo
-    from manystore.stores.safe import UnsafePathError as SpUnsafe
+    from manystore.serving.gateway.multipart import NoSuchUpload as MpNoSuchUpload
+    from manystore.serving.services.service import ContextNotFound as SvcCtx
+    from manystore.serving.services.service import ReadOnlyContext as SvcRo
+    from manystore.storage.surfaces.safe import UnsafePathError as SpUnsafe
 
     assert SpUnsafe is UnsafePathError
     assert SvcCtx is ContextNotFound

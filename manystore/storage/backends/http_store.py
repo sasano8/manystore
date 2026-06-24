@@ -12,7 +12,7 @@ KVS の get/exists と FileStore の read のみ実装する。httpx はメソ�
 import io
 from collections.abc import AsyncIterator
 
-from ..protocols import AsyncFileObject, FileInfo, KeyValueStoreBase, _KvReadFileObject
+from ...protocols import AsyncFileObject, FileInfo, KeyValueStoreBase, _KvReadFileObject
 
 
 def _read_only(op: str) -> None:

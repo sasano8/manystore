@@ -22,7 +22,7 @@ from manystore import (
     S3KeyValueStore,
 )
 from manystore.client import RemoteKeyValueStore
-from manystore.conformancer import (
+from manystore.tools.conformancer import (
     FileStoreTester,
     assert_file_store,
     assert_key_value_store,
@@ -30,7 +30,7 @@ from manystore.conformancer import (
     required_members,
     save_report,
 )
-from manystore.kv import AsyncKeyValueStore
+from manystore.storage.kv import AsyncKeyValueStore
 from manystore.protocols import KeyValueStoreBase
 
 
@@ -71,7 +71,7 @@ def test_all_file_stores_have_required_methods(tmp_path) -> None:
 def test_file_store_requires_io_on_top_of_kvs() -> None:
     # 包含関係の確認: FileStore のメンバ ⊇ KVS のメンバ ＋ open_reader/open_writer。
     kvs = required_members(AsyncKeyValueStore)
-    from manystore.file import AsyncFileStore
+    from manystore.storage.file import AsyncFileStore
 
     fs = required_members(AsyncFileStore)
     assert kvs <= fs

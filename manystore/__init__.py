@@ -13,7 +13,9 @@
 依存し、重い backend（nats / aiobotocore / httpx 等）は各 backend のメソッド内で遅延 import する。
 """
 
-from . import file, kv
+from .storage import file
+
+from .storage import kv
 from .exceptions import PROBLEM_JSON as PROBLEM_JSON
 from .exceptions import ContextNotFound as ContextNotFound
 from .exceptions import ManystoreError as ManystoreError
@@ -21,8 +23,8 @@ from .exceptions import NoSuchUpload as NoSuchUpload
 from .exceptions import ReadOnlyContext as ReadOnlyContext
 from .exceptions import UnsafePathError as UnsafePathError
 from .exceptions import to_problem as to_problem
-from .file import *  # noqa: F403  （後方互換: ファイル群をトップにフラット再エクスポート）
-from .kv import *  # noqa: F403  （後方互換: KV 群をトップにフラット再エクスポート）
+from .storage.file import *  # noqa: F403  （後方互換: ファイル群をトップにフラット再エクスポート）
+from .storage.kv import *  # noqa: F403  （後方互換: KV 群をトップにフラット再エクスポート）
 
 # グループ名前空間（`manystore.kv` / `manystore.file`）＋ 後方互換のフラット名。
 # 共有名（FileInfo / validate_safe_path / UnsafePathError）が両グループに出るので重複を畳む。

@@ -6,8 +6,8 @@
 
 import argparse
 
-from ..implement.config import load_config
-from ..implement.service import StorageService
+from ..services.config import load_config
+from ..services.service import StorageService
 from .app import create_app
 
 

@@ -27,11 +27,11 @@
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
-from .gateway.routes import STORAGE_S3_PREFIX
-from .gateway.routes import build_router as build_s3_router
-from .implement.service import StorageService
-from .server.routes import KV_RAW_PREFIX
-from .server.routes import build_router as build_native_router
+from .serving.gateway.routes import STORAGE_S3_PREFIX
+from .serving.gateway.routes import build_router as build_s3_router
+from .serving.services.service import StorageService
+from .serving.server.routes import KV_RAW_PREFIX
+from .serving.server.routes import build_router as build_native_router
 
 
 def create_combined_app(service: StorageService):

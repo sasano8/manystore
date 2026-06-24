@@ -14,8 +14,8 @@ from .backends import (
     S3FileStore,
     create_file_store,
 )
-from .connect import ConnectPolicy, connecting
-from .protocols import (
+from ..connect import ConnectPolicy, connecting
+from ..protocols import (
     AsyncFileObject,
     AsyncFileStore,
     AsyncKeyValueStore,
@@ -25,7 +25,7 @@ from .protocols import (
     SyncFileStore,
     SyncKeyValueStore,
 )
-from .stores.safe import SafeFileStore, UnsafePathError, validate_safe_path
+from .surfaces.safe import SafeFileStore, UnsafePathError, validate_safe_path
 
 __all__ = [
     # shared

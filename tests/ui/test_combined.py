@@ -19,8 +19,8 @@ from pathlib import Path
 
 import pytest
 
-from manystore.implement.config import parse_config
-from manystore.implement.service import StorageService
+from manystore.serving.services.config import parse_config
+from manystore.serving.services.service import StorageService
 
 uvicorn = pytest.importorskip("uvicorn")
 

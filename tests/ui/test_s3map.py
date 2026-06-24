@@ -2,8 +2,8 @@
 
 from xml.etree.ElementTree import fromstring
 
-from manystore.implement.protocol import EntryInfo
-from manystore.implement.s3map import (
+from manystore.serving.services.protocol import EntryInfo
+from manystore.serving.services.s3map import (
     S3_NS,
     fold_list_v2,
     parse_complete_multipart,

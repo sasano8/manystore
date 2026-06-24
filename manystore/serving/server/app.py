@@ -9,7 +9,7 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from ..implement.service import StorageService
+from ..services.service import StorageService
 from .routes import KV_RAW_PREFIX, build_router
 
 STATIC_DIR = Path(__file__).parent / "static"

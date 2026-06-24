@@ -12,8 +12,8 @@ from .backends import (
     S3KeyValueStore,
     create_key_value_store,
 )
-from .connect import ConnectPolicy, connect_key_value_store, connecting
-from .protocols import (
+from ..connect import ConnectPolicy, connect_key_value_store, connecting
+from ..protocols import (
     AsyncKeyValueStore,
     FileInfo,
     KeyValueFromFileStore,
@@ -23,9 +23,9 @@ from .protocols import (
     iter_prefix,
     scan_prefix,
 )
-from .stores.array import DEFAULT_CACHE_DIR, ArrayKeyValueStore, DownloadCache
-from .stores.safe import SafeKeyValueStore, UnsafePathError, validate_safe_path
-from .stores.sync_bridge import AsyncToSyncKeyValueStore
+from .surfaces.array import DEFAULT_CACHE_DIR, ArrayKeyValueStore, DownloadCache
+from .surfaces.safe import SafeKeyValueStore, UnsafePathError, validate_safe_path
+from .surfaces.sync_bridge import AsyncToSyncKeyValueStore
 
 __all__ = [
     # shared

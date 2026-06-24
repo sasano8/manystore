@@ -11,7 +11,7 @@
 from collections.abc import AsyncIterator
 from pathlib import Path
 
-from ..protocols import (
+from ...protocols import (
     AsyncKeyValueStore,
     FileInfo,
     KeyValueStoreBase,
@@ -19,7 +19,7 @@ from ..protocols import (
     _kv_copy,
     _kv_move,
 )
-from ..protocols import iter_prefix as _iter_prefix
+from ...protocols import iter_prefix as _iter_prefix
 from .safe import validate_safe_path
 
 # ダウンロードキャッシュのデフォルト先（ホーム配下）。
