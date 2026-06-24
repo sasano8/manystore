@@ -14,7 +14,7 @@ from .stores.base import (
     iter_prefix,
     scan_prefix,
 )
-from .stores.async_to_sync_storage import AsyncToSyncKeyValueStore
+from .stores.sync_bridge import AsyncToSyncKeyValueStore
 from .backends import (
     DictKeyValueStore,
     HttpKeyValueStore,
