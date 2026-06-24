@@ -22,6 +22,24 @@
 - **未決（次サイクル以降）**: フェーズ2 `kv/json`（PUT で JSON 検証 400／GET application/json・保存=素通し vs 正規化 未決）／
   フェーズ3 `storage/manystore`（FileStore streaming・range/chunked）。
 
+## 直近の変更
+
+- **interrupt 取り込み（2026-06-24・`aaa.md`）**: 7 要求をトリアージ。要求2→M031（conformancer 整理）／
+  要求3→M032（Safe 包装込みファクトリ）／要求4→M033（iter_all に limit・list_all は iter_all 参照）／
+  要求5→M034（conformance 結果を docs spec 表へ＋Makefile）／要求6→M035（実装/IF 分離リファクタ）として
+  progress.md バックログへ。**要求1**（make 系をグローバル許可＝本人が「supervisor への要求」と明記）→
+  escalation `outbox/2026-06-24-allow-make-targets-globally.md`。**要求7**（フォールバック禁止）→M036＝
+  **直近 M030 の capability fallback と緊張**＝下記「進行中の決定」で要相談。`aaa.md` は archive へ退避。
+
+## 進行中の決定・考慮事項
+
+- **【要相談】フォールバック禁止 vs M030 capability fallback（要求7・2026-06-24）**: ユーザー方針
+  「実装としてフォールバック禁止。問題が隠ぺいされてしまう」。今サイクルで committed の M030
+  `async_storage.iter_prefix` は **ネイティブ非対応時に `iter_all()`+startswith へ暗黙フォールバック**する設計で、
+  この方針と衝突する。capability の意図的 degrade を「許容される設計」とみなすか、`SupportsPrefixListing`
+  非対応なら明示エラー（fail-loud）に倒すかは**未決**。あわせて `S3KeyValueStore.exists` の
+  `except Exception: return False`（全例外を不在に握り潰し）等、既存の error-swallow も是正候補。M036 で扱う。
+
 ## （旧フォーカス）M025改 HTTP addressing 再設計（実装完了・2026-06-24）
 
 着手順はユーザー確定＝**M025改 → M030**（両方完了）。
