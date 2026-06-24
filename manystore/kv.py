@@ -25,7 +25,13 @@ from .stores.base import (
 )
 from .stores.safe import SafeKeyValueStore, UnsafePathError, validate_safe_path
 from .stores.sync_bridge import AsyncToSyncKeyValueStore
-from .sync_storage import SyncKeyValueStore
+from .protocols import FileInfo, SyncKeyValueStore, KeyValueStore
+
+# TODO: 名前の整理
+# KeyValueFileStore = SyncKeyValueStore
+AsyncKeyValueStore = KeyValueStore
+# AsyncFileStore = FileStore
+
 
 __all__ = [
     # shared
@@ -48,6 +54,7 @@ __all__ = [
     "KeyValueFromFileStore",
     # sync / bridge
     "SyncKeyValueStore",
+    "AsyncKeyValueStore",
     "AsyncToSyncKeyValueStore",
     # composite
     "ArrayKeyValueStore",

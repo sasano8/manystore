@@ -71,6 +71,7 @@ class FileStoreBase(abc.ABC):
             await f.write(value)
 
 
+# TODO: あまり意味ないのでは？ protocols を使えばいいじゃん？
 class KeyValueStoreBase(abc.ABC):
     """KVS の `get` 既定実装を与える基底（backend は `get_or_raise` だけ実装すればよい）。
 

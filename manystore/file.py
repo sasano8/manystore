@@ -13,9 +13,14 @@ from .backends import (
     NatsFileStore,
     S3FileStore,
 )
-from .stores.base import FileInfo, FileObject, FileStore, KeyValueFileStore
+# from .stores.base import FileInfo, FileObject, FileStore, KeyValueFileStore
 from .stores.safe import SafeFileStore, UnsafePathError, validate_safe_path
-from .sync_storage import SyncFileObject, SyncFileStore
+from .protocols import SyncFileObject, SyncFileStore, FileInfo, FileObject, SyncKeyValueStore, FileStore, KeyValueStore
+
+# TODO: 名前の整理
+KeyValueFileStore = SyncKeyValueStore
+AsyncKeyValueStore = KeyValueStore
+AsyncFileStore = FileStore
 
 __all__ = [
     # shared
@@ -32,9 +37,12 @@ __all__ = [
     "HttpFileStore",
     # KVS → FileStore アダプタ
     "KeyValueFileStore",
+    "SyncKeyValueStore",
+    "AsyncKeyValueStore",
     # sync
     "SyncFileStore",
     "SyncFileObject",
+    "AsyncFileStore",
     # safe path
     "SafeFileStore",
     "validate_safe_path",
