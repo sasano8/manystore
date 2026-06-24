@@ -13,21 +13,24 @@ from .backends import (
     NatsFileStore,
     S3FileStore,
 )
-# from .stores.base import FileInfo, FileObject, FileStore, KeyValueFileStore
+from .protocols import (
+    AsyncFileObject,
+    AsyncFileStore,
+    AsyncKeyValueStore,
+    FileInfo,
+    KeyValueFileStore,
+    SyncFileObject,
+    SyncFileStore,
+    SyncKeyValueStore,
+)
 from .stores.safe import SafeFileStore, UnsafePathError, validate_safe_path
-from .protocols import SyncFileObject, SyncFileStore, FileInfo, FileObject, SyncKeyValueStore, FileStore, KeyValueStore
-
-# TODO: 名前の整理
-KeyValueFileStore = SyncKeyValueStore
-AsyncKeyValueStore = KeyValueStore
-AsyncFileStore = FileStore
 
 __all__ = [
     # shared
     "FileInfo",
     # abstraction
-    "FileStore",
-    "FileObject",
+    "AsyncFileStore",
+    "AsyncFileObject",
     # backends
     "DictFileStore",
     "LocalFileStore",

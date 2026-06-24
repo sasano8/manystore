@@ -37,7 +37,7 @@ import uuid
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
-from ..protocols import FileStore, KeyValueStore
+from ..protocols import AsyncFileStore, AsyncKeyValueStore
 
 
 def required_members(protocol: type) -> frozenset[str]:
@@ -65,12 +65,12 @@ def assert_implements(obj: object, protocol: type) -> None:
 
 def assert_key_value_store(obj: object) -> None:
     """`obj` が [KeyValueStore] の全メソッドを持つことを表明する。"""
-    assert_implements(obj, KeyValueStore)
+    assert_implements(obj, AsyncKeyValueStore)
 
 
 def assert_file_store(obj: object) -> None:
     """`obj` が [FileStore]（= KeyValueStore + open_reader/open_writer）を持つことを表明する。"""
-    assert_implements(obj, FileStore)
+    assert_implements(obj, AsyncFileStore)
 
 
 # ── 挙動契約テストツール（辞書ストアをオラクルに差分比較） ──

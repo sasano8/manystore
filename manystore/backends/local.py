@@ -14,8 +14,9 @@ from collections.abc import AsyncIterator
 from pathlib import Path
 from typing import BinaryIO
 
-from ..protocols import FileInfo, FileObject
-from ..stores.base import (  # protocols に寄せる
+from ..protocols import (
+    AsyncFileObject,
+    FileInfo,
     FileStoreBase,
     KeyValueFromFileStore,
     _kv_copy,
@@ -93,11 +94,12 @@ class _LocalAtomicWriter:
 class LocalFileStore(FileStoreBase):
     """ローカルファイルシステムの「真実の実装」（完全な [FileStore]＝KeyValueStore + IO）。
 
-    **file 寄り**＝primitive は `open_reader`/`open_writer`（ストリーム）なので [FileStoreBase] を継承し、
-    put/get/get_or_raise（全体）は基底が IO から導出する（値境界でのみバッファ）。本クラスは IO 2 つ＋
-    名前空間操作（iter/list/exists/delete・cp/mv・vacuum）を filesystem-native に実装する＝KeyValueStore も
-    満たす。KVS ビュー（IO を隠したもの）は `KeyValueFromFileStore(LocalFileStore(...))`（＝[LocalKeyValueStore]）
-    で被せる＝実装の二重持ちを避ける。書き込みは open_writer の temp+rename で原子的（all-or-nothing）。バイナリ専用。
+    **file 寄り**＝primitive は `open_reader`/`open_writer`（ストリーム）なので [FileStoreBase] を
+    継承し、put/get/get_or_raise（全体）は基底が IO から導出する（値境界でのみバッファ）。本クラスは
+    IO 2 つ＋名前空間操作（iter/list/exists/delete・cp/mv・vacuum）を filesystem-native に実装する
+    ＝KeyValueStore も満たす。KVS ビュー（IO を隠したもの）は
+    `KeyValueFromFileStore(LocalFileStore(...))`（＝[LocalKeyValueStore]）で被せる＝実装の二重持ちを
+    避ける。書き込みは open_writer の temp+rename で原子的（all-or-nothing）。バイナリ専用。
     """
 
     def __init__(self, directory: Path) -> None:
@@ -108,11 +110,11 @@ class LocalFileStore(FileStoreBase):
 
     # ── ストリーム入出力（primitive）。put/get_or_raise/get は [FileStoreBase] が導出 ──
 
-    async def open_reader(self, filename: str) -> FileObject:
+    async def open_reader(self, filename: str) -> AsyncFileObject:
         return LocalFileObject((self._dir / filename).open("rb"))
 
-    async def open_writer(self, filename: str) -> FileObject:
-        # 親ディレクトリ作成＋temp+rename で all-or-nothing（'/' を含むネストキーもそのまま置ける）。
+    async def open_writer(self, filename: str) -> AsyncFileObject:
+        # 親ディレクトリ作成＋temp+rename で all-or-nothing（ネストキーもそのまま置ける）。
         return _LocalAtomicWriter(self._dir / filename)
 
     # ── 名前空間操作（filesystem-native） ──

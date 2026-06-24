@@ -13,31 +13,25 @@ from .backends import (
     create_key_value_store,
 )
 from .connect import ConnectPolicy, connect_key_value_store, connecting
-from .stores.array import DEFAULT_CACHE_DIR, ArrayKeyValueStore, DownloadCache
-from .stores.base import (
+from .protocols import (
+    AsyncKeyValueStore,
     FileInfo,
     KeyValueFromFileStore,
-    KeyValueStore,
     KeyValueStoreBase,
     SupportsPrefixListing,
+    SyncKeyValueStore,
     iter_prefix,
     scan_prefix,
 )
+from .stores.array import DEFAULT_CACHE_DIR, ArrayKeyValueStore, DownloadCache
 from .stores.safe import SafeKeyValueStore, UnsafePathError, validate_safe_path
 from .stores.sync_bridge import AsyncToSyncKeyValueStore
-from .protocols import FileInfo, SyncKeyValueStore, KeyValueStore
-
-# TODO: 名前の整理
-# KeyValueFileStore = SyncKeyValueStore
-AsyncKeyValueStore = KeyValueStore
-# AsyncFileStore = FileStore
-
 
 __all__ = [
     # shared
     "FileInfo",
     # abstraction
-    "KeyValueStore",
+    "AsyncKeyValueStore",
     "KeyValueStoreBase",
     # optional capability（prefix 列挙）
     "SupportsPrefixListing",

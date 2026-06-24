@@ -13,13 +13,13 @@
 import asyncio
 from collections.abc import Iterator
 
-from .base import FileInfo, KeyValueStore
+from ..protocols import AsyncKeyValueStore, FileInfo
 
 
 class AsyncToSyncKeyValueStore:
     """非同期 [KeyValueStore] を [SyncKeyValueStore] として同期 API で被せるラッパ。"""
 
-    def __init__(self, store: KeyValueStore) -> None:
+    def __init__(self, store: AsyncKeyValueStore) -> None:
         self._store = store
         self._loop = asyncio.new_event_loop()
 

@@ -8,14 +8,14 @@
 from collections.abc import AsyncIterator
 
 from ..exceptions import UnsafePathError  # 集約先（後方互換: ここからも import できる）
-from .base import (
+from ..protocols import (
+    AsyncFileObject,
+    AsyncFileStore,
+    AsyncKeyValueStore,
     FileInfo,
-    FileObject,
-    FileStore,
-    KeyValueStore,
     KeyValueStoreBase,
 )
-from .base import iter_prefix as _iter_prefix
+from ..protocols import iter_prefix as _iter_prefix
 
 __all__ = ["UnsafePathError", "validate_safe_path", "SafeKeyValueStore", "SafeFileStore"]
 
@@ -42,7 +42,7 @@ def validate_safe_path(path: str) -> str:
 class SafeKeyValueStore(KeyValueStoreBase):
     """キーを [validate_safe_path] で検証してから委譲する [KeyValueStore] ラッパ。"""
 
-    def __init__(self, store: KeyValueStore) -> None:
+    def __init__(self, store: AsyncKeyValueStore) -> None:
         self._store = store
 
     async def put(self, key: str, value: bytes) -> None:
@@ -87,11 +87,11 @@ class SafeKeyValueStore(KeyValueStoreBase):
 class SafeFileStore:
     """filename を [validate_safe_path] で検証してから委譲する [FileStore] ラッパ。"""
 
-    def __init__(self, store: FileStore) -> None:
+    def __init__(self, store: AsyncFileStore) -> None:
         self._store = store
 
-    async def open_reader(self, filename: str) -> FileObject:
+    async def open_reader(self, filename: str) -> AsyncFileObject:
         return await self._store.open_reader(validate_safe_path(filename))
 
-    async def open_writer(self, filename: str) -> FileObject:
+    async def open_writer(self, filename: str) -> AsyncFileObject:
         return await self._store.open_writer(validate_safe_path(filename))

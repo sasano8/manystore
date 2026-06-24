@@ -12,8 +12,8 @@ HTTP には一切依存しない＝この層だけで単体テストできる。
 
 from ..backends import create_key_value_store
 from ..exceptions import ContextNotFound, ReadOnlyContext  # 集約先（後方互換で再エクスポート）
+from ..protocols import iter_prefix as _iter_prefix
 from ..stores.array import ArrayKeyValueStore
-from ..stores.base import iter_prefix as _iter_prefix
 from ..stores.safe import SafeKeyValueStore
 from .config import AppConfig
 from .protocol import ContextInfo, EntryInfo

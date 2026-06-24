@@ -11,15 +11,15 @@
 from collections.abc import AsyncIterator
 from pathlib import Path
 
-from .base import (
+from ..protocols import (
+    AsyncKeyValueStore,
     FileInfo,
-    KeyValueStore,
     KeyValueStoreBase,
     _atomic_write_bytes,
     _kv_copy,
     _kv_move,
 )
-from .base import iter_prefix as _iter_prefix
+from ..protocols import iter_prefix as _iter_prefix
 from .safe import validate_safe_path
 
 # ダウンロードキャッシュのデフォルト先（ホーム配下）。
@@ -30,9 +30,9 @@ class ArrayKeyValueStore(KeyValueStoreBase):
     """論理名 → [KeyValueStore] のマウント表で複数 backend を束ねる合成 [KeyValueStore]。"""
 
     def __init__(self) -> None:
-        self._mounts: dict[str, KeyValueStore] = {}
+        self._mounts: dict[str, AsyncKeyValueStore] = {}
 
-    async def mount(self, name: str, store: KeyValueStore) -> None:
+    async def mount(self, name: str, store: AsyncKeyValueStore) -> None:
         """論理名 `name` に backend を割り当て、その backend を connect する。
 
         name は単一セグメント（'/' を含まない）。マウント時に `store.connect()` を呼ぶので、
@@ -43,7 +43,7 @@ class ArrayKeyValueStore(KeyValueStoreBase):
         await store.connect()
         self._mounts[name] = store
 
-    async def unmount(self, name: str) -> KeyValueStore | None:
+    async def unmount(self, name: str) -> AsyncKeyValueStore | None:
         """論理名を外し、その backend を aclose して返す（無ければ None）。"""
         store = self._mounts.pop(name, None)
         if store is not None:
@@ -54,7 +54,7 @@ class ArrayKeyValueStore(KeyValueStoreBase):
         """マウント済みの論理名を名前順で返す。"""
         return sorted(self._mounts)
 
-    def _route(self, key: str) -> tuple[KeyValueStore, str]:
+    def _route(self, key: str) -> tuple[AsyncKeyValueStore, str]:
         """`<name>/<subkey>` を (backend, subkey) に分解する。"""
         name, sep, subkey = key.partition("/")
         if not sep or not subkey:
@@ -153,7 +153,7 @@ class DownloadCache(KeyValueStoreBase):
     （cwd が変わってもヒットさせるため。既定 `~/.cache/manystore`）。
     """
 
-    def __init__(self, store: KeyValueStore, cache_dir: Path | str | None = None) -> None:
+    def __init__(self, store: AsyncKeyValueStore, cache_dir: Path | str | None = None) -> None:
         self._store = store
         base = Path(cache_dir).expanduser() if cache_dir is not None else DEFAULT_CACHE_DIR
         self._cache_dir = base.resolve()

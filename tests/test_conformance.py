@@ -30,8 +30,8 @@ from manystore.conformancer import (
     required_members,
     save_report,
 )
-from manystore.kv import KeyValueStore
-from manystore.stores.base import KeyValueStoreBase
+from manystore.kv import AsyncKeyValueStore
+from manystore.protocols import KeyValueStoreBase
 
 
 def _kvs_instances(tmp_path):
@@ -70,10 +70,10 @@ def test_all_file_stores_have_required_methods(tmp_path) -> None:
 
 def test_file_store_requires_io_on_top_of_kvs() -> None:
     # 包含関係の確認: FileStore のメンバ ⊇ KVS のメンバ ＋ open_reader/open_writer。
-    kvs = required_members(KeyValueStore)
-    from manystore.file import FileStore
+    kvs = required_members(AsyncKeyValueStore)
+    from manystore.file import AsyncFileStore
 
-    fs = required_members(FileStore)
+    fs = required_members(AsyncFileStore)
     assert kvs <= fs
     assert fs - kvs == {"open_reader", "open_writer"}
 
@@ -165,7 +165,7 @@ def test_conformance_detects_missing_method() -> None:
     class _Broken:
         async def put(self, key, value): ...
 
-    missing = missing_members(_Broken(), KeyValueStore)
+    missing = missing_members(_Broken(), AsyncKeyValueStore)
     assert "get_or_raise" in missing
     assert "iter_all" in missing
     with pytest.raises(AssertionError):

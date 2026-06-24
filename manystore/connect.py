@@ -19,7 +19,7 @@ from contextlib import asynccontextmanager
 from dataclasses import dataclass
 
 from .backends import create_key_value_store
-from .protocols import KeyValueStore
+from .protocols import AsyncKeyValueStore
 
 
 @dataclass(frozen=True)
@@ -74,7 +74,7 @@ class ConnectPolicy:
         )
 
 
-async def _connect_with_retry(store: KeyValueStore, policy: ConnectPolicy) -> None:
+async def _connect_with_retry(store: AsyncKeyValueStore, policy: ConnectPolicy) -> None:
     """`store.connect()` を policy に従って試す。最終的に失敗したら最後の例外を送出。
 
     1 回の待機は `timeout` と「残り deadline」の小さい方で縛る。max_retry が inf（無制限）の
@@ -127,11 +127,11 @@ async def _connect_with_retry(store: KeyValueStore, policy: ConnectPolicy) -> No
 
 @asynccontextmanager
 async def connecting(
-    factory: Callable[[], KeyValueStore],
+    factory: Callable[[], AsyncKeyValueStore],
     *,
     verify: bool = True,
     policy: ConnectPolicy | None = None,
-) -> AsyncIterator[KeyValueStore]:
+) -> AsyncIterator[AsyncKeyValueStore]:
     """`factory()` で実体を生成し（policy に従い）connect してから yield、終了時に aclose する。
 
     実体生成と接続を `__aenter__` まで遅延する（factory で包んだ状態＝まだ接続していない）。

@@ -17,8 +17,7 @@ from collections.abc import AsyncIterator
 from urllib.parse import quote
 
 from ..implement.protocol import ContextInfo, EntryInfo
-from ..protocols import FileInfo
-from ..stores.base import KeyValueStoreBase, _kv_copy, _kv_move
+from ..protocols import FileInfo, KeyValueStoreBase, _kv_copy, _kv_move
 
 
 def _quote_key(key: str) -> str:

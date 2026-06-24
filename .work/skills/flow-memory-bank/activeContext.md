@@ -5,16 +5,20 @@
 
 ## 現在のフォーカス
 
-**protocols.py 集約＋FileStoreBase＋iter_all async/limit 統一を実装中（interrupt
-`20260624-protocols-consolidation-and-filestorebase.md`）。残＝facade を protocols 参照に切替→`sync_storage.py` 削除。**
+**protocols.py を「契約＋既定実装の唯一の源泉」に確定（2026-06-25 完了）。`stores/base.py` を削除し、
+既定実装（`FileStoreBase`/`KeyValueStoreBase`・アダプタ `KeyValueFileStore`/`KeyValueFromFileStore`・
+共有ヘルパ `iter_prefix`/`scan_prefix`/`_kv_copy`/`_kv_move`/`_atomic_write_bytes`/`_Kv*FileObject`）を
+protocols.py に集約。全 import を `..protocols` へ向け替え。`sync_storage.py` も削除済。fast 113 green・format green。**
 
 - **完了・コミット済**: ① protocols.py に契約集約＋各 import を `..protocols` へ ② `FileStoreBase` 新設＋
   `LocalFileStore(FileStoreBase)`（file 寄り＝primitive=open_reader/writer・KVS 面は IO から導出）③ **`iter_all`
   を全 async ストアで `async def`（async ジェネレータ）に統一**（コルーチン化バグを是正）④ **`iter_all`/`list_all`
   が `limit: int | None = None`**（limit は iter_all に一元適用・list は materialize）＝`_take` ヘルパ削除。
-- **残（次サイクル・このコミットには含めず）**: `kv.py`/`file.py` の sync Protocol import を `sync_storage`→
-  `protocols` に切替 → **`sync_storage.py` 削除**（interrupt item1）。`sync_storage.py` はユーザー指示で当面未着手＝
-  lint/format 赤が残る唯一のファイル（protocols.py 側に正規版が揃っている）。
+- **2026-06-25 で完了**: 上記「残」は解消。`stores/base.py` を削除し中身を protocols.py に全面集約、
+  `KeyValueFileStore` を `file.py` の公開 API に追加（フラット再エクスポート）。`make test` 失敗の原因は
+  **test_storage.py が Protocol の `AsyncKeyValueStore` を adapter として instantiate していた**こと＝
+  正しい `KeyValueFileStore` に修正。protocols.py/local.py に潜在していた E501 ドリフト（base.py 由来）も是正。
+  ※`from __future__ import annotations` は [3.14 前提で全廃] 方針に従い**入れない**（PEP 649 で前方参照は valid）。
 
 - ユーザーが IDE で実装ファイルを移動・改名済＝`manystore/stores/{base,array,safe,sync_bridge}.py`
   （旧 async_storage/array_storage/safe_path/async_to_sync_storage）＋ `conformance.py`→`conformancer/`。

@@ -6,9 +6,9 @@ nats-py はメソッド内で遅延 import する。FileStore は read=全体取
 import contextlib
 from collections.abc import AsyncIterator
 
-from ..stores.base import (
+from ..protocols import (
+    AsyncFileObject,
     FileInfo,
-    FileObject,
     KeyValueStoreBase,
     _kv_copy,
     _kv_move,
@@ -115,8 +115,8 @@ class NatsFileStore(NatsObjectKeyValueStore):
     を流用）。KVS 面は継承。
     """
 
-    async def open_reader(self, filename: str) -> FileObject:
+    async def open_reader(self, filename: str) -> AsyncFileObject:
         return _KvReadFileObject(await self.get_or_raise(filename))  # whole get を buffer 化
 
-    async def open_writer(self, filename: str) -> FileObject:
+    async def open_writer(self, filename: str) -> AsyncFileObject:
         return _KvWriteFileObject(self, filename)  # close で whole put

@@ -6,7 +6,7 @@
 
 from pathlib import Path
 
-from ..protocols import KeyValueStore
+from ..protocols import AsyncKeyValueStore
 from .http_store import HttpFileStore, HttpKeyValueStore
 from .local import LocalFileObject, LocalFileStore, LocalKeyValueStore
 from .memory import DictFileStore, DictKeyValueStore
@@ -42,7 +42,7 @@ def create_key_value_store(
     nats_bucket: str = "manystore_files",
     http_base_url: str = "",
     http_headers: dict[str, str] | None = None,
-) -> KeyValueStore:
+) -> AsyncKeyValueStore:
     if backend == "memory":
         return DictKeyValueStore()  # プロセス内 dict（揮発・接続不要）
     elif backend == "local":
