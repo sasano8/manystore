@@ -27,7 +27,7 @@ from contextlib import closing
 
 import pytest
 
-# 全テストが uvicorn を別スレッド実 listen＋実 aiobotocore 往復＝待ち支配なので module 全体を slow に（R13）。
+# 全テスト uvicorn 別スレッド listen＋実 aiobotocore 往復＝待ち支配ゆえ module 全体 slow（R13）。
 pytestmark = pytest.mark.slow
 
 uvicorn = pytest.importorskip("uvicorn")

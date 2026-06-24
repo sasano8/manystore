@@ -1,6 +1,6 @@
 """backends — backend 毎の具体実装（Local / S3 / NATS / HTTP）と KVS のファクトリ。
 
-抽象（[KeyValueStore] / [FileStore]）は [async_storage] に、ここには実装だけを置く。
+抽象（[KeyValueStore] / [FileStore]）は `stores` に、ここには backend 実装だけを置く。
 重い依存（aiobotocore / nats）は各 backend のメソッド内で遅延 import する。
 """
 

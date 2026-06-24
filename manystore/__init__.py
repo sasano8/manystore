@@ -1,14 +1,8 @@
 """manystore — 差し替え可能なバックエンドを持つストア群。
 
-2 種のストア抽象を、async / sync / async-to-sync の 3 モジュールに分けて持つ:
+2 種のストア抽象を提供する（async を一次実装、sync ブリッジを同梱）:
 - [KeyValueStore] … put/get がメインの値ストア（Local / S3 / NATS / HTTP バックエンド同梱）。
 - [FileStore]     … `open` でファイルオブジェクト（[FileObject]）を取得するストリーム指向の抽象。
-
-モジュール:
-- [async_storage]         … ストア抽象（[KeyValueStore] / [FileStore]）＋共通ヘルパ＋汎用アダプタ。
-- [backends]              … backend 毎の具体実装（Local / S3 / NATS / HTTP）とファクトリ。
-- [sync_storage]          … 同期インターフェイス（[SyncKeyValueStore] / [SyncFileStore]）。
-- [async_to_sync_storage] … 非同期を同期として被せるブリッジ（[AsyncToSyncKeyValueStore]）。
 
 公開 API は **2 つの名前空間にグルーピング**して公開する:
 - [manystore.kv]   … キーバリューストア（put/get がメインの値ストア）。

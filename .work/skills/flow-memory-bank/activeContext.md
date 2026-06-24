@@ -5,22 +5,17 @@
 
 ## 現在のフォーカス
 
-**実装/プロトコル分離リファクタ（M035）＋ conformancer 化（M031）をユーザーが IDE で駆動中（2026-06-24）。**
+**M035 リファクタ完了（ユーザー IDE）＋ドキュメント参照の整理（2026-06-24）。次サイクル候補は下記。**
 
-> ⚠️ **ツリーが現在 red（ユーザーの in-flight 改名）**: `stores/async_storage.py` が `base.py` へ未改名なのに
-> `conformancer/__init__.py:40` が `from .stores.base import`（しかも相対レベル誤り＝`..stores.base` が正）を参照し
-> `test_conformance.py` が collection error。`kv.py` 等はまだ `stores.async_storage` を import＝**改名が中途**。
-> エージェントは触らない（ユーザーの IDE refactor 領域）。ユーザーが async_storage→base 改名を完了させれば解消。
-
-- ユーザーが IDE refactor で move-symbol を実行中＝コミット `60f2405`(async_storage→base)/`a37abde`(array)/
-  `862f824`(async_to_sync→sync_bridge)/`61e2d43`(safe_path→safe)/`fd6ef1a`(conformance→conformancer)。
-  現状 `manystore/stores/` に `async_storage.py`/`array_storage.py`/`async_to_sync_storage.py`/`safe_path.py` が移動済
-  （import は `from .stores.* import` に追従・`import manystore` OK）。`sync_storage.py` は root 残置（純 Protocol）。
-- **M035 移動マップの正本＝`m035-impl-protocol-split-plan.md`**（src→dest を symbol 単位で確定）。残＝Protocol を
-  root `protocols.py` へ抽出（async_storage の Protocol 群＋sync_storage 全 Protocol）／subpackage 名・base.py 等への
-  最終リネーム。**aa.md 要求3（sync/async プロトコルを共通管理場所へ）はこの protocols.py 集約に一致**。
-- エージェント側の役割＝マップ提示済み・MB hygiene。コードの move 主体はユーザー（IDE）なので衝突を避ける
-  （`.work/` のみ触る）。
+- ユーザーが IDE で実装ファイルを移動・改名済＝`manystore/stores/{base,array,safe,sync_bridge}.py`
+  （旧 async_storage/array_storage/safe_path/async_to_sync_storage）＋ `conformance.py`→`conformancer/`。
+  `sync_storage.py` は root 残置（純 Protocol）。**`protocols.py` への Protocol 抽出はせず**（ユーザー判断＝
+  base.py が Protocol＋実装を保持）。ツリー green（fast 113 passed）。
+- **ドキュメント参照の整理（このタスク・ユーザー方針）**: 「ドキュメントに書くと不整合が生じる＝必要以上の参照は
+  持たず消す（本当に必要ならリネームして残す）」。systemPatterns のファイル別インベントリを概念レベルへ畳み
+  （ファイル名列挙をやめ facade `kv`/`file`＋`docs/architecture.md` を正本に）、コード docstring の旧モジュール参照
+  （`[async_storage]`/`safe_path` 等）を削除/改名、`docs/architecture.md` の Protocol 参照を公開シンボルへ。完了 plan
+  `m035-impl-protocol-split-plan.md` は役目を終えたので削除。
 
 ## 直近の変更
 

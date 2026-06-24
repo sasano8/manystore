@@ -3,7 +3,7 @@
 - [SyncKeyValueStore] … [KeyValueStore] の同期版（put/get がメイン）。
 - [SyncFileStore] … [FileStore] の同期版（`open` で [SyncFileObject] を取得）。
 
-当面の実装は async_to_sync_storage のブリッジが担うが、将来ループを外して性能を取りたい
+当面の実装は [AsyncToSyncKeyValueStore] のブリッジが担うが、将来ループを外して性能を取りたい
 ときは、これらのインターフェイスに沿った手書きの同期バックエンドを足せる（差し替え可能）。
 """
 

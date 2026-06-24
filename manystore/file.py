@@ -5,7 +5,6 @@
 トップ `manystore` からも再エクスポートする。
 """
 
-from .stores.base import FileInfo, FileObject, FileStore, KeyValueFileStore
 from .backends import (
     DictFileStore,
     HttpFileStore,
@@ -14,6 +13,7 @@ from .backends import (
     NatsFileStore,
     S3FileStore,
 )
+from .stores.base import FileInfo, FileObject, FileStore, KeyValueFileStore
 from .stores.safe import SafeFileStore, UnsafePathError, validate_safe_path
 from .sync_storage import SyncFileObject, SyncFileStore
 

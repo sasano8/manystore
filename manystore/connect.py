@@ -1,7 +1,7 @@
 """connection lifecycle — 接続前の状態（factory 包み）を async with で接続して使う。
 
 インスタンス初期化では接続せず、`async with` で初めて接続する。Local も接続不要だが
-ステップを合わせるため connect/aclose を持つ（[async_storage] 参照）。
+ステップを合わせるため connect/aclose を持つ。
 
 - [ConnectPolicy] … 接続の方針（初回 timeout・リトライ・バックオフ・全体 deadline）。
 - [connecting] … 任意のストア factory を包む汎用の async context manager。
@@ -18,8 +18,8 @@ from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 
-from .stores.base import KeyValueStore
 from .backends import create_key_value_store
+from .stores.base import KeyValueStore
 
 
 @dataclass(frozen=True)

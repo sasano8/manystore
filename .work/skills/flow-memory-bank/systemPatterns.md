@@ -2,28 +2,21 @@
 
 ## システム構成
 
-`manystore/` パッケージ（wheel packages = `["manystore"]`）。主なモジュール：
+`manystore/` パッケージ（wheel packages = `["manystore"]`）。**個別ファイル名はここに列挙しない**
+（移動で drift するため）。**公開 API の正本は facade `manystore.kv` / `manystore.file`**（＋トップ
+`manystore` 再エクスポート）、**設計原則の正本は repo `docs/architecture.md`**（FileStore=KVS+IO・核の
+配置/寄り・get_or_raise・conformance）。レイヤは概念で押さえる:
 
-- `async_storage.py` — 一次実装。抽象（`KeyValueStore` / `FileStore` Protocol）＋基底 `KeyValueStoreBase`
-  （`get(key, default=None)` を `get_or_raise` から与える）＋共通ヘルパ（`_take` / `_atomic_write_bytes` /
-  `_kv_copy` / `_kv_move`）＋2 方向アダプタ `KeyValueFileStore`（KVS→FileStore）/ `KeyValueFromFileStore`
-  （FileStore→KVS）。**`FileStore(KeyValueStore, Protocol)` = KVS + open_reader/open_writer**（原則7）。
-- `sync_storage.py` — 同期 IF（`SyncKeyValueStore` / `SyncFileStore` / `SyncFileObject`）。
-- `async_to_sync_storage.py` — `AsyncToSyncKeyValueStore`（専属ループを `run_until_complete` で駆動する
-  ゼロ依存ブリッジ）。
-- `backends/` — `local.py` / `s3.py` / `nats.py` / `http_store.py` / `memory.py` ＋ `__init__` の
-  `create_key_value_store`（"memory"/"local"/"s3"/"nats"/"http"）。`http_store.py` は **read-only**（GET/HEAD のみ。
-  書き込み・一覧は `io.UnsupportedOperation`）。`memory.py`＝`DictKeyValueStore`/`DictFileStore`（依存ゼロ・揮発の
-  参照 backend）。
-- `conformance.py` — 適合性ツール（`assert_key_value_store`/`assert_file_store`＝Protocol メソッド存在チェック。
-  サードパーティ backend が pytest で横断準拠確認。挙動契約は未実装＝M022 P1）。
-- `docs/architecture.md`（repo）— **設計原則の正本**（FileStore=KVS+IO・核配置/寄り・get_or_raise・conformance）。
-- `connect.py` — `connect_key_value_store` / `connecting` / `ConnectPolicy`。
-- `safe_path.py` — `validate_safe_path` ＋ `SafeKeyValueStore`（download/キャッシュも担う唯一の KVS wrapper）/
-  `SafeFileStore`。
-- `array_storage.py` — `ArrayKeyValueStore`（論理名＝マウント先で複数 backend を束ねる汎用ストア）
-  ＋ `DownloadCache`。
-- **UI/サーバ（M019・`manystore[server]` extra）** — 3 層に分離（詳細 `.work/.../m019-ui-plan.md`）:
+- **コア（抽象＋実装）** — `manystore/stores/`（＋ sync Protocol）。抽象 `KeyValueStore`/`FileStore` Protocol、
+  基底 `KeyValueStoreBase`（`get` を `get_or_raise` から与える）、共通ヘルパ、2 方向アダプタ
+  `KeyValueFileStore`（KVS→FileStore）/`KeyValueFromFileStore`（FileStore→KVS）、合成 `ArrayKeyValueStore`、
+  安全ラッパ `SafeKeyValueStore`/`SafeFileStore`、sync ブリッジ `AsyncToSyncKeyValueStore`。
+  **`FileStore(KeyValueStore, Protocol)` = KVS + open_reader/open_writer**（原則7）。
+- **backends** — `create_key_value_store("memory"/"local"/"s3"/"nats"/"http")`。http は **read-only**
+  （GET/HEAD のみ・write/list は `io.UnsupportedOperation`）。memory＝依存ゼロ・揮発の参照 backend。
+- **conformancer** — 適合性ツール（Protocol メソッド存在チェック＋FileStoreTester）。
+- **接続** — `connect_key_value_store` / `connecting` / `ConnectPolicy`。
+- **UI/サーバ（M019・`manystore[server]` extra）** — 3 層に分離:
   - `implement/` — backend 非依存の中核。`protocol`(dataclass 契約) / `config`(contexts+views.featured, tomllib) /
     `service`(`StorageService`: protocol→`KeyValueStore` 写像、`SafeKeyValueStore` でキー検証) /
     `watcher`(`PollingWatcher`: size 差分→イベント、fan-out)。HTTP 非依存で単体テスト可。
@@ -76,7 +69,7 @@
    （Memory Bank は一時記憶なのでここには要約のみ／正式原則を置かない）。要約: backend ごとに kv 寄り/file 寄りを
    見極め、逆派生で性能が落ちる方を核に。kv 寄り＝`XFileStore(XKeyValueStore)`（S3=native streaming / NATS・HTTP・dict
    =buffer 合成）、file 寄り＝`KeyValueFromFileStore(XFileStore)`（Local）。`FileStore = KeyValueStore + IO`。
-   準拠は `manystore.conformance`（メソッド存在チェック）で横断確認。read-only（HTTP）は write 系が
+   準拠は `manystore.conformancer`（メソッド存在チェック）で横断確認。read-only（HTTP）は write 系が
    `io.UnsupportedOperation`。**詳細・backend 別表・conformance の使い方は `docs/architecture.md` を見ること。**
 
 ## コンポーネント関係 / 重要な実装経路

@@ -9,7 +9,7 @@ PermissionError）を
 
 モジュール関数 [to_problem] は **任意の例外**（manystore 外の stdlib 例外も）を problem dict に写す
 （[ManystoreError] は自身の status/title、その他は既定写像、未知は 500）。元モジュール
-（safe_path / implement.service / gateway.multipart）は後方互換で各例外を再エクスポートする。
+（stores.safe / implement.service / gateway.multipart）は後方互換で各例外を再エクスポートする。
 """
 
 import io

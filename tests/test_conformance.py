@@ -2,7 +2,7 @@
 
 (1) 全 backend が `KeyValueStore` / `FileStore` Protocol のメソッドを揃えているか（存在チェック）、
 (2) `FileStoreTester` が辞書ストアをオラクルに対象の挙動（run_light）を差分検証できるか、を確認。
-サードパーティ backend も `manystore.conformance` を import すれば同じ検査を回せる。
+サードパーティ backend も `manystore.conformancer` を import すれば同じ検査を回せる。
 """
 
 import asyncio
@@ -21,7 +21,6 @@ from manystore import (
     S3FileStore,
     S3KeyValueStore,
 )
-from manystore.stores.base import KeyValueStoreBase
 from manystore.client import RemoteKeyValueStore
 from manystore.conformancer import (
     FileStoreTester,
@@ -32,6 +31,7 @@ from manystore.conformancer import (
     save_report,
 )
 from manystore.kv import KeyValueStore
+from manystore.stores.base import KeyValueStoreBase
 
 
 def _kvs_instances(tmp_path):

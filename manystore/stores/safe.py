@@ -7,6 +7,7 @@
 
 from collections.abc import AsyncIterator
 
+from ..exceptions import UnsafePathError  # 集約先（後方互換: ここからも import できる）
 from .base import (
     FileInfo,
     FileObject,
@@ -15,7 +16,6 @@ from .base import (
     KeyValueStoreBase,
 )
 from .base import iter_prefix as _iter_prefix
-from ..exceptions import UnsafePathError  # 集約先（後方互換: ここからも import できる）
 
 __all__ = ["UnsafePathError", "validate_safe_path", "SafeKeyValueStore", "SafeFileStore"]
 

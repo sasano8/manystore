@@ -62,9 +62,8 @@ def _s3_up() -> bool:
 
 
 def _s3_virtual_up() -> bool:
-    # virtual-host スタイルは `<bucket>.<host>` を解決できる DNS 環境（実 AWS 等）でのみ成立する。
-    # ローカル S3 互換サーバ（SeaweedFS/minio）では解決できず、本接続が TimeoutError まで待つ＝R13 の
-    # アンチパターン。よって **明示 opt-in（env）が無ければ即 skip**（timeout を待たず到達チェックで弾く）。
+    # virtual-host は `<bucket>.<host>` を解決できる DNS 環境でのみ成立。ローカルでは解決できず
+    # 本接続が TimeoutError まで待つ＝R13 アンチパターン。明示 opt-in（env）無しは即 skip。
     return bool(os.environ.get("MANYSTORE_S3_VIRTUAL")) and _s3_up()
 
 
@@ -176,10 +175,7 @@ async def _run(opener: Callable[[], object]) -> None:
     "case",
     # 実 backend 待ちを伴うケース（nats/s3）は slow＝内ループ除外。local は待ち無しの
     # 常時バグ検出ケースなので fast のまま残す（R13）。
-    [
-        pytest.param(c, id=c.id, marks=[pytest.mark.slow] if c.skip_on_error else [])
-        for c in CASES
-    ],
+    [pytest.param(c, id=c.id, marks=[pytest.mark.slow] if c.skip_on_error else []) for c in CASES],
 )
 def test_backend_crud(case: _Case) -> None:
     """注入するストアだけ変えて、全 backend で同じ CRUD を回す。"""
