@@ -2,19 +2,28 @@
 
 ## 現在のフォーカス
 
-**HTTP addressing 再設計（M025改）＋ prefix capability（M030）を設計確定・起票（2026-06-24・ユーザー要望/対話・doc-first）。**
-M028（context=ArrayStorage 第一階層）を受けて HTTP 面を簡素化する方針を対話で確定。**実装は次サイクル**（今回は計画のみ）。
+**M025改 HTTP addressing 再設計（実装完了・2026-06-24・ユーザー要望/対話）。次は M030（prefix capability）。**
+着手順はユーザー確定＝**M025改 → M030**。M025改 を実装・コミットし、次サイクルで M030 に入る。
 
-- **addressing（M025改）**: `contexts/{ctx}/objects/{key}` → **`NS/{bucket}/{path}`**（先頭=bucket=ArrayStorage
-  第一階層、後続は不透明 `{path}`、`contexts`/`objects`/`keys` 飾り廃止、表層語を bucket に統一）。コレクション判別＝
-  空パス=一覧/非空=オブジェクト（prefix 廃止で末尾スラッシュ規則不要）。WS は同パス `WS NS/{bucket}/` を upgrade で判別。
-- **prefix を capability に移設（M030）**: native HTTP から prefix 撤去（フラット list-all）。prefix は
-  `SupportsPrefixListing`（`iter_prefix`）＋汎用フォールバックヘルパに移設＝S3 ネイティブ（list_objects_v2 Prefix）/
-  他は総なめ。`Safe`/`Array` ラッパーが委譲して native 効率を通す（**M027b と同じ伝播**）。S3 GW ListObjectsV2・
-  multipart 内部をこのヘルパ経由に。prefix は NATS 由来ではない（汎用 startswith）と判明。
-- 破壊的変更（未リリース＝互換エイリアス無し）。設計は `m025-namespace-restructure-plan.md`（改訂版）。
-- **未決**: M025改 と M030 の着手順（capability 先 or 同時に切る）／`GET NS/` に featured/default を載せるか／
-  フェーズ3 storage/manystore のストリーミング詳細／UI フラット化に伴う大規模 bucket の遅延ロード喪失。
+- **addressing**: native REST を `contexts/{ctx}/objects/{key}` → **`{bucket}/{path}`**（NS=`/kv/raw`）に再設計。
+  `contexts`/`objects`/`keys` 飾りを廃止し表層語を bucket に統一（内部 `StorageService` の context 命名は不変）。
+  ルート＝`GET /`(bucket 一覧)／`GET /{bucket}/`(キー**フラット**一覧・`?limit=`)／`WS /{bucket}/`(同パスを upgrade で判別)／
+  `HEAD|GET|PUT|DELETE /{bucket}/{path:path}`。登録順は `GET /{bucket}/` を `GET /{bucket}/{path:path}` より先に
+  （`{path:path}` が空文字も拾うため）。コレクション判別＝空パス=一覧/非空=オブジェクト（末尾スラッシュ規則は消滅）。
+- **NS root 衝突の解決（ユーザー確定）**: 単体アプリ `create_app` も native を **`/kv/raw` 前置**に統一（combined と一貫）。
+  これで bucket 一覧が `GET /kv/raw/` になり、`/` を同梱 UI の StaticFiles に明け渡せる（root 衝突解消）。
+- **prefix は native から撤去**（フラット list-all）。`server/routes.py` の list は `service.list_entries(bucket, limit=)`
+  のみ。**`service.list_entries` の prefix 引数は M030 まで残置**（S3 GW・multipart が利用中）。
+- **client**（`ManystoreClient`/`RemoteKeyValueStore`）: `base_url` は **native NS のルート**を指す（例 `http://host/kv/raw`）。
+  httpx の相対結合のため base_url 末尾に `/` を補い、リクエストは `{bucket}/{path}` 相対で組む。
+- **UI**（`app.js`）: `GET /kv/raw/{bucket}/?limit=10000` で**全キーをフラット取得**し、現在 dir への絞りは
+  `e.key.startsWith(state.dir)` でクライアント側に。WS は `/kv/raw/{bucket}/`。
+- 破壊的変更（未リリース＝互換エイリアス無し）。`make check` 緑（**118 passed, 1 skipped**）。test 改修＝
+  `test_server`/`test_combined`(URL を {bucket}/{path} 化)・`test_client`(base_url に /kv/raw)。設計は
+  `m025-namespace-restructure-plan.md`。
+- **未決（M030 以降）**: prefix capability の着手（次サイクル）／`GET /kv/raw/`(bucket 一覧)に featured/default を
+  載せるか（現状は載せている＝UI が使用）／フェーズ2 kv/json・フェーズ3 storage/manystore／UI フラット化に伴う
+  大規模 bucket の遅延ロード喪失（後回し可）。
 
 ## （旧フォーカス）
 

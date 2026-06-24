@@ -25,7 +25,8 @@ async def test_remote_kvs_roundtrip(tmp_path: Path) -> None:
     await service.connect()
     app = create_app(service)
     transport = httpx.ASGITransport(app=app)
-    store = RemoteKeyValueStore("http://test", "work", transport=transport)
+    # base_url は native NS（/kv/raw）のルートを指す。
+    store = RemoteKeyValueStore("http://test/kv/raw", "work", transport=transport)
     try:
         assert await store.get("a.txt") is None
         await store.put("a.txt", b"hello")
@@ -55,7 +56,9 @@ async def test_remote_get_or_raise_and_default(tmp_path: Path) -> None:
     service = StorageService(cfg, watch_interval=1.0)
     await service.connect()
     app = create_app(service)
-    store = RemoteKeyValueStore("http://test", "work", transport=httpx.ASGITransport(app=app))
+    store = RemoteKeyValueStore(
+        "http://test/kv/raw", "work", transport=httpx.ASGITransport(app=app)
+    )
     try:
         # サーバ層（StorageService）の get_or_raise も欠損で FileNotFoundError。
         with pytest.raises(FileNotFoundError):

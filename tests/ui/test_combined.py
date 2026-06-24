@@ -52,17 +52,17 @@ def test_manystore_native_rest_roundtrip(tmp_path: Path) -> None:
 
     service = StorageService(_make_config(tmp_path), watch_interval=0.05)
     with TestClient(create_combined_app(service)) as client:
-        # contexts 一覧（lifespan で service.connect が一度だけ走っていることの証左）。
-        meta = client.get("/kv/raw/contexts").json()
+        # bucket 一覧（lifespan で service.connect が一度だけ走っていることの証左）。
+        meta = client.get("/kv/raw/").json()
         assert {c["name"] for c in meta["contexts"]} == {"work", "ro"}
         assert meta["default_context"] == "work"
 
-        # PUT → GET → DELETE が `/kv/raw` 配下で通る。
-        assert client.put("/kv/raw/contexts/work/objects/a/b.txt", content=b"hi").status_code == 204
-        r = client.get("/kv/raw/contexts/work/objects/a/b.txt")
+        # PUT → GET → DELETE が `/kv/raw/{bucket}/{path}` で通る。
+        assert client.put("/kv/raw/work/a/b.txt", content=b"hi").status_code == 204
+        r = client.get("/kv/raw/work/a/b.txt")
         assert r.status_code == 200 and r.content == b"hi"
-        assert client.delete("/kv/raw/contexts/work/objects/a/b.txt").status_code == 204
-        assert client.get("/kv/raw/contexts/work/objects/a/b.txt").status_code == 404
+        assert client.delete("/kv/raw/work/a/b.txt").status_code == 204
+        assert client.get("/kv/raw/work/a/b.txt").status_code == 404
 
 
 def test_native_and_s3_share_service(tmp_path: Path) -> None:
@@ -71,10 +71,8 @@ def test_native_and_s3_share_service(tmp_path: Path) -> None:
 
     service = StorageService(_make_config(tmp_path), watch_interval=0.05)
     with TestClient(create_combined_app(service)) as client:
-        assert (
-            client.put("/kv/raw/contexts/work/objects/shared.txt", content=b"X").status_code == 204
-        )
-        # storage/s3 側（path-style）から同じ context=bucket / key で取得できる。
+        assert client.put("/kv/raw/work/shared.txt", content=b"X").status_code == 204
+        # storage/s3 側（path-style）から同じ bucket / key で取得できる。
         r = client.get("/storage/s3/work/shared.txt")
         assert r.status_code == 200 and r.content == b"X"
 

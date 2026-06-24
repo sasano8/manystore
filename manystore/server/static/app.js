@@ -1,8 +1,10 @@
 // manystore storage UI — ビルドレスな vanilla フロントエンド。
-// /contexts を読んで context/featured を描画し、選んだ context のキーを「仮想ツリー」で一覧する。
+// addressing は {bucket}/{path}（M025改・NS=/kv/raw）。GET /kv/raw/ で bucket/featured を
+// 描画し、選んだ bucket のキーを「仮想ツリー」で一覧する。
 //
-// KVS のキーはフラット文字列だが、/keys?prefix= が prefix 配下の全キーを返すので、
-// フロント側で "/" 区切りに畳めば階層に見せられる（中間階層でも直下のフォルダ/ファイルを列挙可能）。
+// KVS のキーはフラット文字列。native API は prefix を撤去したので GET /kv/raw/{bucket}/ は
+// bucket 内の**全キーをフラット**に返す（M030 で capability 化）。フロント側で "/" 区切りに
+// 畳めば階層に見せられる（中間階層でも直下のフォルダ/ファイルを列挙可能）。
 //   - state.dir : 現在のディレクトリ prefix（"" か "…/" で末尾は必ず "/"）。
 //   - state.key : 開いているファイルの完全キー（無ければ null）。
 // パンくず（dir1 / dir2 / dir3）はこの位置を表し、各セグメントのクリックでその階層へ移動。
@@ -25,7 +27,7 @@ async function api(path, opts) {
 }
 
 async function loadContexts() {
-  const data = await (await api("/contexts")).json();
+  const data = await (await api("/kv/raw/")).json();
   state.featured = data.featured || [];
 
   const ctxUl = $("contexts");
@@ -66,24 +68,24 @@ async function selectContext(ctx, prefix = "", quickWrite = false) {
   }
 }
 
-// 指定ディレクトリ prefix へ移動し、配下の全キーを取得してツリー描画する。
+// 指定ディレクトリ prefix へ移動し、bucket 内の全キー（フラット）を取得してツリー描画する。
+// native API は prefix を撤去したので bucket 全体を引き、現在 dir への絞り込みは renderTree が行う。
 async function navigateTo(dir) {
   state.dir = normDir(dir);
-  const data = await (
-    await api(`/contexts/${state.context}/keys?prefix=${encodeURIComponent(state.dir)}`)
-  ).json();
+  const data = await (await api(`/kv/raw/${state.context}/?limit=10000`)).json();
   state.entries = data.entries;
   renderTree();
   renderBreadcrumb();
 }
 
-// 現在 dir 配下のフラットキーを、直下のフォルダ（次セグメント）とファイルに畳んで描画。
+// bucket 全体のフラットキーから現在 dir 配下だけを、直下のフォルダ（次セグメント）とファイルに畳んで描画。
 function renderTree() {
   const ul = $("keys");
   ul.innerHTML = "";
   const folders = new Map(); // 名前 -> 配下キー数
   const files = [];
   for (const e of state.entries) {
+    if (!e.key.startsWith(state.dir)) continue; // 現在 dir 配下のみ（クライアント側 prefix 絞り）
     const rest = e.key.slice(state.dir.length);
     if (!rest) continue;
     const slash = rest.indexOf("/");
@@ -164,7 +166,7 @@ async function openKey(key) {
   for (const li of document.querySelectorAll("#keys li"))
     li.classList.toggle("active", li.dataset.key === key);
   renderBreadcrumb();
-  const r = await api(`/contexts/${state.context}/objects/${encodeURI(key)}`);
+  const r = await api(`/kv/raw/${state.context}/${encodeURI(key)}`);
   $("viewer").value = r.status === 404 ? "" : await r.text();
 }
 
@@ -202,7 +204,7 @@ async function save() {
   const key = (state.key || $("path-input").value).trim();
   if (!state.context || !key || key.endsWith("/"))
     return setStatus("context と key（ファイルパス）を指定してください");
-  await api(`/contexts/${state.context}/objects/${encodeURI(key)}`, {
+  await api(`/kv/raw/${state.context}/${encodeURI(key)}`, {
     method: "PUT",
     body: $("viewer").value,
   });
@@ -215,7 +217,7 @@ async function save() {
 async function del() {
   const key = state.key;
   if (!state.context || !key) return;
-  await api(`/contexts/${state.context}/objects/${encodeURI(key)}`, { method: "DELETE" });
+  await api(`/kv/raw/${state.context}/${encodeURI(key)}`, { method: "DELETE" });
   setStatus(`deleted: ${key}`);
   $("viewer").value = "";
   state.key = null;
@@ -225,7 +227,7 @@ async function del() {
 function connectWs(ctx) {
   if (state.ws) state.ws.close();
   const proto = location.protocol === "https:" ? "wss" : "ws";
-  const ws = new WebSocket(`${proto}://${location.host}/contexts/${ctx}/events`);
+  const ws = new WebSocket(`${proto}://${location.host}/kv/raw/${ctx}/`);
   ws.onmessage = (ev) => {
     const e = JSON.parse(ev.data);
     setStatus(`${e.type}: ${e.key}`);

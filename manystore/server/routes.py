@@ -1,16 +1,27 @@
 """routes — REST + WebSocket エンドポイント（protocol の実体）。
 
-KeyValueStore と 1:1 で対応する薄い HTTP アダプタ:
-- GET    /contexts                       … context 一覧 + featured + default_context
-- GET    /contexts/{ctx}/keys            … キー一覧（?prefix= &limit=）
-- HEAD   /contexts/{ctx}/objects/{key}   … 存在確認
-- GET    /contexts/{ctx}/objects/{key}   … 取得（bytes）
-- PUT    /contexts/{ctx}/objects/{key}   … 書き込み（body=bytes）
-- DELETE /contexts/{ctx}/objects/{key}   … 削除
-- WS     /contexts/{ctx}/events          … 変更イベントを push
+addressing は **`{bucket}/{path}`**（M025改）。bucket は [ArrayKeyValueStore] の第一階層
+（mount）、後続は不透明な `path`。`contexts`/`objects`/`keys` の飾りは廃止し、表層語を
+**bucket** に統一する（S3 と揃える。内部 [StorageService] の `context` 命名はそのまま）:
 
-interrupt 投入は「featured な local context への PUT」として、この汎用 PUT で成立する
+- GET    /                  … bucket(=mount) 一覧 + featured + default_context
+- GET    /{bucket}/         … bucket 内の全キー（フラット・?limit=）
+- WS     /{bucket}/         … 変更イベントを push（同パスを WS upgrade で判別）
+- HEAD   /{bucket}/{path}   … 存在確認
+- GET    /{bucket}/{path}   … 取得（bytes）
+- PUT    /{bucket}/{path}   … 書き込み（body=bytes）
+- DELETE /{bucket}/{path}   … 削除
+
+コレクション判別＝**空パス=一覧 / 非空パス=オブジェクト**（prefix 撤去で末尾スラッシュ規則は
+不要・曖昧さが消える）。prefix（仮想フォルダ）は native API から撤去し、backend/ラッパーの
+optional capability へ移す（M030）。`{bucket}/` のキー一覧は**フラット**（subtree 絞りは
+クライアント側で畳む）。`{path}` は不透明（サーバは階層解釈しない）。
+
+interrupt 投入は「featured な local bucket への PUT」として、この汎用 PUT で成立する
 （専用エンドポイントは持たない＝UI は汎用のまま）。
+
+ルート登録順に注意：`GET /{bucket}/`（キー一覧）を `GET /{bucket}/{path:path}`（オブジェクト・
+`{path}` は空文字も拾える）より**先**に登録し、`/{bucket}/` がオブジェクト経路に吸われないように。
 
 エラー応答は **`application/problem+json`**（RFC 9457）で返す（[to_problem]）。ドメイン例外
 （[ManystoreError]）は status/title 付き problem に、欠損は 404 problem に写す。想定外の例外は
@@ -26,9 +37,9 @@ from ..implement.service import StorageService
 def build_router(service: StorageService):
     """`service` を載せた manystore ネイティブ REST/WS ルートの [APIRouter] を返す。
 
-    統合アプリは `app.include_router(build_router(service), prefix="/manystore")` で前置でき、
-    単体アプリ（[create_app]）は prefix なしで include する。相対パス
-    （`/contexts/...` 等）は prefix が前置されるだけで本体は不変。fastapi は遅延 import。
+    統合アプリ・単体アプリとも `app.include_router(build_router(service), prefix="/kv/raw")`
+    で前置する（NS=`/kv/raw`）。相対パス（`/{bucket}/...` 等）は prefix が前置されるだけで
+    本体は不変。fastapi は遅延 import。
     """
     from fastapi import (
         APIRouter,
@@ -52,61 +63,61 @@ def build_router(service: StorageService):
             raise exc
         return _problem(exc)
 
-    @app.get("/contexts")
-    async def list_contexts() -> dict[str, object]:
+    @app.get("/")
+    async def list_buckets() -> dict[str, object]:
         return {
             "contexts": [asdict(c) for c in service.list_contexts()],
             "featured": service.featured(),
             "default_context": service.default_context,
         }
 
-    @app.get("/contexts/{context}/keys")
-    async def list_keys(context: str, prefix: str = "", limit: int = 1000):
+    @app.get("/{bucket}/")
+    async def list_keys(bucket: str, limit: int = 1000):
         try:
-            entries = await service.list_entries(context, prefix=prefix, limit=limit)
+            entries = await service.list_entries(bucket, limit=limit)
         except Exception as exc:
             return _on_error(exc)
         return {"entries": [asdict(e) for e in entries]}
 
-    @app.head("/contexts/{context}/objects/{key:path}")
-    async def head_object(context: str, key: str) -> Response:
+    @app.head("/{bucket}/{path:path}")
+    async def head_object(bucket: str, path: str) -> Response:
         try:
-            ok = await service.exists(context, key)
+            ok = await service.exists(bucket, path)
         except Exception as exc:
             return _on_error(exc)
         return Response(status_code=200 if ok else 404)
 
-    @app.get("/contexts/{context}/objects/{key:path}")
-    async def get_object(context: str, key: str) -> Response:
+    @app.get("/{bucket}/{path:path}")
+    async def get_object(bucket: str, path: str) -> Response:
         try:
-            data = await service.get(context, key)
+            data = await service.get(bucket, path)
         except Exception as exc:
             return _on_error(exc)
         if data is None:
             return _problem(FileNotFoundError("not found"))  # 404 problem
         return Response(content=data, media_type="application/octet-stream")
 
-    @app.put("/contexts/{context}/objects/{key:path}", status_code=204)
-    async def put_object(context: str, key: str, request: Request) -> Response:
+    @app.put("/{bucket}/{path:path}", status_code=204)
+    async def put_object(bucket: str, path: str, request: Request) -> Response:
         body = await request.body()
         try:
-            await service.put(context, key, body)
+            await service.put(bucket, path, body)
         except Exception as exc:
             return _on_error(exc)
         return Response(status_code=204)
 
-    @app.delete("/contexts/{context}/objects/{key:path}", status_code=204)
-    async def delete_object(context: str, key: str) -> Response:
+    @app.delete("/{bucket}/{path:path}", status_code=204)
+    async def delete_object(bucket: str, path: str) -> Response:
         try:
-            await service.delete(context, key)
+            await service.delete(bucket, path)
         except Exception as exc:
             return _on_error(exc)
         return Response(status_code=204)
 
-    @app.websocket("/contexts/{context}/events")
-    async def events(ws: WebSocket, context: str) -> None:
+    @app.websocket("/{bucket}/")
+    async def events(ws: WebSocket, bucket: str) -> None:
         try:
-            watcher = service.watcher(context)
+            watcher = service.watcher(bucket)
         except ContextNotFound:
             await ws.close(code=4404)
             return
@@ -121,9 +132,10 @@ def build_router(service: StorageService):
 
 
 def register_routes(app, service: StorageService) -> None:
-    """`app`（FastAPI）に protocol のルートを登録する（後方互換の薄いシム）。
+    """`app`（FastAPI）に protocol のルートを root 直下で登録する（後方互換の薄いシム）。
 
-    内部で [build_router] が返す [APIRouter] を `app.include_router(...)` する。
-    既存の単体アプリ生成（[create_app]）はこの形のまま動く。
+    内部で [build_router] が返す [APIRouter] を prefix 無しで `app.include_router(...)` する。
+    現行の [create_app] は NS=`/kv/raw` 前置で include するため本シムは使わないが、root 直下に
+    native ルートを載せたい外部呼び出し向けに残す（bucket 一覧が `GET /` になる点に注意）。
     """
     app.include_router(build_router(service))
