@@ -112,8 +112,12 @@ class StorageService:
                 break
         return out
 
-    async def get(self, context: str, key: str) -> bytes | None:
-        return await self._array.get(self._key(context, key))
+    async def get_or_raise(self, context: str, key: str) -> bytes:
+        """欠損なら `FileNotFoundError`（get の primitive・client/backend と同じ規約）。"""
+        return await self._array.get_or_raise(self._key(context, key))
+
+    async def get(self, context: str, key: str, default: bytes | None = None) -> bytes | None:
+        return await self._array.get(self._key(context, key), default)
 
     async def exists(self, context: str, key: str) -> bool:
         return await self._array.exists(self._key(context, key))

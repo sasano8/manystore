@@ -21,6 +21,8 @@ from manystore import (
     S3FileStore,
     S3KeyValueStore,
 )
+from manystore.async_storage import KeyValueStoreBase
+from manystore.client import RemoteKeyValueStore
 from manystore.conformance import (
     FileStoreTester,
     assert_file_store,
@@ -33,13 +35,15 @@ from manystore.kv import KeyValueStore
 
 
 def _kvs_instances(tmp_path):
-    # 接続はしない（メソッド存在チェックは生成だけで十分）。
+    # 接続はしない（メソッド存在チェックは生成だけで十分）。サーバ越しの RemoteKeyValueStore も
+    # 「関係するストア」として roster に含める（get_or_raise 未実装などの取りこぼしを検知する）。
     return [
         DictKeyValueStore(),
         LocalKeyValueStore(tmp_path),
         S3KeyValueStore(bucket="b"),
         NatsObjectKeyValueStore(url="nats://x", bucket="b"),
         HttpKeyValueStore(base_url="http://x"),
+        RemoteKeyValueStore("http://x", "ctx"),
     ]
 
 
@@ -166,3 +170,24 @@ def test_conformance_detects_missing_method() -> None:
     assert "iter_all" in missing
     with pytest.raises(AssertionError):
         assert_key_value_store(_Broken())
+
+
+def test_base_enforces_get_or_raise_at_instantiation() -> None:
+    # KeyValueStoreBase 上で primitive(get_or_raise) を実装し忘れたストアは、呼ぶ前に
+    # **インスタンス化時点で TypeError** になる＝関係するストアの実装漏れに必ず気づける。
+    class _ForgotPrimitive(KeyValueStoreBase):
+        async def put(self, key, value): ...  # get_or_raise を実装していない
+
+    with pytest.raises(TypeError):
+        _ForgotPrimitive()
+
+    # primitive を実装したサブクラスは生成でき、get は基底から得られる（default を返す）。
+    class _Ok(KeyValueStoreBase):
+        async def get_or_raise(self, key):
+            raise FileNotFoundError(key)
+
+    asyncio.run(_assert_get_default(_Ok()))
+
+
+async def _assert_get_default(store) -> None:
+    assert await store.get("missing", default=b"d") == b"d"

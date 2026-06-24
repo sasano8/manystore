@@ -12,7 +12,7 @@ httpx を遅延 import する。
 from collections.abc import AsyncIterator
 from urllib.parse import quote
 
-from ..async_storage import FileInfo, _kv_copy, _kv_move
+from ..async_storage import FileInfo, KeyValueStoreBase, _kv_copy, _kv_move
 from ..implement.protocol import ContextInfo, EntryInfo
 
 
@@ -55,12 +55,18 @@ class ManystoreClient:
         r.raise_for_status()
         return [EntryInfo(key=e["key"], size=e["size"]) for e in r.json()["entries"]]
 
-    async def get(self, context: str, key: str) -> bytes | None:
+    async def get_or_raise(self, context: str, key: str) -> bytes:
         r = await self._client.get(f"/contexts/{context}/objects/{_quote_key(key)}")
         if r.status_code == 404:
-            return None
+            raise FileNotFoundError(key)  # 欠損は FileNotFoundError に正規化（get_or_raise 規約）
         r.raise_for_status()
         return r.content
+
+    async def get(self, context: str, key: str, default: bytes | None = None) -> bytes | None:
+        try:
+            return await self.get_or_raise(context, key)
+        except FileNotFoundError:
+            return default
 
     async def exists(self, context: str, key: str) -> bool:
         r = await self._client.head(f"/contexts/{context}/objects/{_quote_key(key)}")
@@ -78,8 +84,12 @@ class ManystoreClient:
         await self._client.aclose()
 
 
-class RemoteKeyValueStore:
-    """1 つの context をサーバ越しに [KeyValueStore] として扱うストア（RW）。"""
+class RemoteKeyValueStore(KeyValueStoreBase):
+    """1 つの context をサーバ越しに [KeyValueStore] として扱うストア（RW）。
+
+    primitive `get_or_raise` だけ実装し、`get(key, default=None)` は基底 [KeyValueStoreBase]
+    から受け取る（欠損は基底が捕捉して `default`）。
+    """
 
     def __init__(
         self,
@@ -95,8 +105,8 @@ class RemoteKeyValueStore:
     async def put(self, key: str, value: bytes) -> None:
         await self._client.put(self._context, key, value)
 
-    async def get(self, key: str) -> bytes | None:
-        return await self._client.get(self._context, key)
+    async def get_or_raise(self, key: str) -> bytes:
+        return await self._client.get_or_raise(self._context, key)
 
     async def iter_all(self) -> AsyncIterator[FileInfo]:
         for e in await self._client.list_entries(self._context, limit=10_000):

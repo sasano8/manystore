@@ -2,6 +2,24 @@
 
 ## 現在のフォーカス
 
+**M027c get_or_raise を client/service へ波及＋未実装を検知する網（実装完了・2026-06-24・ユーザー要望/対話）。**
+ユーザー要望「get_or_raise を client・service へ波及」＋質問「インターフェースが関係するものに実装されて
+いなければ気づけるようにできるか？」に対応。
+
+- **波及**: (1) `RemoteKeyValueStore` を `KeyValueStoreBase` 継承に変更＝primitive `get_or_raise`（404→
+  FileNotFoundError）だけ実装し `get(default)` は基底から。`ManystoreClient` に `get_or_raise(context,key)` を足し
+  `get` をその捕捉で再実装。(2) `StorageService` に `get_or_raise(context,key)`（array.get_or_raise 委譲）＋
+  `get(context,key,default=None)`。これで context 越し層も get の duality を持つ。
+- **「気づける」網（質問への回答＝はい）**: `KeyValueStoreBase` を **`abc.ABC` 化＋`get_or_raise` を
+  `@abstractmethod`**。primitive を実装し忘れたストアは**インスタンス化時点で TypeError**＝Protocol を部分的に
+  しか満たさない実装が黙って通らない（全 backend は実装済みで無影響）。加えて `RemoteKeyValueStore` を
+  conformance roster（メソッド存在チェック）に追加＝「関係するストア」を網羅。**2 層**＝ABC で primitive を
+  即時強制／roster の `assert_key_value_store` で全メソッド面をチェック。
+- test +2（ABC 強制でインスタンス化 TypeError／client・service の get_or_raise・default）。`make check` 緑
+  （**118 passed, 1 skipped**）。
+
+## （旧フォーカス）
+
 **M009 例外を exceptions に集約＋Problem Details 変換（実装完了・2026-06-24・ユーザー要望/対話）。**
 ユーザー要望「例外を exceptions にまとめたい／application/problem+json に変換できるメソッドを用意」に対応。
 

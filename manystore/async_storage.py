@@ -10,6 +10,7 @@
 FileStore→KVS の [KeyValueFromFileStore]）だけを置く。
 """
 
+import abc
 import contextlib
 import io
 import os
@@ -43,16 +44,21 @@ class KeyValueStore(Protocol):
     async def aclose(self) -> None: ...
 
 
-class KeyValueStoreBase:
+class KeyValueStoreBase(abc.ABC):
     """KVS の `get` 既定実装を与える基底（backend は `get_or_raise` だけ実装すればよい）。
 
     primitive は **`get_or_raise`**（キーが無ければ `FileNotFoundError` を上げる）。全体取得の
     `get(key, default=None)` は get_or_raise を捕捉して、欠損時に `default` を返す既定実装を
-    ここで 1 か所だけ提供する（各 backend で try/except を重複させない）。サブクラスは
-    get_or_raise を override する。
+    ここで 1 か所だけ提供する（各 backend で try/except を重複させない）。
+
+    `get_or_raise` は **`@abstractmethod`**。これを実装しないストアは **インスタンス化時点で
+    `TypeError`** になる＝「関係するストアが primitive を実装し忘れた」ことに必ず気づける
+    （[KeyValueStore] Protocol を部分的にしか満たさない実装が黙って通るのを防ぐ）。
     """
 
+    @abc.abstractmethod
     async def get_or_raise(self, key: str) -> bytes:
+        """キーの値を返す。欠損は `FileNotFoundError`。**サブクラス必須**（primitive）。"""
         raise NotImplementedError
 
     async def get(self, key: str, default: bytes | None = None) -> bytes | None:

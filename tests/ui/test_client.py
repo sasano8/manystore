@@ -7,6 +7,7 @@ pytest-asyncio（asyncio_mode=auto）で `async def test_*` をそのまま回�
 from pathlib import Path
 
 import httpx
+import pytest
 
 from manystore.client import RemoteKeyValueStore
 from manystore.implement.config import parse_config
@@ -43,6 +44,30 @@ async def test_remote_kvs_roundtrip(tmp_path: Path) -> None:
 
         await store.delete("a.txt")
         assert await store.get("a.txt") is None
+    finally:
+        await store.aclose()
+        await service.aclose()
+
+
+async def test_remote_get_or_raise_and_default(tmp_path: Path) -> None:
+    # get_or_raise が client/service に波及済み：欠損は FileNotFoundError、get は default を返す。
+    cfg = parse_config({"contexts": {"work": {"backend": "local", "root": str(tmp_path)}}})
+    service = StorageService(cfg, watch_interval=1.0)
+    await service.connect()
+    app = create_app(service)
+    store = RemoteKeyValueStore("http://test", "work", transport=httpx.ASGITransport(app=app))
+    try:
+        # サーバ層（StorageService）の get_or_raise も欠損で FileNotFoundError。
+        with pytest.raises(FileNotFoundError):
+            await service.get_or_raise("work", "missing.txt")
+
+        # クライアント層（RemoteKeyValueStore）：欠損は get_or_raise が送出、get は default。
+        with pytest.raises(FileNotFoundError):
+            await store.get_or_raise("missing.txt")
+        assert await store.get("missing.txt", default=b"fallback") == b"fallback"
+
+        await store.put("k.txt", b"v")
+        assert await store.get_or_raise("k.txt") == b"v"
     finally:
         await store.aclose()
         await service.aclose()
