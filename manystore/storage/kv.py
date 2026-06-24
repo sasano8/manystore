@@ -4,14 +4,6 @@
 （ファイル指向の [manystore.file] と名前空間で分離）。トップ `manystore` からも再エクスポートする。
 """
 
-from .backends import (
-    DictKeyValueStore,
-    HttpKeyValueStore,
-    LocalKeyValueStore,
-    NatsObjectKeyValueStore,
-    S3KeyValueStore,
-    create_key_value_store,
-)
 from ..connect import ConnectPolicy, connect_key_value_store, connecting
 from ..protocols import (
     AsyncKeyValueStore,
@@ -22,6 +14,14 @@ from ..protocols import (
     SyncKeyValueStore,
     iter_prefix,
     scan_prefix,
+)
+from .backends import (
+    DictKeyValueStore,
+    HttpKeyValueStore,
+    LocalKeyValueStore,
+    NatsObjectKeyValueStore,
+    S3KeyValueStore,
+    create_key_value_store,
 )
 from .surfaces.array import DEFAULT_CACHE_DIR, ArrayKeyValueStore, DownloadCache
 from .surfaces.safe import SafeKeyValueStore, UnsafePathError, validate_safe_path

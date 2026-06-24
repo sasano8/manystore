@@ -122,12 +122,12 @@ await safe.put("../escape", b"...")   # UnsafePathError
 
 ```bash
 # 開発用ワンコマンド起動（既定ストレージ .cache/manystore_dev は使い捨て・自動作成）
-make ui                    # = uv run python -m manystore.server --config examples/manystore-ui.dev.toml
+make ui                    # = uv run python -m manystore.serving.server --config examples/manystore-ui.dev.toml
 make ui PORT=9000          # ポート変更
 
 # 自分の設定で起動する場合（配布利用時）
 pip install "manystore[server]"
-python -m manystore.server --config examples/manystore-ui.toml   # 既定 http://127.0.0.1:8000
+python -m manystore.serving.server --config examples/manystore-ui.toml   # 既定 http://127.0.0.1:8000
 ```
 
 ブラウザで `http://127.0.0.1:8000` を開く。`make ui` は開発用設定（`examples/manystore-ui.dev.toml`）で
@@ -154,7 +154,7 @@ UI 本体は特定用途（interrupt 等）を知らず、config が「重点パ
 **汎用 UI のまま**任意のパスを手早く扱える。protocol（REST/WS）は `KeyValueStore` と 1:1 で対応し、
 `manystore.client.RemoteKeyValueStore` で 1 context をサーバ越しの `KeyValueStore` として扱える。
 
-- 構成: `manystore.implement`（backend 非依存の中核）/ `manystore.server`（FastAPI）/ `manystore.client`（SDK）。
+- 構成: `manystore.serving.services`（backend 非依存の中核）/ `manystore.serving.server`（FastAPI）/ `manystore.client`（SDK）。
 - 既定 bind は `127.0.0.1`。外部公開は `--host 0.0.0.0` を明示（フル CRUD を晒すため既定は自ホスト）。
 - 監視は MVP では polling（全 backend 対応）。inotify ベースは後続の最適化。
 

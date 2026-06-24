@@ -4,18 +4,12 @@
 - [KeyValueStore] … put/get がメインの値ストア（Local / S3 / NATS / HTTP バックエンド同梱）。
 - [FileStore]     … `open` でファイルオブジェクト（[FileObject]）を取得するストリーム指向の抽象。
 
-公開 API は **2 つの名前空間にグルーピング**して公開する:
-- [manystore.kv]   … キーバリューストア（put/get がメインの値ストア）。
-- [manystore.file] … ファイルストレージ（`open_reader`/`open_writer` の指向・バイナリ専用）。
-
-トップ `manystore` は後方互換のため両グループをフラットにも再エクスポートする（`manystore.kv` /
-`manystore.file` のどちらからでも、トップからでも import できる）。`__init__` 直下は stdlib のみに
-依存し、重い backend（nats / aiobotocore / httpx 等）は各 backend のメソッド内で遅延 import する。
+公開 API は facade `manystore.storage.kv`（値）/ `manystore.storage.file`（ファイル）に分け、
+トップ `manystore` へフラットに再エクスポートする（`from manystore import ...` でも
+`manystore.kv` / `manystore.file` 経由でも参照できる）。`__init__` 直下は stdlib のみに依存し、
+重い backend（nats / aiobotocore / httpx 等）は各 backend のメソッド内で遅延 import する。
 """
 
-from .storage import file
-
-from .storage import kv
 from .exceptions import PROBLEM_JSON as PROBLEM_JSON
 from .exceptions import ContextNotFound as ContextNotFound
 from .exceptions import ManystoreError as ManystoreError
@@ -23,6 +17,7 @@ from .exceptions import NoSuchUpload as NoSuchUpload
 from .exceptions import ReadOnlyContext as ReadOnlyContext
 from .exceptions import UnsafePathError as UnsafePathError
 from .exceptions import to_problem as to_problem
+from .storage import file, kv
 from .storage.file import *  # noqa: F403  （後方互換: ファイル群をトップにフラット再エクスポート）
 from .storage.kv import *  # noqa: F403  （後方互換: KV 群をトップにフラット再エクスポート）
 

@@ -1,5 +1,5 @@
 # manystore storage UI のサンプル設定。
-# 起動: uv run python -m manystore.server --config examples/manystore-ui.toml
+# 起動: uv run python -m manystore.serving.server --config examples/manystore-ui.toml
 # （`pip install "manystore[server]"` で server extra を入れておく）
 
 # UI が既定で開く context（任意）。

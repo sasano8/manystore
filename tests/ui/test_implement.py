@@ -8,7 +8,6 @@ from pathlib import Path
 
 import pytest
 
-from manystore.storage.backends import LocalKeyValueStore
 from manystore.serving.services.config import parse_config
 from manystore.serving.services.service import (
     ContextNotFound,
@@ -16,6 +15,7 @@ from manystore.serving.services.service import (
     StorageService,
 )
 from manystore.serving.services.watcher import PollingWatcher
+from manystore.storage.backends import LocalKeyValueStore
 
 
 def _config(tmp_path: Path) -> object:

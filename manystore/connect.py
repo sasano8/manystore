@@ -18,8 +18,8 @@ from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 
-from .storage.backends import create_key_value_store
 from .protocols import AsyncKeyValueStore
+from .storage.backends import create_key_value_store
 
 
 @dataclass(frozen=True)

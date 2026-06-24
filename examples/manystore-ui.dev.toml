@@ -1,5 +1,5 @@
 # manystore storage UI — 開発用設定（使い捨てストレージを既定にする）。
-# 起動: make ui      （= uv run python -m manystore.server --config examples/manystore-ui.dev.toml）
+# 起動: make ui      （= uv run python -m manystore.serving.server --config examples/manystore-ui.dev.toml）
 #
 # 既定ストレージは .cache/manystore_dev（.gitignore 済み＝使い捨て）。起動時に自動作成される
 # （LocalKeyValueStore が dir を mkdir する）ので、事前準備は不要。

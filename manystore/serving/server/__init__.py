@@ -4,7 +4,7 @@
 するので、未インストールでも本体（`import manystore`）は壊れない。
 
 - [create_app] … [StorageService] を載せた FastAPI アプリを返す（`from .app import create_app`）。
-- `python -m manystore.server --config <toml>` … uvicorn で起動する（[__main__]）。
+- `python -m manystore.serving.server --config <toml>` … uvicorn で起動する（[__main__]）。
 """
 
 from .app import create_app

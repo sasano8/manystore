@@ -5,15 +5,6 @@
 トップ `manystore` からも再エクスポートする。
 """
 
-from .backends import (
-    DictFileStore,
-    HttpFileStore,
-    LocalFileObject,
-    LocalFileStore,
-    NatsFileStore,
-    S3FileStore,
-    create_file_store,
-)
 from ..connect import ConnectPolicy, connecting
 from ..protocols import (
     AsyncFileObject,
@@ -24,6 +15,15 @@ from ..protocols import (
     SyncFileObject,
     SyncFileStore,
     SyncKeyValueStore,
+)
+from .backends import (
+    DictFileStore,
+    HttpFileStore,
+    LocalFileObject,
+    LocalFileStore,
+    NatsFileStore,
+    S3FileStore,
+    create_file_store,
 )
 from .surfaces.safe import SafeFileStore, UnsafePathError, validate_safe_path
 

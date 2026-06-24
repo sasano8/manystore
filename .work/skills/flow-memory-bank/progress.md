@@ -16,12 +16,12 @@
 - async / sync ブリッジ（`AsyncToSyncKeyValueStore`）、接続ライフサイクル（`connect_key_value_store`/`connecting`/
   `ConnectPolicy`）、安全パス（`validate_safe_path`/`SafeKeyValueStore`/`SafeFileStore`）、合成（`ArrayKeyValueStore`/
   `DownloadCache`）。
-- **適合性ツール `manystore.conformancer`**: メソッド存在チェック＋`FileStoreTester`（DictFileStore をオラクルに
+- **適合性ツール `manystore.tools.conformancer`**: メソッド存在チェック＋`FileStoreTester`（DictFileStore をオラクルに
   差分検証。`run_light` 実装済＝12 観点・副作用も記録・`save_report` で JSON 保存）。
-- **UI/サーバ（`manystore[server]` extra）**: `implement`/`server`/`client` の 3 層。任意 context を HTTP+WS で公開する
+- **UI/サーバ（`manystore[server]` extra）**: `serving.services`/`serving.server`/`client` の 3 層。任意 context を HTTP+WS で公開する
   汎用 CRUD UI。context = ArrayStorage 第一階層（bucket）。native REST は `{bucket}/{path}`、WS ライブ通知、
   `views.featured` で重点パス。`RemoteKeyValueStore` でサーバ越し KVS。
-- **S3 互換ゲートウェイ `manystore.gateway`**: GET/PUT/HEAD/DELETE/ListObjectsV2 + Multipart を `StorageService` 上に
+- **S3 互換ゲートウェイ `manystore.serving.gateway`**: GET/PUT/HEAD/DELETE/ListObjectsV2 + Multipart を `StorageService` 上に
   1:1 合成（コア IF 不変・実 aiobotocore 往復で検証済）。
 - **統合エントリポイント `manystore.combined`（`python -m manystore`）**: native REST/WS（`/kv/raw`・buffered）と
   S3 ゲートウェイ（`/storage/s3`・streaming）を単一 lifespan で束ねる。
@@ -109,6 +109,9 @@ error-swallow 監査 M036 / Safe 既定化 M011・M032 / テスト拡充）と U
 - **fail-loud（要求7）**: 暗黙フォールバックで失敗・非対応を握り潰さない。capability 非対応は loud 失敗・非 native は明示 opt-in。
 - **protocols.py = 契約＋既定実装の唯一の源泉**（2026-06-25）: backend が継承・流用する base/adapter/helper を 1 ファイルに集約し
   二重参照を断つ（`stores/base.py`・`sync_storage.py` 削除）。
+- **ディレクトリを 3 バケットに再編**（2026-06-25・ユーザー IDE）: `storage/`（ライブラリ本体＝backends・surfaces〔旧 stores〕・
+  facade kv/file）/ `serving/`（HTTP 公開＝services〔旧 implement〕・server・gateway）/ `tools/`（conformancer）。`implement`
+  の曖昧な名前を解消し「ストレージ抽象」と「その serving」をトップで分離。`protocols`/`connect`/`exceptions`/`client`/`combined` はトップ据え置き。
 - **Python サポート範囲は 3.14+ で確定（M017 見送り・2026-06-25）**: 3.10+ へ広げる案は YAGNI で見送り
   （広げると future import 復活＋ruff 設定の負担。3.14 純度を優先）。需要が出たら再検討。
 - Memory Bank: Cline 準拠 6 コア。作業フォルダ `.work/skills/flow-memory-bank/`（`.work/` は commit する正本）。

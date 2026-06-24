@@ -1,4 +1,4 @@
-"""`python -m manystore.gateway --config <toml>` で uvicorn 起動する CLI。
+"""`python -m manystore.serving.gateway --config <toml>` で uvicorn 起動する CLI。
 
 manystore を S3 互換 API として公開する。bucket = config の context。既定 bind は
 localhost（127.0.0.1）＝SigV4 署名検証はせず gateway 自身の認証層（既定 localhost）に
@@ -13,7 +13,7 @@ from .app import create_gateway
 
 
 def main(argv: list[str] | None = None) -> None:
-    parser = argparse.ArgumentParser(prog="manystore.gateway")
+    parser = argparse.ArgumentParser(prog="manystore.serving.gateway")
     parser.add_argument(
         "--config", required=True, help="TOML 設定ファイル（contexts＝S3 バケットに公開）"
     )

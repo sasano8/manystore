@@ -13,21 +13,19 @@
   （KVS→FileStore）/`KeyValueFromFileStore`（FileStore→KVS）、prefix capability ディスパッチ
   `iter_prefix`/`scan_prefix`、共有 IO オブジェクトと `_kv_copy`/`_kv_move`/`_atomic_write_bytes`。
   **`FileStore(KeyValueStore, Protocol)` = KVS + open_reader/open_writer**（原則7）。
-- **`manystore/stores/`** — 合成 `ArrayKeyValueStore`（`array.py`）、安全ラッパ `SafeKeyValueStore`/`SafeFileStore`
-  （`safe.py`）、sync ブリッジ `AsyncToSyncKeyValueStore`（`sync_bridge.py`）。いずれも protocols から import。
-- **backends** — `create_key_value_store("memory"/"local"/"s3"/"nats"/"http")`。http は **read-only**
-  （GET/HEAD のみ・write/list は `io.UnsupportedOperation`）。memory＝依存ゼロ・揮発の参照 backend。
-- **conformancer** — 適合性ツール（Protocol メソッド存在チェック＋FileStoreTester）。
-- **接続** — `connect_key_value_store` / `connecting` / `ConnectPolicy`。
-- **UI/サーバ（M019・`manystore[server]` extra）** — 3 層に分離:
-  - `implement/` — backend 非依存の中核。`protocol`(dataclass 契約) / `config`(contexts+views.featured, tomllib) /
-    `service`(`StorageService`: protocol→`KeyValueStore` 写像、`SafeKeyValueStore` でキー検証) /
-    `watcher`(`PollingWatcher`: size 差分→イベント、fan-out)。HTTP 非依存で単体テスト可。
-  - `server/` — FastAPI（`create_app`/routes/`__main__`/static）。REST/WS は `KeyValueStore` と 1:1 の薄い
-    アダプタ。fastapi/uvicorn は遅延 import。同梱ビルドレス Web UI。
-  - `client/remote.py` — manystore API 前提のクライアント（汎用 GET の `backends/http_store` とは別物）。
-    `ManystoreClient`（薄い SDK）/ `RemoteKeyValueStore`（1 context を `KeyValueStore` として被せる
-    ＝read-only `http_store` の RW 版）。`transport` 注入で in-process ASGI テスト可。
+3 バケットに分かれる（ディレクトリ＝役割なので個別ファイル名は追わない）:
+
+- **`manystore/storage/` ＝ ストレージ・ライブラリ本体**。`backends/`（具象 backend）/ `surfaces/`（コアへの
+  ラッパ・合成＝`Safe*`・`ArrayKeyValueStore`・`AsyncToSyncKeyValueStore`）/ facade `kv.py`・`file.py`。backend は
+  `create_key_value_store`/`create_file_store`（"memory"/"local"/"s3"/"nats"/"http"）。http は read-only
+  （write/list は `io.UnsupportedOperation`）、memory は依存ゼロ・揮発の参照 backend。
+- **`manystore/serving/`（`manystore[server]` extra）＝ コアを HTTP で公開する層**。`services/`（旧 implement＝
+  backend 非依存の中核：`StorageService`・protocol 契約 dataclass・config・`PollingWatcher`・s3map）/ `server/`
+  （FastAPI native REST/WS＋同梱 Web UI）/ `gateway/`（S3 互換）。`combined.py`（top）が両者を単一 lifespan で束ねる。
+- **`manystore/tools/conformancer/` ＝ 適合性ツール**（Protocol メソッド存在チェック＋FileStoreTester）。
+- **トップ直下** — `protocols.py`（契約＋既定実装の源泉・上記）/ `connect.py`（`connect_key_value_store`/`connecting`/
+  `ConnectPolicy`）/ `exceptions.py` / `client/`（`ManystoreClient`・`RemoteKeyValueStore`）。
+- **安全な入口（顔）** — `open_async_key_value_store` / `open_async_file_store`（Safe 包装必須の接続 CM）。
 
 ## 主要な技術判断
 
@@ -72,7 +70,7 @@
    （Memory Bank は一時記憶なのでここには要約のみ／正式原則を置かない）。要約: backend ごとに kv 寄り/file 寄りを
    見極め、逆派生で性能が落ちる方を核に。kv 寄り＝`XFileStore(XKeyValueStore)`（S3=native streaming / NATS・HTTP・dict
    =buffer 合成）、file 寄り＝`KeyValueFromFileStore(XFileStore)`（Local）。`FileStore = KeyValueStore + IO`。
-   準拠は `manystore.conformancer`（メソッド存在チェック）で横断確認。read-only（HTTP）は write 系が
+   準拠は `manystore.tools.conformancer`（メソッド存在チェック）で横断確認。read-only（HTTP）は write 系が
    `io.UnsupportedOperation`。**詳細・backend 別表・conformance の使い方は `docs/architecture.md` を見ること。**
 
 ## コンポーネント関係 / 重要な実装経路

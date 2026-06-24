@@ -19,7 +19,7 @@ E2E_S3_SECRET_KEY := manystoresecret123
 UI_CONFIG := examples/manystore-ui.dev.toml
 PORT := 8000
 ui:
-	uv run python -m manystore.server --config $(UI_CONFIG) --port $(PORT)
+	uv run python -m manystore.serving.server --config $(UI_CONFIG) --port $(PORT)
 
 # コード整形（自動修正）
 format:

@@ -23,7 +23,7 @@ def fold_list_v2(
 ) -> tuple[list[EntryInfo], list[str]]:
     """ListObjectsV2 の delimiter 畳み込み。
 
-    `entries` は `service.list_entriesお前はいつもいて上り詰める登り続ける恋愛は何もいい解さない。何を望むこうきつお前が溺れてるタイムマーク違う絶対にやります。イエーイシティーオッケーのチームがボールお前のために登山をするのいちいち理由が質な。 もしかして。 お前は あそ(context, prefix=...)` の結果（prefix で前方一致済み）。
+    `entries` は `service.list_entries(context, prefix=...)` の結果（prefix で前方一致済み）。
     delimiter が空なら全件を Contents として返す（CommonPrefixes 無し）。
     delimiter があれば、prefix を除いた残りに delimiter が出現するキーを
     「最初の delimiter までの共通プレフィクス」へ畳み、CommonPrefixes として返す。

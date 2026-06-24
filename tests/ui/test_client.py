@@ -10,10 +10,10 @@ import httpx
 import pytest
 
 from manystore.client import RemoteKeyValueStore
-from manystore.serving.services.config import parse_config
-from manystore.serving.services.service import StorageService
 from manystore.serving.server.app import create_app
 from manystore.serving.server.routes import KV_RAW_PREFIX  # native NS prefix の単一正本
+from manystore.serving.services.config import parse_config
+from manystore.serving.services.service import StorageService
 
 
 async def test_remote_kvs_roundtrip(tmp_path: Path) -> None:

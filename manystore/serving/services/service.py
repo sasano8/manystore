@@ -10,9 +10,9 @@ HTTP の **context（第一階層）は [ArrayKeyValueStore] の mount に対応
 HTTP には一切依存しない＝この層だけで単体テストできる。
 """
 
-from ...storage.backends import create_key_value_store
 from ...exceptions import ContextNotFound, ReadOnlyContext  # 集約先（後方互換で再エクスポート）
 from ...protocols import iter_prefix as _iter_prefix
+from ...storage.backends import create_key_value_store
 from ...storage.surfaces.array import ArrayKeyValueStore
 from ...storage.surfaces.safe import SafeKeyValueStore
 from .config import AppConfig

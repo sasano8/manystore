@@ -20,8 +20,9 @@
   （router は lifespan を持たない）。
 - fastapi は遅延 import（`manystore[server]` 未導入でも `import manystore` は壊さない）。
 
-後方互換: 既存の単体アプリ（[manystore.server.create_app] / [manystore.gateway.create_gateway]）
-と各 `__main__` はそのまま動く。本統合はそれらに**追加**するだけで、何も壊さない。
+後方互換: 既存の単体アプリ（[manystore.serving.server.create_app] /
+[manystore.serving.gateway.create_gateway]）と各 `__main__` はそのまま動く。本統合はそれらに
+**追加**するだけで、何も壊さない。
 """
 
 from collections.abc import AsyncIterator
@@ -29,9 +30,9 @@ from contextlib import asynccontextmanager
 
 from .serving.gateway.routes import STORAGE_S3_PREFIX
 from .serving.gateway.routes import build_router as build_s3_router
-from .serving.services.service import StorageService
 from .serving.server.routes import KV_RAW_PREFIX
 from .serving.server.routes import build_router as build_native_router
+from .serving.services.service import StorageService
 
 
 def create_combined_app(service: StorageService):

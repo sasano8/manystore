@@ -17,7 +17,7 @@
 
     import asyncio
     from manystore import DictFileStore
-    from manystore.conformance import assert_file_store, FileStoreTester, save_report
+    from manystore.tools.conformancer import assert_file_store, FileStoreTester, save_report
 
     def test_my_file_store():
         target = MyFileStore()

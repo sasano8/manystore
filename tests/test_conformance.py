@@ -22,6 +22,8 @@ from manystore import (
     S3KeyValueStore,
 )
 from manystore.client import RemoteKeyValueStore
+from manystore.protocols import KeyValueStoreBase
+from manystore.storage.kv import AsyncKeyValueStore
 from manystore.tools.conformancer import (
     FileStoreTester,
     assert_file_store,
@@ -30,8 +32,6 @@ from manystore.tools.conformancer import (
     required_members,
     save_report,
 )
-from manystore.storage.kv import AsyncKeyValueStore
-from manystore.protocols import KeyValueStoreBase
 
 
 def _kvs_instances(tmp_path):

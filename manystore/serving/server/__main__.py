@@ -1,4 +1,4 @@
-"""`python -m manystore.server --config <toml>` で uvicorn 起動する CLI。
+"""`python -m manystore.serving.server --config <toml>` で uvicorn 起動する CLI。
 
 既定 bind は localhost（127.0.0.1）。外部公開は明示的に `--host 0.0.0.0` を要求する
 （フル CRUD を晒すので、既定では自ホストに閉じる）。
@@ -12,7 +12,7 @@ from .app import create_app
 
 
 def main(argv: list[str] | None = None) -> None:
-    parser = argparse.ArgumentParser(prog="manystore.server")
+    parser = argparse.ArgumentParser(prog="manystore.serving.server")
     parser.add_argument(
         "--config", required=True, help="TOML 設定ファイル（contexts / views.featured）"
     )
