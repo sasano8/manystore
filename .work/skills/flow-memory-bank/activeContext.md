@@ -28,17 +28,23 @@
   要求3→M032（Safe 包装込みファクトリ）／要求4→M033（iter_all に limit・list_all は iter_all 参照）／
   要求5→M034（conformance 結果を docs spec 表へ＋Makefile）／要求6→M035（実装/IF 分離リファクタ）として
   progress.md バックログへ。**要求1**（make 系をグローバル許可＝本人が「supervisor への要求」と明記）→
-  escalation `outbox/2026-06-24-allow-make-targets-globally.md`。**要求7**（フォールバック禁止）→M036＝
-  **直近 M030 の capability fallback と緊張**＝下記「進行中の決定」で要相談。`aaa.md` は archive へ退避。
+  escalation `outbox/2026-06-24-allow-make-targets-globally.md`。**要求7**（フォールバック禁止）→M036。
+  `aaa.md` は archive へ退避。
+- **要求7（fail-loud）対応＝M030 の prefix capability を fail-loud 化（2026-06-24・ユーザー選択(b)）**:
+  暗黙フォールバック撤去・`scan_prefix` opt-in・非対応は loud 失敗。下記「進行中の決定」参照。残=error-swallow 監査（M036）。
 
 ## 進行中の決定・考慮事項
 
-- **【要相談】フォールバック禁止 vs M030 capability fallback（要求7・2026-06-24）**: ユーザー方針
-  「実装としてフォールバック禁止。問題が隠ぺいされてしまう」。今サイクルで committed の M030
-  `async_storage.iter_prefix` は **ネイティブ非対応時に `iter_all()`+startswith へ暗黙フォールバック**する設計で、
-  この方針と衝突する。capability の意図的 degrade を「許容される設計」とみなすか、`SupportsPrefixListing`
-  非対応なら明示エラー（fail-loud）に倒すかは**未決**。あわせて `S3KeyValueStore.exists` の
-  `except Exception: return False`（全例外を不在に握り潰し）等、既存の error-swallow も是正候補。M036 で扱う。
+- **【決定済・実装済】フォールバック禁止（要求7・2026-06-24）= fail-loud**: ユーザー選択＝「M030 も
+  fail-loud に直す」。`async_storage.iter_prefix` ディスパッチを **暗黙フォールバック撤去→capability 非対応は
+  `NotImplementedError` で即失敗**に変更。サーバ側 prefix を持たない backend（local/dict/nats）は新ヘルパ
+  `scan_prefix(store, prefix)` で **自ら opt-in**（暗黙の総なめではなく「scan で支える」と宣言）、HTTP は read-only
+  ゆえ `iter_prefix` も `UnsupportedOperation` を loud に上げる。S3=native。ラッパ（Safe/Array/2 アダプタ/
+  DownloadCache）はディスパッチ経由で委譲し非対応を伝播。`scan_prefix` を `kv` facade で公開。`make check` 緑
+  （**124 passed, 1 skipped**）。
+- **【残・M036】error-swallow 監査**: 「黙って既定値を返す」握り潰しは別途是正が残る＝`S3KeyValueStore.exists`／
+  `NatsObjectKeyValueStore.exists`・`iter_all` の `except Exception: return False/[]`、`watcher` のポーリング
+  ループ等。route handler の `except Exception→error 応答` 等は変換であり対象外。M036 の残スコープ。
 
 ## （旧フォーカス）M025改 HTTP addressing 再設計（実装完了・2026-06-24）
 

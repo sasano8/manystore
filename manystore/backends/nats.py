@@ -15,6 +15,7 @@ from ..async_storage import (
     _KvReadFileObject,
     _KvWriteFileObject,
     _take,
+    scan_prefix,
 )
 
 
@@ -74,6 +75,10 @@ class NatsObjectKeyValueStore(KeyValueStoreBase, _NatsBase):
         entries.sort(key=lambda e: e.name, reverse=True)
         for e in entries:
             yield FileInfo(filename=e.name, size=e.size or 0)
+
+    def iter_prefix(self, prefix: str) -> AsyncIterator[FileInfo]:
+        # NATS にサーバ側 prefix は無い＝scan で明示的に支える（暗黙 fallback ではない）。
+        return scan_prefix(self, prefix)
 
     async def list_all(self, limit: int = 10) -> list[FileInfo]:
         return await _take(self.iter_all(), limit)

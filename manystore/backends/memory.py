@@ -16,6 +16,7 @@ from ..async_storage import (
     _KvReadFileObject,
     _KvWriteFileObject,
     _take,
+    scan_prefix,
 )
 
 
@@ -42,6 +43,9 @@ class DictKeyValueStore(KeyValueStoreBase):
     async def iter_all(self) -> AsyncIterator[FileInfo]:
         for key in sorted(self._data, reverse=True):  # 名前降順（他 backend と整合）
             yield FileInfo(filename=key, size=len(self._data[key]))
+
+    def iter_prefix(self, prefix: str) -> AsyncIterator[FileInfo]:
+        return scan_prefix(self, prefix)  # dict にサーバ側 prefix は無い＝scan で明示的に支える
 
     async def list_all(self, limit: int = 10) -> list[FileInfo]:
         return await _take(self.iter_all(), limit)

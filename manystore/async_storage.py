@@ -83,25 +83,41 @@ class SupportsPrefixListing(Protocol):
     """`prefix` 前方一致の列挙をネイティブに持つストアの **optional capability**。
 
     core IF（[KeyValueStore]）には載せない（最小・汎用に保つ＝原則1）。S3 のように
-    サーバ側で prefix を絞れる backend だけがこれを実装し、横断ヘルパ [iter_prefix] が
-    あれば使い・無ければ `iter_all()`+startswith で総なめにフォールバックする。
+    サーバ側で prefix を絞れる backend は native 実装、サーバ側 prefix を持たない backend は
+    [scan_prefix] で明示的に opt-in して、いずれも自身が capability を**宣言**する。ディスパッチ
+    [iter_prefix] は capability を持たないストアでは暗黙フォールバックせず loud に失敗する。
     """
 
     def iter_prefix(self, prefix: str) -> AsyncIterator[FileInfo]: ...
 
 
-async def iter_prefix(store: KeyValueStore, prefix: str) -> AsyncIterator[FileInfo]:
-    """`store` の `prefix` 前方一致エントリを列挙する汎用ヘルパ（capability フォールバック）。
+def iter_prefix(store: KeyValueStore, prefix: str) -> AsyncIterator[FileInfo]:
+    """`store` の `prefix` 前方一致エントリを列挙する **capability ディスパッチ**。
 
-    `store` が [SupportsPrefixListing]（ネイティブ `iter_prefix`）を持てばそれに委譲する
-    （S3=サーバ側 `list_objects_v2(Prefix=…)` で絞る）。無ければ `iter_all()` を総なめして
-    キー名を `startswith(prefix)` で絞る（現状の汎用フィルタと等価）。ラッパ（[SafeKeyValueStore]
-    / [ArrayKeyValueStore]）はこのヘルパ経由で内側へ委譲し、ネイティブ効率を素通しする。
+    `store` が [SupportsPrefixListing]（`iter_prefix`）を持てばそれへ委譲する（S3=サーバ側
+    `list_objects_v2(Prefix=…)` で絞る／サーバ側 prefix を持たない backend は [scan_prefix] で
+    **明示的に opt-in** した scan 実装）。capability を持たなければ **暗黙フォールバックせず
+    `NotImplementedError` で即座に失敗する**（暗黙の総なめは「prefix 非対応」という事実を隠して
+    問題を埋もれさせるため＝fail-loud 方針）。ラッパ（[SafeKeyValueStore] / [ArrayKeyValueStore]）は
+    このディスパッチ経由で内側へ委譲し、非対応はそのまま伝播させる。
     """
-    if isinstance(store, SupportsPrefixListing):
-        async for info in store.iter_prefix(prefix):
-            yield info
-        return
+    if not isinstance(store, SupportsPrefixListing):
+        raise NotImplementedError(
+            f"{type(store).__name__} は prefix 列挙 capability（iter_prefix）を持たない。"
+            " backend/ラッパに iter_prefix を実装する（サーバ側 prefix が無いなら scan_prefix で"
+            " 明示的に opt-in）こと。暗黙の iter_all 総なめ fallback はしない（fail-loud）。"
+        )
+    return store.iter_prefix(prefix)
+
+
+async def scan_prefix(store: KeyValueStore, prefix: str) -> AsyncIterator[FileInfo]:
+    """`iter_all()` を総なめして `prefix` で絞る **明示的な scan 実装**ヘルパ。
+
+    サーバ側 prefix を持たない backend（local / dict / nats 等）が自身の `iter_prefix` 内で
+    **自ら opt-in** して使う（`def iter_prefix(self, prefix): return scan_prefix(self, prefix)`）。
+    [iter_prefix] ディスパッチが行う暗黙フォールバックではなく、**各 backend が「prefix を scan で
+    支える」と宣言する**点が要（fail-loud＝非対応は黙って scan に落とさず、対応は明示する）。
+    """
     async for info in store.iter_all():
         if info["filename"].startswith(prefix):
             yield info
@@ -261,6 +277,9 @@ class KeyValueFileStore(KeyValueStoreBase):
     def iter_all(self) -> AsyncIterator[FileInfo]:
         return self._store.iter_all()
 
+    def iter_prefix(self, prefix: str) -> AsyncIterator[FileInfo]:
+        return iter_prefix(self._store, prefix)  # 下層の capability をそのまま伝播（非対応は loud）
+
     async def list_all(self, limit: int = 10) -> list[FileInfo]:
         return await self._store.list_all(limit)
 
@@ -306,6 +325,11 @@ class KeyValueFromFileStore(KeyValueStoreBase):
 
     def iter_all(self) -> AsyncIterator[FileInfo]:
         return self._store.iter_all()
+
+    def iter_prefix(self, prefix: str) -> AsyncIterator[FileInfo]:
+        return iter_prefix(
+            self._store, prefix
+        )  # 下層 FileStore の capability を伝播（非対応は loud）
 
     async def list_all(self, limit: int = 10) -> list[FileInfo]:
         return await self._store.list_all(limit)

@@ -22,6 +22,7 @@ from ..async_storage import (
     _atomic_write_bytes,
     _kv_copy,
     _take,
+    scan_prefix,
 )
 
 
@@ -144,6 +145,10 @@ class LocalFileStore(KeyValueStoreBase):
         )
         for f in files:
             yield FileInfo(filename=f.relative_to(self._dir).as_posix(), size=f.stat().st_size)
+
+    def iter_prefix(self, prefix: str) -> AsyncIterator[FileInfo]:
+        # filesystem にサーバ側 prefix は無い＝scan で明示的に支える（暗黙 fallback ではない）。
+        return scan_prefix(self, prefix)
 
     async def list_all(self, limit: int = 10) -> list[FileInfo]:
         return await _take(self.iter_all(), limit)

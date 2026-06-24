@@ -1063,10 +1063,11 @@ class _PrefixRecorder:
             yield {"filename": k, "size": size}
 
 
-def test_iter_prefix_helper_falls_back_to_startswith_scan() -> None:
-    # ネイティブを持たない store（Dict）は iter_all()+startswith に総なめフォールバックする。
+def test_dict_store_supports_prefix_via_explicit_scan() -> None:
+    # サーバ側 prefix を持たない backend（Dict）は scan_prefix で **明示的に** capability を支える
+    # （暗黙フォールバックではなく、自身が SupportsPrefixListing として宣言する）。
     store = DictKeyValueStore()
-    assert not isinstance(store, SupportsPrefixListing)
+    assert isinstance(store, SupportsPrefixListing)
 
     async def scenario() -> None:
         await store.put("a/1", b"x")
@@ -1078,6 +1079,19 @@ def test_iter_prefix_helper_falls_back_to_startswith_scan() -> None:
         assert empty == ["a/1", "a/2", "b/1"]  # 空 prefix = 全件
 
     asyncio.run(scenario())
+
+
+def test_iter_prefix_dispatch_fails_loud_without_capability() -> None:
+    # capability（iter_prefix）を持たない store は **暗黙フォールバックせず即 NotImplementedError**
+    # ＝「prefix 非対応」という事実を隠さない（fail-loud）。
+    class _NoPrefixStore:
+        async def iter_all(self):
+            yield {"filename": "a", "size": 1}
+
+    store = _NoPrefixStore()
+    assert not isinstance(store, SupportsPrefixListing)
+    with pytest.raises(NotImplementedError):
+        iter_prefix(store, "a")  # 呼び出し時点で即座に失敗（イテレーション前）
 
 
 def test_iter_prefix_helper_uses_native_capability() -> None:

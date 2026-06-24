@@ -12,6 +12,7 @@ from .async_storage import (
     KeyValueStoreBase,
     SupportsPrefixListing,
     iter_prefix,
+    scan_prefix,
 )
 from .async_to_sync_storage import AsyncToSyncKeyValueStore
 from .backends import (
@@ -35,6 +36,7 @@ __all__ = [
     # optional capability（prefix 列挙）
     "SupportsPrefixListing",
     "iter_prefix",
+    "scan_prefix",
     # backends
     "DictKeyValueStore",
     "LocalKeyValueStore",

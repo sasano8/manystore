@@ -34,8 +34,8 @@ format-check:
 # lint のみ
 lint:
 	uvx ruff@$(RUFF_VERSION) check $(SRC)
-	# pylint src --enable=duplicate-code
 	# pyright basedpyright
+	# jscpd
 
 pylint:
 	uvx pylint@$(PYLINT_VERSION) manystore --enable=duplicate-code

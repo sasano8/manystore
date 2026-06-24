@@ -164,6 +164,9 @@ class DownloadCache(KeyValueStoreBase):
     def iter_all(self) -> AsyncIterator[FileInfo]:
         return self._store.iter_all()
 
+    def iter_prefix(self, prefix: str) -> AsyncIterator[FileInfo]:
+        return _iter_prefix(self._store, prefix)  # 下層の capability を伝播（非対応は loud）
+
     async def list_all(self, limit: int = 10) -> list[FileInfo]:
         return await self._store.list_all(limit)
 
