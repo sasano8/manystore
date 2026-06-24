@@ -7,11 +7,14 @@
 `manystore` 再エクスポート）、**設計原則の正本は repo `docs/architecture.md`**（FileStore=KVS+IO・核の
 配置/寄り・get_or_raise・conformance）。レイヤは概念で押さえる:
 
-- **コア（抽象＋実装）** — `manystore/stores/`（＋ sync Protocol）。抽象 `KeyValueStore`/`FileStore` Protocol、
-  基底 `KeyValueStoreBase`（`get` を `get_or_raise` から与える）、共通ヘルパ、2 方向アダプタ
-  `KeyValueFileStore`（KVS→FileStore）/`KeyValueFromFileStore`（FileStore→KVS）、合成 `ArrayKeyValueStore`、
-  安全ラッパ `SafeKeyValueStore`/`SafeFileStore`、sync ブリッジ `AsyncToSyncKeyValueStore`。
+- **`protocols.py` = 契約＋既定実装の唯一の源泉**（2026-06-25 確定）。async/sync の Protocol（契約）に加え、
+  backend が継承・流用する**既定実装**を 1 ファイルに集約: 基底 `FileStoreBase`（file 寄り）/
+  `KeyValueStoreBase`（kv 寄り＝`get` を `get_or_raise` から与える）、2 方向アダプタ `KeyValueFileStore`
+  （KVS→FileStore）/`KeyValueFromFileStore`（FileStore→KVS）、prefix capability ディスパッチ
+  `iter_prefix`/`scan_prefix`、共有 IO オブジェクトと `_kv_copy`/`_kv_move`/`_atomic_write_bytes`。
   **`FileStore(KeyValueStore, Protocol)` = KVS + open_reader/open_writer**（原則7）。
+- **`manystore/stores/`** — 合成 `ArrayKeyValueStore`（`array.py`）、安全ラッパ `SafeKeyValueStore`/`SafeFileStore`
+  （`safe.py`）、sync ブリッジ `AsyncToSyncKeyValueStore`（`sync_bridge.py`）。いずれも protocols から import。
 - **backends** — `create_key_value_store("memory"/"local"/"s3"/"nats"/"http")`。http は **read-only**
   （GET/HEAD のみ・write/list は `io.UnsupportedOperation`）。memory＝依存ゼロ・揮発の参照 backend。
 - **conformancer** — 適合性ツール（Protocol メソッド存在チェック＋FileStoreTester）。
