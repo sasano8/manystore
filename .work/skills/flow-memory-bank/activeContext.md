@@ -1,558 +1,65 @@
 # Active Context
 
+> activeContext は「**今の焦点のスナップショット**」。完了マイルストーンの履歴は `progress.md`（M-row）に
+> 畳む（2026-06-24 memory clean 実施＝旧フォーカス 13 ブロックを progress へ集約・削除）。
+
 ## 現在のフォーカス
 
-**M030 prefix capability 移設（実装完了・2026-06-24・ユーザー要望/対話）。次はフェーズ2 kv/json facade。**
+**実装/プロトコル分離リファクタ（M035）＋ conformancer 化（M031）をユーザーが IDE で駆動中（2026-06-24）。**
 
-- prefix を **optional capability** に移設＝`async_storage.SupportsPrefixListing`（`@runtime_checkable`
-  Protocol・`iter_prefix(prefix)`）＋汎用ヘルパ `async_storage.iter_prefix(store, prefix)`（ネイティブ有→
-  委譲／無→`iter_all()`+startswith フォールバック）。両者を `manystore.kv` facade で公開（トップ再エクスポート）。
-- **S3=ネイティブ**: `S3KeyValueStore.iter_prefix` が `list_objects_v2(Prefix=…)` でサーバ側絞り。`iter_all` は
-  `iter_prefix("")` に委譲（順序=降順 reverse=True・挙動不変）。NATS/HTTP/local/dict=ネイティブ無→フォールバック。
-- **伝播（M027b 同型）**: `SafeKeyValueStore.iter_prefix`（prefix を validate→空は全件で検証スキップ→ヘルパで内側委譲）／
-  `ArrayKeyValueStore.iter_prefix`（第一セグメントで mount 振り分け→subprefix をヘルパ委譲→`<mount>/`再前置。`/`無し
-  prefix は mount 名一致で丸ごと列挙）。委譲があるので S3 native がラッパ越しでも隠れない。
-- **設計判断（plan からの逸脱・記録）**: plan は「`service.list_entries` の prefix 引数撤去＋gateway/multipart を
-  ヘルパ経由に差し替え」だったが、**`list_entries(context, prefix="", limit=)` のシグネチャは維持し実装だけ capability
-  ヘルパ経由に差し替えた**。理由=汎用 startswith フィルタの所在は service→capability へ移る（plan の真意は達成）一方、
-  gateway は `service` だけに依存する境界を保て churn が最小（gateway/multipart は無改修で透過的にネイティブ効率を得る）。
-- 変更: `async_storage.py`(capability+helper)・`backends/s3.py`(native+iter_all 委譲)・`safe_path.py`・`array_storage.py`・
-  `implement/service.py`(list_entries 再配線)・`kv.py`(公開)。test +5（`tests/test_storage.py` 末尾＝helper fallback/native・
-  Safe validate+委譲・Array routing・S3 server-side prefix。`_FakeS3` に paginator fake 追加）。`make check` 緑（**123 passed, 1 skipped**）。
-- **未決（次サイクル以降）**: フェーズ2 `kv/json`（PUT で JSON 検証 400／GET application/json・保存=素通し vs 正規化 未決）／
-  フェーズ3 `storage/manystore`（FileStore streaming・range/chunked）。
+- ユーザーが IDE refactor で move-symbol を実行中＝コミット `60f2405`(async_storage→base)/`a37abde`(array)/
+  `862f824`(async_to_sync→sync_bridge)/`61e2d43`(safe_path→safe)/`fd6ef1a`(conformance→conformancer)。
+  現状 `manystore/stores/` に `async_storage.py`/`array_storage.py`/`async_to_sync_storage.py`/`safe_path.py` が移動済
+  （import は `from .stores.* import` に追従・`import manystore` OK）。`sync_storage.py` は root 残置（純 Protocol）。
+- **M035 移動マップの正本＝`m035-impl-protocol-split-plan.md`**（src→dest を symbol 単位で確定）。残＝Protocol を
+  root `protocols.py` へ抽出（async_storage の Protocol 群＋sync_storage 全 Protocol）／subpackage 名・base.py 等への
+  最終リネーム。**aa.md 要求3（sync/async プロトコルを共通管理場所へ）はこの protocols.py 集約に一致**。
+- エージェント側の役割＝マップ提示済み・MB hygiene。コードの move 主体はユーザー（IDE）なので衝突を避ける
+  （`.work/` のみ触る）。
 
 ## 直近の変更
 
-- **interrupt 取り込み（2026-06-24・`aaa.md`）**: 7 要求をトリアージ。要求2→M031（conformancer 整理）／
-  要求3→M032（Safe 包装込みファクトリ）／要求4→M033（iter_all に limit・list_all は iter_all 参照）／
-  要求5→M034（conformance 結果を docs spec 表へ＋Makefile）／要求6→M035（実装/IF 分離リファクタ）として
-  progress.md バックログへ。**要求1**（make 系をグローバル許可＝本人が「supervisor への要求」と明記）→
-  escalation `outbox/2026-06-24-allow-make-targets-globally.md`。**要求7**（フォールバック禁止）→M036。
-  `aaa.md` は archive へ退避。
-- **要求7（fail-loud）対応＝M030 の prefix capability を fail-loud 化（2026-06-24・ユーザー選択(b)）**:
-  暗黙フォールバック撤去・`scan_prefix` opt-in・非対応は loud 失敗。下記「進行中の決定」参照。残=error-swallow 監査（M036）。
+- **memory clean 実施（2026-06-24・supervisor 高優先指示）**: activeContext が 559 行/61KB・「（旧フォーカス）」
+  13 ブロックに肥大→**今の焦点スナップショットへ圧縮**（履歴は progress.md M-row に在るため削除）。指示は
+  `interrupt/archive/2026-06-24-memory-clean-activecontext.md`。※この指示は funnel をすり抜け一時 git から消えかけたが
+  `ef5b645` 履歴から復元・処理済み。
+- **interrupt `aa.md` 取り込み（2026-06-24）**: 要求1（e2e タイムアウト→即 skip）→**M037**（下記 supervisor 指示に内包）／
+  要求2（`m0xx-*-plan.md` の置き場所を相談）→**下記「進行中の決定」で要相談**／要求3（sync/async プロトコル共通管理）→
+  **M035 の protocols.py 集約に吸収**。`aa.md` は archive へ。
+- **supervisor 高優先指示 取り込み（2026-06-24・テスト軽重分離 R13）→ M037**: `@pytest.mark.slow` 軽重分離＋
+  `make test`(fast)/`make test-all` 分離＋s3-virtual の早期 skip（timeout 待ち撤廃）。**このサイクルで実装**。次フォーカス。
+- **このセッションの実装（agent ブランチ）**: M025改 後追いの NS prefix 定数化(`4bd5c7e`)／M030 prefix capability 移設
+  (`805f4a6`)／要求7 fail-loud 化(`ef5b645`)／interrupt aaa.md triage(`7a0c178`)／M035 マップ(`c3b0a07`)。
 
 ## 進行中の決定・考慮事項
 
-- **【決定済・実装済】フォールバック禁止（要求7・2026-06-24）= fail-loud**: ユーザー選択＝「M030 も
-  fail-loud に直す」。`async_storage.iter_prefix` ディスパッチを **暗黙フォールバック撤去→capability 非対応は
-  `NotImplementedError` で即失敗**に変更。サーバ側 prefix を持たない backend（local/dict/nats）は新ヘルパ
-  `scan_prefix(store, prefix)` で **自ら opt-in**（暗黙の総なめではなく「scan で支える」と宣言）、HTTP は read-only
-  ゆえ `iter_prefix` も `UnsupportedOperation` を loud に上げる。S3=native。ラッパ（Safe/Array/2 アダプタ/
-  DownloadCache）はディスパッチ経由で委譲し非対応を伝播。`scan_prefix` を `kv` facade で公開。`make check` 緑
-  （**124 passed, 1 skipped**）。
-- **【残・M036】error-swallow 監査**: 「黙って既定値を返す」握り潰しは別途是正が残る＝`S3KeyValueStore.exists`／
-  `NatsObjectKeyValueStore.exists`・`iter_all` の `except Exception: return False/[]`、`watcher` のポーリング
-  ループ等。route handler の `except Exception→error 応答` 等は変換であり対象外。M036 の残スコープ。
-
-## （旧フォーカス）M025改 HTTP addressing 再設計（実装完了・2026-06-24）
-
-着手順はユーザー確定＝**M025改 → M030**（両方完了）。
-
-- **addressing**: native REST を `contexts/{ctx}/objects/{key}` → **`{bucket}/{path}`**（NS=`/kv/raw`）に再設計。
-  `contexts`/`objects`/`keys` 飾りを廃止し表層語を bucket に統一（内部 `StorageService` の context 命名は不変）。
-  ルート＝`GET /`(bucket 一覧)／`GET /{bucket}/`(キー**フラット**一覧・`?limit=`)／`WS /{bucket}/`(同パスを upgrade で判別)／
-  `HEAD|GET|PUT|DELETE /{bucket}/{path:path}`。登録順は `GET /{bucket}/` を `GET /{bucket}/{path:path}` より先に
-  （`{path:path}` が空文字も拾うため）。コレクション判別＝空パス=一覧/非空=オブジェクト（末尾スラッシュ規則は消滅）。
-- **NS root 衝突の解決（ユーザー確定）**: 単体アプリ `create_app` も native を **`/kv/raw` 前置**に統一（combined と一貫）。
-  これで bucket 一覧が `GET /kv/raw/` になり、`/` を同梱 UI の StaticFiles に明け渡せる（root 衝突解消）。
-- **prefix は native から撤去**（フラット list-all）。`server/routes.py` の list は `service.list_entries(bucket, limit=)`
-  のみ。**`service.list_entries` の prefix 引数は M030 まで残置**（S3 GW・multipart が利用中）。
-- **client**（`ManystoreClient`/`RemoteKeyValueStore`）: `base_url` は **native NS のルート**を指す（例 `http://host/kv/raw`）。
-  httpx の相対結合のため base_url 末尾に `/` を補い、リクエストは `{bucket}/{path}` 相対で組む。
-- **UI**（`app.js`）: `GET /kv/raw/{bucket}/?limit=10000` で**全キーをフラット取得**し、現在 dir への絞りは
-  `e.key.startsWith(state.dir)` でクライアント側に。WS は `/kv/raw/{bucket}/`。
-- 破壊的変更（未リリース＝互換エイリアス無し）。`make check` 緑（**118 passed, 1 skipped**）。test 改修＝
-  `test_server`/`test_combined`(URL を {bucket}/{path} 化)・`test_client`(base_url に /kv/raw)。設計は
-  `m025-namespace-restructure-plan.md`。
-- **NS prefix を単一正本化（M025改 後追いの anti-drift・2026-06-24）**: `/kv/raw`/`/storage/s3` のベタ書きを
-  `server/routes.KV_RAW_PREFIX`・`gateway/routes.STORAGE_S3_PREFIX` 定数に集約。`combined.py`/`server/app.py`/
-  client base_url を組む `test_client.py` がこの定数を参照（付け替えはここ 1 か所）。`test_combined`/`test_server`
-  は**ワイヤ契約を独立に固定する**目的で具体 URL リテラルのまま残置（定数由来にすると prefix 誤変更を検知できない）。
-- **未決（M030 以降）**: prefix capability の着手（次サイクル）／`GET /kv/raw/`(bucket 一覧)に featured/default を
-  載せるか（現状は載せている＝UI が使用）／フェーズ2 kv/json・フェーズ3 storage/manystore／UI フラット化に伴う
-  大規模 bucket の遅延ロード喪失（後回し可）。
-
-## （旧フォーカス）
-
-**G1 配布前提を整備（M005/M006/M008 完了・M007 見送り・2026-06-24・ユーザー要望）。** 配布できる状態に。
-
-- **M005**: 未使用依存 `redis` を `pyproject` から削除（import ゼロ＝juice 残骸）＋`uv lock`（Removed redis v8.0.0）。
-- **M006**: **MIT**（ユーザー選択）。`LICENSE`（Copyright (c) 2026 sasano8）作成＋README に「ライセンス」節。
-- **M008**: `[project]` に readme/license="MIT"(PEP 639 SPDX)/license-files/authors/keywords/classifiers/`[project.urls]`。
-  `uv build` で wheel METADATA 2.4 を検証（License-Expression: MIT・Author-email・Project-URL・redis 消滅・LICENSE 同梱）。
-- **M007（py.typed）は見送り（ユーザー判断）**: py.typed を入れると型チェッカが公開 API を厳格化し、`__all__`/再
-  エクスポート規則を満たさない名前が private 化（補完に出ない）＝運用コスト増。py.typed 自体が隠蔽するわけでは
-  ないが厳格化を避けるため不採用。`Typing :: Typed` classifier も付けない。
-- `make check` 緑（**118 passed, 1 skipped**）。
-
-## （旧フォーカス）
-
-**M027c get_or_raise を client/service へ波及＋未実装を検知する網（実装完了・2026-06-24・ユーザー要望/対話）。**
-ユーザー要望「get_or_raise を client・service へ波及」＋質問「インターフェースが関係するものに実装されて
-いなければ気づけるようにできるか？」に対応。
-
-- **波及**: (1) `RemoteKeyValueStore` を `KeyValueStoreBase` 継承に変更＝primitive `get_or_raise`（404→
-  FileNotFoundError）だけ実装し `get(default)` は基底から。`ManystoreClient` に `get_or_raise(context,key)` を足し
-  `get` をその捕捉で再実装。(2) `StorageService` に `get_or_raise(context,key)`（array.get_or_raise 委譲）＋
-  `get(context,key,default=None)`。これで context 越し層も get の duality を持つ。
-- **「気づける」網（質問への回答＝はい）**: `KeyValueStoreBase` を **`abc.ABC` 化＋`get_or_raise` を
-  `@abstractmethod`**。primitive を実装し忘れたストアは**インスタンス化時点で TypeError**＝Protocol を部分的に
-  しか満たさない実装が黙って通らない（全 backend は実装済みで無影響）。加えて `RemoteKeyValueStore` を
-  conformance roster（メソッド存在チェック）に追加＝「関係するストア」を網羅。**2 層**＝ABC で primitive を
-  即時強制／roster の `assert_key_value_store` で全メソッド面をチェック。
-- test +2（ABC 強制でインスタンス化 TypeError／client・service の get_or_raise・default）。`make check` 緑
-  （**118 passed, 1 skipped**）。
-
-## （旧フォーカス）
-
-**M009 例外を exceptions に集約＋Problem Details 変換（実装完了・2026-06-24・ユーザー要望/対話）。**
-ユーザー要望「例外を exceptions にまとめたい／application/problem+json に変換できるメソッドを用意」に対応。
-
-- 新 `manystore/exceptions.py` に散在 4 例外（`UnsafePathError`/`ContextNotFound`/`ReadOnlyContext`/
-  `NoSuchUpload`）を集約。基底 `ManystoreError(Exception)`＝`status`/`title`/`type` を持ち、`to_problem()` で
-  **RFC 9457 Problem Details(dict)** を返す。メディアタイプ定数 `PROBLEM_JSON="application/problem+json"`。
-- 各ドメイン例外は**現行の stdlib 例外（KeyError/ValueError/PermissionError）を先頭に残したまま**
-  `ManystoreError` を多重継承＝`isinstance`/`str` 後方互換（既存 `except`／HTTP 写像を壊さない）。
-- モジュール関数 `to_problem(exc, *, instance=None)` は **任意の例外**を problem に写す（ManystoreError は
-  自身の status、その他は stdlib 既定写像、未知 500。io.UnsupportedOperation は ValueError サブクラスゆえ順序で先判定）。
-- 元モジュール（safe_path/service/multipart）は再エクスポートで後方互換、トップ `manystore` も公開。
-  test +6（`tests/test_exceptions.py`）。`make check` 緑（**115 passed, 1 skipped**）。
-- **HTTP ルート採用済（2026-06-24 後続・ユーザー要望「http ルートに採用」）**: native REST
-  （`server/routes.py`）の**エラー応答を `application/problem+json` に載せ替え**。`_http_error`(HTTPException)
-  を `_on_error`（ManystoreError→`to_problem`→`JSONResponse(media_type=PROBLEM_JSON)`、想定外は再送出）に置換、
-  欠損 GET は 404 problem。各 route を `return _on_error(exc)` に。**S3 ゲートウェイは S3 互換 XML のまま不採用**
-  （aiobotocore 互換）。test +1（`test_error_responses_are_problem_json`）。`make check` 緑（**116 passed, 1 skipped**）。
-
-## （旧フォーカス）
-
-**M028 HTTP の context を ArrayStorage に寄せる（実装完了・2026-06-24・ユーザー要望/対話）。**
-ユーザー指摘「HTTP の `contexts` は ArrayStorage の第一階層＝ArrayStorage をそのまま公開すればよい」に対応。
-`StorageService` を `ArrayKeyValueStore` バックに変更し、自前の `_stores: dict` ＋手書き振り分けを廃止。
-
-- connect で各 context を `SafeKeyValueStore` で包んで `self._array.mount(name, store)`（mount が connect も担う）。
-- CRUD は `(context, key)`→`self._array["{ctx}/{key}"]` に合成して委譲＝振り分けは ArrayStorage 任せ。
-  `validate_safe_path` の service 重複を撤去（mount した SafeKeyValueStore が subkey を検証）。
-- existence/ContextNotFound は `self._array.mounts()` を正に判定。`list_entries` は `array.iter_all()`
-  （`<name>/` 前置の横断列挙）を `"{ctx}/"` で切り出し prefix 絞り＝対象 context の順序・limit 挙動は不変。
-- **ArrayStorage を汚さない**＝writable ポリシー・context メタ（list_contexts/featured/default_context）・
-  per-context PollingWatcher は service 層に残置。watcher は mount したのと同一 store を掴む（参照は service 保持）。
-- **不変条件**: core IF 不変・HTTP ルート(`/contexts/...`)不変・新依存ゼロ・振る舞い保存。変更は
-  `implement/service.py` のみ（+ test）。test +1（`test_contexts_are_isolated_first_segment`）。`make check` 緑
-  （**109 passed, 1 skipped**）。残: 動的 mount 公開は **M028b（未着手・M011 認証連動）**。
-
-## （旧フォーカス）
-
-**M022 FileStoreTester に op 毎の状態スナップショットを追加（実装完了・2026-06-24・ユーザー要望/対話）。**
-「メソッドが返り値を返すだけでなく、その後ストアがどんな状態になるかの検証が重要」というユーザー指摘に対応。
-`conformance.py` の `_check` が op を reference/target に適用するたびに、**返り値**（expected/actual）に加えて
-**op 適用後の状態**（新 `_state`＝`iter_all` のファイル名一覧・**昇順**）を両ストアで取得し、`StepResult` に
-`expected_state`/`actual_state` を追加。`passed` は**返り値と状態の両方**が一致して初めて真にした（副作用の
-取りこぼし防止）。`save_report` の JSON にも state が乗る＝リプレイ素材が強化。test +1
-（`test_run_light_records_state_per_op`＝全ステップが昇順 state を持ち reference 一致／missing は空状態／
-write 後はキーが state に現れる）。`make check` 緑（**108 passed, 1 skipped**）。
-
-**M028 のスコープをユーザー合意（2026-06-24）**: (1) behavior-preserving リファクタで進める＝はい、
-(2) 動的 mount 公開（M028b）は今回スコープ外＝はい。着手は本タスク（state スナップショット）の後。
-
-## （旧フォーカス）
-
-**M027 Local KV を FileStore から派生（実装完了・2026-06-23 後続・ユーザー要望/対話で設計確定）。**
-M027 の「設計の壁」（FileStore Protocol に list/exists/delete が無く get/put しか派生できない）を、
-ユーザーとの対話で **選択肢(b)＋汎用アダプタ＋Protocol 拡張** に確定し実装した。
-
-- **真実の実装を `LocalFileStore` に集約**: put/get・iter/list/exists/delete・vacuum・cp/mv を
-  filesystem-native に LocalFileStore へ移設（旧 `LocalKeyValueStore` から）。get は自身の
-  `open_reader` を流用してストリーム入出力の上に全体取得を表現。
-- **`LocalKeyValueStore` は薄いビュー**: `class LocalKeyValueStore(KeyValueFromFileStore)` で
-  `KeyValueFromFileStore(LocalFileStore(dir))` を構成。get/put は下層 open_reader/open_writer 越し、
-  iter/list/exists/delete/cp/mv は素通し委譲。vacuum だけ Local 固有として override（concrete 参照 `_fs`）。
-- **`FileStore` Protocol を拡張**（iter/list/exists/delete/cp/mv/connect/aclose を追加）＝
-  `KeyValueFromFileStore` の `# type: ignore[attr-defined]` を全廃。`KeyValueFromFileStore` を
-  `manystore.kv` から公開（KeyValueFileStore の逆向き）。
-- **テスト +2**（`test_storage.py`）: 汎用アダプタの直接往復（get/put/iter/exists/cp/mv/delete・欠損=None）／
-  LocalKeyValueStore が KeyValueFromFileStore の薄いビューであること（KVS put→FileStore open_reader で同一読取）。
-  既存の Local KVS テスト群は委譲経路をそのまま検証。`make check` 緑（**93 passed, 1 skipped**）。
-- **follow-up（取りこぼし防止）**: FileStore Protocol 拡張で `S3FileStore`/`NatsFileStore`/`HttpFileStore`/
-  `SafeFileStore`/`SyncFileStore` が新メソッド未実装＝**Protocol を部分的にしか満たさない**（CI に型チェッカが
-  無く破綻なし・呼べば AttributeError）。これらに名前空間操作を備える（または narrow Protocol に整理する）のは
-  別タスク＝**progress M027 follow-up** に記載。
-
-**（前サイクル）M025 名前空間再編・フェーズ1（移設）完了（2026-06-23・ユーザー要望/対話）。** 統合アプリの HTTP 第1階層を
-**バッファリング性**で再編する設計をユーザーと確定（設計 `m025-namespace-restructure-plan.md`）。軸＝`kv/*`(バッファ・
-辞書的・全体 get/put) / `storage/*`(ストリーミング・ファイルオープン的・ラージ)。S3 は意味的に kv（key→bytes）だが
-ラージ＋multipart で**ファイルオープン寄り**ゆえ storage 側。4 ルート＝`kv/raw`(既存=native 生バイト) / `kv/json`(新規=
-JSON 検証 facade) / `storage/s3`(既存=S3 GW) / `storage/manystore`(新規=FileStore streaming over HTTP)。全て server
-facade 層に閉じる＝**コア IF 不変**。
-
-- **フェーズ1 = 移設（既存 2 ルートの再配置）を実装**。combined アプリの `include_router` prefix を
-  `/manystore`→`/kv/raw`・`/s3`→`/storage/s3` に付け替えただけ（`combined.py`/`__main__.py` docstring・
-  `tests/ui/test_combined.py` の URL・S3 `endpoint_url=<host>/storage/s3`）。native 内部パス（`/contexts/.../objects/...`）
-  は不変＝prefix 付け替えのみ（最小・可逆）。kv が深く s3 がフラットなのは native がリッチなプロトコル（contexts/keys/events）
-  だから（無理に平坦化しない）。
-- **後方互換エイリアスは張らずクリーン移設**（M023 は昨日入ったばかりで未リリース＝外部利用者ゼロ）。standalone
-  （`create_app`/`create_gateway`・`python -m manystore.server`/`.gateway`）は不変＝旧パスが要る人はそちら。
-- **コア IF 不変・新依存ゼロ・テスト数不変**。`make check` 緑（**91 passed, 1 skipped**）。
-- **残**: フェーズ2 `kv/json`（PUT で json 検証→不正 400 / GET は必ず `application/json`・保存方式=素通し vs 正規化 未決）／
-  フェーズ3 `storage/manystore`（FileStore ストリーミング HTTP 公開＝一番重い新規・range/chunked 設計要）／
-  README・examples の起動例パス追従確認。
-
-## （直近の起票・未着手）
-
-**M028「HTTP の context を ArrayStorage に寄せる」を起票（2026-06-24・ユーザー要望/対話）。** 要望を interrupt へ
-funnel→トリアージ→`interrupt/archive/2026-06-24-expose-arraystorage-as-contexts.md` へ退避。指摘＝HTTP の `contexts` は
-ArrayStorage の第一階層＝`ArrayKeyValueStore` をそのまま公開すればよい。`StorageService` の context 振り分けが
-ArrayStorage の routing/横断列挙/跨ぎ cp/mv を焼き直しているので、composition を ArrayStorage に委譲し
-`array["{ctx}/{key}"]` に合成する behavior-preserving リファクタとして **progress M028（設計先行・相談）**に起票。
-writable ポリシー/watcher/メタ/featured は core を汚さず service 層に残す。動的 mount 公開は **M028b（相談・M011 連動）**に分離。
-設計は `m028-expose-arraystorage-plan.md`。**実装・コミットはせず計画のみ**（指示どおり）。
-
-## （旧フォーカス）
-
-**M023 統合エントリポイント化 実装完了（2026-06-23・supervisor 指示）。** S1/S2 で並存していた 2 アプリ
-（`gateway`=S3 互換 / `server`=manystore native REST）を**単一 FastAPI に束ね**、パス第一階層で
-`/s3`（S3 互換）と `/manystore`（native REST/WS）に分けた。スコープは統合＋テスト追従のみ
-（S3 passthrough / S4 実機は対象外）。コア IF（KeyValueStore/FileStore/StorageService）不変・新依存ゼロ。
-
-- **採用方式 = `include_router(router, prefix=...)`**。`app.mount()` は Starlette でサブアプリの lifespan が
-  走らず共有 service の connect が起動時に呼ばれない落とし穴ゆえ**却下**。
-- **routes 層を APIRouter 化（小リファクタ）**: `server/routes.py` / `gateway/routes.py` に
-  `build_router(service) -> APIRouter` を追加（`@app.*` デコレータ本体は不変＝`app` 変数が APIRouter を指すだけ）。
-  `register_routes(app, service)` は `app.include_router(build_router(service))` の**後方互換シム**に縮退。
-- **統合アプリ** `manystore/combined.py:create_combined_app(service)`: `/manystore` に native REST/WS、`/s3` に
-  S3 ゲートウェイを include。**共有 service を 1 回だけ connect/aclose する単一 lifespan**（router は lifespan を
-  持たないので二重 connect/aclose を回避）。S3 クライアントは `endpoint_url=<host>/s3`（path-style）。
-- **新エントリ起動** `python -m manystore --config <toml>`（`manystore/__main__.py`・既定 8000）。
-- **後方互換**: 単体 `create_app`/`create_gateway`・`python -m manystore.server`/`.gateway` は不変。静的 UI
-  （`/` の StaticFiles）は従来どおり `create_app` 側に残し、統合アプリには持ち込まない（prefix ルータと root が
-  衝突＝スコープ外）。
-- **追加テスト**: `tests/ui/test_combined.py`(+4) = `/manystore` REST 疎通 / native PUT→`/s3` GET の service 共有 /
-  実 aiobotocore で `/s3` 越し PUT/GET/HEAD/List/DELETE / multipart 往復（uvicorn を ephemeral port で別スレッド起動）。
-- **検証**: `make check` 緑（**91 passed, 1 skipped**・S2 の 87 から +4）。format-check / lint clean。
-- **残課題**: S3 passthrough（`SupportsPresign` + redirect/proxy）／S4 SeaweedFS 実機 backend 疎通／繰延ページング。
-
-## （旧フォーカス）
-
-**M021 S2（Multipart Upload）実装完了（2026-06-23・supervisor 指示）。** スコープは S2 のみ
-（S3 passthrough / S4 実機は対象外）。S3 の multipart API を**コア IF 不変**で `StorageService` の上に薄く合成した。
-
-- **新規/変更ファイル**: `manystore/gateway/multipart.py`（新・状態保持と create/upload/complete/abort のオーケストレーション）／
-  `manystore/implement/s3map.py`（multipart XML 補助 = `render_initiate_multipart` / `render_complete_multipart` /
-  `parse_complete_multipart` を追加・HTTP 非依存）／`manystore/gateway/routes.py`（PUT/POST/DELETE を query で多重化分岐・
-  ListObjectsV2 から予約プレフィクス除外）／`manystore/gateway/__init__.py`（docstring）。
-- **実装した API**: CreateMultipartUpload（`POST /{bucket}/{key}?uploads`・uploadId=uuid4 hex）／UploadPart
-  （`PUT /{bucket}/{key}?partNumber=N&uploadId=X`・一時キーへ put・part の MD5 を ETag）／CompleteMultipartUpload
-  （`POST /{bucket}/{key}?uploadId=X`＋本文 Part 列・**指定順**結合→**1 回の put（all-or-nothing）**→一時 part 掃除・
-  ETag=`<concat-md5>-N`）／AbortMultipartUpload（`DELETE /{bucket}/{key}?uploadId=X`・冪等）。**ListParts /
-  ListMultipartUploads は YAGNI で見送り**（progress バックログ）。
-- **状態の保持方式 = ストア上の予約キー空間** `.manystore-mpu/{uploadId}/{partNumber:05d}`（インメモリ辞書ではない）。
-  理由: **サーバ再起動耐性・複数プロセス/ワーカ耐性**（落ちても part が残り、どのワーカでも同じストアに積む）。予約
-  プレフィクスは `validate_safe_path` を通る安全キー。ListObjectsV2 は予約プレフィクスを **gateway 側で除外**（service 不変）。
-- **並行/上書き/順序**: 同一 (uploadId, partNumber) への再 UploadPart は **last-writer-wins**（put 自体がアトミック＝
-  半端に混ざらない）。結合順は **Complete リクエスト本文の partNumber 順**を尊重（クライアント責務・サーバは再ソートしない）。
-- **コア IF 変更 = なし**（`KeyValueStore` / `FileStore` / `StorageService` 公開 API いずれも不変）。新依存ゼロ
-  （aiobotocore=コア依存・uvicorn=既存）。
-- **追加テスト**: `tests/ui/test_gateway_s3client.py` +2（`test_real_s3_client_multipart_roundtrip`=Create→UploadPart×3
-  （1MiB+0.5MiB+端数）→Complete→GET 結合一致＋ETag 末尾 `-3`＋一覧に予約キー非露出／
-  `test_real_s3_client_multipart_abort_discards_parts`=Abort 後に本オブジェクト未作成＝NoSuchKey＋一時 part 掃除）。
-  in-process route 分岐は `test_gateway.py` +5（Create/UploadPart/Complete/GET 一致・Abort・NoSuchUpload・partNumber 0=
-  InvalidArgument・unknown bucket=NoSuchBucket）。XML 純ロジックは `test_s3map.py` +4。
-- **検証**: `make check` 緑（**87 passed, 1 skipped**・S1 の 76 から +11）。format-check / lint clean。
-- **残課題**: S3 passthrough（`SupportsPresign` + redirect/proxy）／S4 SeaweedFS 実機 backend 疎通／繰延ページング／
-  見送った multipart 補助 API（ListParts / ListMultipartUploads）。
-
-## （旧フォーカス）
-
-**M021 S1 を「実 S3 クライアント往復」で検証補強（2026-06-23 後続サイクル・supervisor 指示）。**
-S1 の既存テストは gateway 生成の S3 XML を stdlib ElementTree でパースするだけで**実 S3 クライアント往復が無かった**。
-直前実装者は「実 client = 同期 boto3 は新依存」として S4 へ繰越したが、**manystore はコア依存に `aiobotocore>=2.0.0`
-（botocore 内包の実 S3 クライアント）を持つ**ため、`endpoint_url=<起動 gateway>` に向ければ**新依存ゼロ**で実往復が
-書けると判明＝前倒し解消。
-
-- **追加テスト**: `tests/ui/test_gateway_s3client.py`（4 ケース）。
-  - `test_real_s3_client_roundtrip`: PUT→GET→HEAD→ListObjectsV2(flat)→DELETE を aiobotocore で往復。ETag（PUT/GET/HEAD
-    一致）・本文一致・ContentLength・削除後 GET=NoSuchKey を検証。
-  - `test_real_s3_client_list_delimiter_common_prefixes`: delimiter='/' で CommonPrefixes 畳み、prefix+delimiter で
-    1 階層下の Contents 列挙を実クライアントで検証。
-  - `test_real_s3_client_get_missing_raises_nosuchkey`: 欠損キー GET が `NoSuchKey` 例外（XML パース経路）に。
-  - `test_real_s3_client_readonly_bucket_access_denied`: writable=false への PUT が `AccessDenied`（ClientError）に。
-- **起動方式**: aiobotocore は**実ソケット**を使うので in-process ASGI ではなく **uvicorn を ephemeral port
-  （127.0.0.1:0）で別スレッド起動**するフィクスチャ（`_ThreadedServer`・`server.started` を待って endpoint を返す）。
-  gateway は `GET /{bucket}/{key}` ＝ bucket をパスに置く **path-style** 前提なので client は `addressing_style="path"`。
-- **依存の扱い＝新依存ゼロ**: aiobotocore（3.7.0）はコア依存、uvicorn（0.49.0）は `[server]` extra/dev 既存、
-  pytest-asyncio は既存（`asyncio_mode=auto` で `async def test_*`）。**追加インストール不要**。同期 boto3 は入れていない。
-- **実クライアント往復で判明した齟齬＝ゼロ**: 実 botocore は XML/ヘッダ厳密性に敏感だが、S1 が生成する ETag・
-  Content-Length・XML 名前空間（`http://s3.amazonaws.com/doc/2006-03-01/`）・エラー Code（NoSuchKey/AccessDenied）・
-  ステータスコードを **botocore がそのまま受理**＝不具合・差異なし。S1 の XML/ヘッダ実装が実クライアント基準で妥当と実証。
-- **検証**: `make check` 緑（**76 passed, 1 skipped**・従来 72 から +4。skip は既存 s3-virtual E2E で本変更と無関係）。
-  format-check も clean。
-- **残課題**: S4 = **SeaweedFS 実機 backend** 疎通（実 client 往復は前倒し済み・残るは実 backend とパススルー）／
-  S2 multipart／S3 passthrough。
-
-## （旧フォーカス）
-
-**M021 S1（S3 ゲートウェイ本体）実装完了（2026-06-23・supervisor interrupt 指示）。** manystore を S3 互換 API
-として公開する新サブパッケージ `manystore.gateway` を追加。`m021-s3-gateway-plan.md` の S1 のみをスコープ厳守で実装
-（S2 multipart・S3 passthrough・S4 SeaweedFS 実機・繰延ページング・残未決 Q1/Q4/Q5 はバックログ）。
-
-- **新規ファイル**: `manystore/implement/s3map.py`（delimiter 畳み込み + S3 XML 生成 + エラー XML。HTTP 非依存＝
-  stdlib `xml.etree.ElementTree` のみ・新依存ゼロ）、`manystore/gateway/{__init__,app,routes,__main__}.py`
-  （M019 server 層と同型。`create_gateway(service)`・FastAPI 遅延 import・lifespan で connect/aclose・`[server]`
-  extra 流用・`python -m manystore.gateway --config <toml>` 既定 port 9000）。
-- **操作（S1）**: GET=GetObject / PUT=PutObject(ETag=MD5) / HEAD=HeadObject(Content-Length) / DELETE=DeleteObject(204)
-  / ListObjectsV2(prefix+delimiter)。すべて既存 `StorageService`（put/get/exists/delete/list_entries）へ 1:1 で乗せる
-  ＝**コア IF 不変**。bucket=context。delimiter は s3map で CommonPrefixes に畳む（service.list_entries は delimiter
-  非対応なので gateway/s3map 側で畳む）。例外→S3 エラー XML（ContextNotFound→NoSuchBucket / ReadOnlyContext→
-  AccessDenied / UnsafePathError→InvalidArgument / get None→NoSuchKey）。
-- **推奨デフォルト適用**: Q2 SigV4 検証=しない（gateway 認証へ委譲）、Q6 extra=`[server]` 相乗り、Q3 ページング=
-  max-keys 上限 1000 クランプ・打ち切りのみ（continuation token は繰延）。Q1/Q4/Q5・S2/S3/S4 はスコープ外。
-- **テスト**: `tests/ui/test_gateway.py`(8・local backend に対し PUT/GET/HEAD/DELETE/ListObjectsV2・delimiter 畳み・
-  各種 S3 エラー XML)・`tests/ui/test_s3map.py`(5・純ロジックの fold/XML)。`make check` 緑（**72 passed, 1 skipped**・
-  従来 59 から +13）。⚠️ 実 S3 client（boto3/aws-cli）疎通は **S4 へ繰越**（aiobotocore は async-only、同期 boto3 は
-  新依存になるため S1 では XML を ElementTree パースで検証。実 client/SeaweedFS 疎通は S4 段階）。
-
-## （旧フォーカス）
-
-**M020（UI 改善: パンくず階層ナビ + コピー/生パス編集）完了。** ユーザー要望（2026-06-21）:
-(1) パスを `dir1 / dir2 / dir3` のパンくず表示にし各セグメントをクリックでその階層へ移動、
-(2) 左にコピーボタン、パンくず（空きスペース）をクリックすると生パスのテキストボックスになり貼り付け可能。
-ユーザー懸念「KVS に階層概念が薄い／中間階層に飛ぶと下層が分からない」への回答＝**問題なし**:
-`/keys?prefix=` が prefix 配下の**全キーをフラットに返す**（service.list_entries が iter() を startswith 絞り込み）
-ので、フロントで `/` 区切りに畳めば仮想ツリーになり、中間 prefix でも直下のフォルダ/ファイルを次セグメント
-group で列挙できる（実機 smoke 済み: prefix='dir1/' で dir2/ と直下ファイルが見える）。
-**実装は `manystore/server/static/`（index.html/app.js/style.css）のみ＝サーバ・protocol・python は不変**
-（`pytest tests/ui` 8 passed・app.js は node --check 緑）。app.js は state.dir(現在ディレクトリ prefix)/
-state.key(開いているファイル) を持ち、navigateTo→renderTree(フォルダ/ファイル畳み込み・`..`行)+renderBreadcrumb。
-copy ボタンは clipboard.writeText（不可なら生パス入力にフォールバック）、新規/quick_write は editRawPath。
-
-**M019（ストレージ UI）P1〜P3 実装完了。** `manystore.{implement,server,client}` の 3 層を追加し、任意 context を
-HTTP+WS で公開する**汎用 CRUD ストレージ UI** を実装。`make check` 緑（**59 passed, 1 skipped**）＋実起動スモーク
-（interrupt への remote PUT 往復を実証）。最終レイアウトは **単一ディストリビューション + `manystore[server]`
-extra**（当初の別パッケージ案から巻き戻し。理由は `m019-ui-plan.md`）。interrupt 専用 UI は作らず、config の
-`views.featured`（pin/quick_write）で重点表示する汎用 UI＝interrupt も「featured な local への汎用 PUT」で投入。
-
-次サイクル候補: M019 残り（P4 http_store の RW 拡張 / P5 S3 gateway / LocalWatcher=inotify / 認証）、または
-配布前提の G1（M005 redis 削除・M006 LICENSE・M007 py.typed・M008 メタ）。
-
-（前タスク **M018 完了**。）
-本プロジェクトは `agent` ブランチで単線コミットし、`interrupt/` 受信箱の指示を取り込んで進める運用。
-dotfiles は `workers_dir: workers` を宣言した **supervisor**（自身も Memory Bank を持つ）で、
-`dotfiles/workers/manystore` → 本 repo の symlink 配下に manystore を worker として束ねる。
-下り（dotfiles→manystore interrupt 投函）／上り（manystore→dotfiles interrupt エスカレ）の双方向運用。
-
-- **`iter`→`iter_all` 改名＋run_light に iter_all 追加／run 系を外部レポート追記式に（2026-06-23 後続・ユーザー要望/対話）**:
-  (1) コア `iter` を **`iter_all`** に一括改名（list_all は iter_all を呼ぶ形＝整合）。run_light に iter_all(empty/after_write)
-  を追加＝10→**12 観点**。(2) `FileStoreTester` の **run 系（run_light 等）が呼び出し側の「レポート（list）」を受け取り
-  操作順に追記する形**に変更し、**ツールは状態（steps/spec/result/save_json）を保持しない**＝モジュール関数 `save_report(report, path)`
-  で保存。レポートは呼び出し側が所有。テスト/docs/Protocol コメント追従。`make check` 緑（**107 passed, 1 skipped**）。
-- **コア `list`→`list_all` に改名（意味を厳格化）＋run_light に list_all 追加（2026-06-23 後続・ユーザー要望/対話）**:
-  ユーザー指摘「list の意味が曖昧（全ファイル平坦 vs 1 階層）」に対応。コアの `list(limit)` を **`list_all(limit)`** に
-  一括改名し、**全キーを平坦に列挙（'/' ネストも再帰・1 階層概念は持たない＝KVS はフラット）／limit は安全上限**と
-  Protocol コメントで厳格化。対象＝Protocol(KVS/Sync)・全 backend・ラッパ(Safe/Array/DownloadCache)・bridge・
-  client/remote＋全 call site／テスト（`obs.list()` と `_FakeNatsObs.list` 定義は除外）。`list_entries`(service/UI 層)は
-  別物で無関係。`FileStoreTester.run_light` に `list_all`(empty/after_write) を追加＝8→**10 観点**。README/docs 追従。
-  `make check` 緑（**107 passed, 1 skipped**）。
-- **M022 を FileStoreTester（オラクル方式）に作り直し＋run_light 実装（2026-06-23 後続・ユーザー要望「m022」/対話）**:
-  ユーザーの「イメージが合わない」指摘で、前段の loose な `check_*_contract` 関数版を**廃止**し、オラクル方式の
-  **`FileStoreTester(reference=DictFileStore, target)`** に作り直した。同一操作列を辞書（正）と対象に適用し観測一致を
-  観点ごとに記録。`run_light`（open_reader/open_writer/exists・8 観点）を実装、`run_middle/heavy/full` は stub。`delete_all`
-  （iter+delete・ジェネシス・light 検証対象外）。結果は `result()`/`save_json`＝`op`/`args`/`expected`/`actual`/`passed`
-  を JSON 保存（**操作ログ＝将来リプレイ素材**・ユーザー選択）。spec（file/kv 寄り）自動検出は placeholder＝**M022b**
-  に起票（特性表用）。`test_e2e_backends.py` は `_crud_roundtrip` に戻した（run_light は FileStore 専用の別レイヤ）。
-  `tests/test_conformance.py` で Local を辞書オラクルに run_light・自己一致・差分検出・JSON 保存を検証。docs/architecture.md
-  conformance 節を FileStoreTester に更新。`make check` 緑（**107 passed, 1 skipped**）。
-- **設計原則の正本を repo へ移設＋適合性ツール（M022 P1）＋dict backend（2026-06-23 後続・ユーザー要望/対話）**:
-  ユーザー指摘「正式原則を一時記憶（systemPatterns）に置くのは変／ruff では Protocol 準拠を検査できない／サード
-  パーティ backend 用の仕様テスト（まずメソッド存在）が欲しい／辞書 backend が欲しい」に対応。(1) **設計原則の正本を
-  `docs/architecture.md`（repo）へ移設**＝Memory Bank は圧縮される一時記憶なので systemPatterns 原則7 はポインタに縮退。
-  (2) **`manystore/conformance.py`**＝`typing.get_protocol_members` で Protocol メソッドの存在を横断チェック
-  （`assert_key_value_store`/`assert_file_store`）。ruff は型/Protocol を検査できない（linter/formatter）ので実行時
-  conformance で代替。挙動契約は未実装（開発途上）＝M022 P1。(3) **`backends/memory.py`**＝`DictKeyValueStore`/
-  `DictFileStore`（依存ゼロ・揮発・`create_key_value_store("memory")`）。kv 寄りなので IO は buffer 合成。
-  `tests/test_conformance.py`(+4) で全 backend を横断チェック。`make check` 緑（**103 passed, 1 skipped**）。
-- **核を kv/file どちらに寄せるか方針を原則7 に明文化＋HTTP FileStore を完全準拠化（2026-06-23 後続・ユーザー要望/対話）**:
-  ユーザー要望「核を寄せる方針を正式ドキュメント化」→ `systemPatterns.md` **原則7**（核は native primitive 側・逆派生で
-  性能が落ちる方を核に・kv 寄り=`XFileStore(XKeyValueStore)`／file 寄り=`KeyValueFromFileStore`）として正式記述。あわせて
-  M027b の問題を詳説し、**HTTP のみ先行・read-only は実行時 `UnsupportedOperation` 許容**で確定して着手。
-  `HttpFileStore(HttpKeyValueStore)`＝KVS 面継承＋open_reader を whole get の buffer 合成（get_or_raise 再利用で旧 GET 重複
-  解消）。test +1。`make check` 緑（**99 passed, 1 skipped**）。残: Safe/Sync は M027b。
-- **S3/NATS FileStore を完全準拠化＝「寄り」で核を配置（2026-06-23 後続・ユーザー要望/対話）**: ユーザー要望
-  「s3/nats を完全準拠に。file 寄り/kv 寄りを意識し、性能が出る方に核の実装を」を実装。**S3=file 寄り**
-  （streaming が強み）→ `S3FileStore(S3KeyValueStore)`＝KVS 核（native whole get/put）を継承し、open_reader/
-  open_writer を **native streaming**（range body / multipart）で実装（核を IO 側に）。**NATS=kv 寄り**（whole
-  get/put が native・真の streaming は nats-py のスレッド安全性で deferred）→ `NatsFileStore(NatsObjectKeyValueStore)`
-  ＝KVS 核を継承し IO は **whole の上に buffer 合成**（共有 `_KvReadFileObject`/`_KvWriteFileObject` を流用＝専用
-  `_NatsBufferedWriter` を削除して重複解消）。両者とも `XFileStore(XKeyValueStore)`＝「FileStore = KVS + IO」を継承で
-  表現＝KVS 二重持ちなし。tests +2（fake で KVS 面 put/get/get_or_raise/iter/exists を検証・S3 fake に NoSuchKey 追加）。
-  `make check` 緑（**98 passed, 1 skipped**）。残: HTTP/Safe FileStore は M027b（HTTP は read-only・Safe は委譲設計要）。
-- **Protocol 関係を整理＝FileStore = KeyValueStore + IO（2026-06-23 後続・ユーザー要望/対話）**: ユーザー提案
-  「FileStore Protocol に put/get/get_or_raise を含めてよい。KVS は FileStore から open_reader/open_writer を
-  除いた部分集合で、それ以外はそのまま流用。KVS→FileStore は IO の埋め合わせ（ラッパ）が要る」を実装。
-  (1) `class FileStore(KeyValueStore, Protocol)` に整理＝IO 2 メソッドだけ足す（put/get/get_or_raise・名前空間操作・
-  ライフサイクルは KVS から継承＝重複宣言を削除）。(2) `KeyValueFileStore`(KVS→FileStore) を**完全な FileStore**に＝
-  open_reader/open_writer を合成し、KVS 面（put/get_or_raise/iter/…）は下層 KVS へ委譲（open_reader は get_or_raise 経由で
-  欠損 FileNotFoundError）。(3) `KeyValueFromFileStore`(FileStore→KVS) を**純委譲**に＝FileStore が put/get_or_raise を
-  持つので IO 合成をやめ下層へそのまま委譲（IO を落とすだけ）。(4) `LocalFileStore` を `KeyValueStoreBase` 継承＋
-  `get`→`get_or_raise`（open_reader 流用）に＝**完全な FileStore（KVS+IO）の真実の実装**。tests +2（LocalFileStore を
-  KVS として／KeyValueFileStore が完全 FileStore）。`make check` 緑（**96 passed, 1 skipped**）。M027b の波及範囲は
-  「FileStore の KVS 面（put/get/iter 等）を S3/NATS/HTTP/Safe FileStore にも備える」に拡大（progress 更新）。
-- **KVS の get を get_or_raise primitive ＋ get(default) に再設計（2026-06-23 後続・ユーザー要望/対話）**:
-  ユーザー要望「get はデフォルト値を取れる／get_or_raise（例外を上げる）を用意し、get は get_or_raise を
-  捕捉する形に」を実装。**共有基底 `KeyValueStoreBase`** を新設し `get(key, default=None)` を get_or_raise から
-  1 か所で実装（欠損は `FileNotFoundError` に正規化＝既存 open_reader/_kv_copy と一貫）。primitive を get_or_raise に
-  反転＝`KeyValueFromFileStore`(Local)・`S3KeyValueStore`・`NatsObjectKeyValueStore`・`HttpKeyValueStore`・
-  `SafeKeyValueStore`・`ArrayKeyValueStore`・`DownloadCache` を基底継承＋get_or_raise 実装に変更（各 backend の
-  try/except 重複を解消）。sync ブリッジ（`AsyncToSyncKeyValueStore`）＋ Protocol（`KeyValueStore`/`SyncKeyValueStore`）も
-  両メソッドに追従。`KeyValueStoreBase` を `manystore.kv` 公開（第三者 backend 実装の足場）。`_KvReadFileObject`/
-  `_KvWriteFileObject` は既に CM 提供済＝get_or_raise の `async with await open_reader` 経路で活用。get_or_raise が
-  下層 open_reader を**コンテキストマネージャ**で開く点も明示。tests +1（get default/get_or_raise）。`make check` 緑
-  （**94 passed, 1 skipped**）。**follow-up**: `RemoteKeyValueStore`(client)・`implement/service.py` は今回スコープ外＝
-  get_or_raise 未実装で Protocol 部分準拠（progress M027b に併記）。
-- **M027 Local KV を FileStore から派生を実装（2026-06-23 後続・ユーザー要望/対話で設計確定）**: 前セッションで
-  funnel をすり抜けて未コミットで残っていた `KeyValueFromFileStore`（壊れていた＝委譲先 LocalFileStore に
-  iter/list 等が無く AttributeError、type:ignore で隠蔽）を出発点に、対話で設計を確定して完成させた。選択肢(b)
-  ＝LocalFileStore を真実の実装にし、LocalKeyValueStore を `KeyValueFromFileStore(LocalFileStore)` の薄いビューに。
-  FileStore Protocol を iter/list/exists/delete/cp/mv/connect/aclose で拡張し type:ignore 全廃。`KeyValueFromFileStore`
-  を `manystore.kv` 公開。変更: `async_storage.py`・`backends/local.py`（全面再構成）・`kv.py`・`tests/test_storage.py`(+2)。
-  `make check` 緑（93/1）。詳細は上記「現在のフォーカス」。
-- **バッファ性方針の確定＋Local KV 派生方向をバックログ起票（2026-06-23・ユーザー要望/対話）**: 対話入力を
-  interrupt（`20260623-local-kv-from-filestore-and-buffer-semantics.md`）へ funnel→トリアージ→archive。(1) 設計方針
-  **「KV=バッファ概念／FileStore=バッファ無し概念。adapter でどちら向きに被せても KV 層でバッファ＝みせかけのストリーム。
-  真にバッファ無しは生ストレージを素通し露出した時だけ。サーバ越しに真の streaming は出せず、真髄はクライアント wrap」**
-  を **systemPatterns 原則6** に昇格。(2) 具体要望「Local の KV を `KeyValueFromFileStore(LocalFileStore)` で派生
-  （メイン実装を LocalFileStore に集約）」を **progress M027（設計先行・相談）** に起票。設計の壁＝FileStore Protocol に
-  list/exists/delete が無く get/put しか派生できない＝doc-first 合意要。
-- **stream インターフェース（第3の族）をバックログ起票（2026-06-23・ユーザー要望/対話）**: storage/kv に加え
-  **stream**＝単一ターゲットに接続を張り続け追記/追従するチャネル族（jsonl 追記・NATS トピック=ファイル・MVP=バイト）。
-  FileStore で表現できない **tail/subscribe＋継続 append**＝**新コア IF**ゆえ facade では済まず doc-first 合意が要る。
-  interrupt へ funnel→archive、progress に **M026（相談・設計先行）**として起票。
-- **M025 名前空間再編フェーズ1（移設）を実装（2026-06-23・ユーザー要望/対話）**: 対話で要望を受け interrupt
-  （`20260623-namespace-restructure-kv-storage.md`）へ funnel→トリアージ→`interrupt/archive/` へ退避。設計を
-  `m025-namespace-restructure-plan.md` に確定（buffer 性で `kv`/`storage` に二分・4 ルート）。フェーズ1＝combined の
-  prefix を `/manystore`→`/kv/raw`・`/s3`→`/storage/s3` に付け替え（上記「現在のフォーカス」）。progress に M025 起票。
-  変更ファイル: `combined.py`・`__main__.py`・`tests/ui/test_combined.py`。`make check` 緑（91/1）。
-- **interrupt 受信箱を取り込み（2026-06-23・M023 着手時）**: 2 件をトリアージ。(1)
-  `20260622-stage2-quality-resolved-and-pull-migration.md`（info+low）= quality エスカレ解決の共有は受領（追加作業なし）、
-  pull 型移行＋層エイリアス統一の残タスクを **progress.md M024（priority low）**へ起こした。(2)
-  `20260623-s3-gateway-and-passthrough.md` = M021 の原指示で `m021-s3-gateway-plan.md` に既吸収＝archive へ退避。
-  両ファイルを `interrupt/archive/`（日付プレフィクス）へ移動。
-- **M023 統合エントリポイント化を実装（2026-06-23・supervisor 指示）**: `include_router(prefix=...)` で `/s3`+`/manystore`
-  を 1 アプリに束ねた（上記「現在のフォーカス」）。新規 `combined.py`・`__main__.py`・`tests/ui/test_combined.py`、
-  変更 `server/routes.py`・`gateway/routes.py`（`build_router` 追加・`register_routes` をシム化）。`make check` 緑（91/1）。
-- **M021（S3 ゲートウェイ + パススルー）の着手前 deep think を実施（2026-06-23・supervisor interrupt をトリアージ）**：
-  `interrupt/20260623-s3-gateway-and-passthrough.md`（priority normal）を取り込み、**実装はせず設計のみ確定**。
-  成果物 `m021-s3-gateway-plan.md`。要旨＝(1) 最小 S3 操作 = GET/PUT/HEAD/DELETE/ListObjectsV2（multipart は段階2、
-  bucket=context、delimiter 対応）。(2) パススルー = presigned redirect 本線＋プロキシフォールバック、署名は
-  **gateway 保有の実 S3 資格情報**で代理署名（クライアント資格情報は実 S3 へ転用しない＝STS は YAGNI）。
-  presign は **S3 backend 限定の optional capability `SupportsPresign`** に閉じコア IF は不変。(3) 置き場 =
-  新サブパッケージ `manystore.gateway`（M019 同型・FastAPI 遅延 import・既存 `[server]` extra 流用・S3 XML は
-  stdlib ElementTree＝新依存ゼロ・`implement` の `StorageService` を再利用）。(4) 段階 = S1 本体→S2 multipart→
-  S3 パススルー→S4 SeaweedFS 実機。**コード未実装・git commit せず**（WIP なし。コミット判断は worker 対話/ユーザー）。
-  既存 progress の M019 P5（S3 gateway）を本計画として精緻化・採番。
-
-- **検証はベタ書き禁止＝Makefile 経由に統一（ユーザー要望 2026-06-21）**：techContext.md の「検証コマンド」を
-  生 `uvx ruff …` → `make lint`/`make check` 参照に修正（ruff 版は `RUFF_VERSION := 0.15.18` で固定済み・既に
-  Makefile 完備）。これが「毎回手打ち」の元凶だった。**この方針の正本は quality スキル（R5 Makefile / R8 `make check`）**。
-  - **dotfiles の位置づけを再訂正（陳腐化）**：dotfiles は今や `workers_dir: workers` を宣言した **supervisor**で、
-    `dotfiles/workers/manystore -> ../../manystore` の symlink 配下に manystore が worker としてぶら下がる。
-    過去メモ「dotfiles は supervisor でない」は無効。
-  - **親へエスカレ実施**：「quality が常時ループ（memory-bank）から参照されず発揮されない」構造ギャップを、
-    親 `dotfiles/.work/skills/memory-bank/interrupt/20260621-quality-skill-not-applied.md` に worker として投函
-    （memory-bank→quality のリンク追加等を提案。反映先は supervisor 判断）。親スキルは worker から直接編集しない。
-- **UI 開発起動を整備**：`make ui`（= `examples/manystore-ui.dev.toml` で起動）。dev 既定ストレージは
-  `.cache/manystore_dev`（`.gitignore` に `.cache/` 追加＝使い捨て・起動時に LocalKVS が自動 mkdir）。
-  `PORT=xxxx` で上書き可。client SDK は `ManystoreClient`/`RemoteKeyValueStore`（`manystore.client.remote`）に改名済み。
-- **公開 API 整理（ユーザー要望 3 点）**：
-  - **pytest-asyncio 導入**（`asyncio_mode="auto"`）。新 UI テスト（implement/client）は `async def` 化。実害なし
-    （dev 依存のみ・既存 `asyncio.run` と共存・fastapi TestClient は同期で anyio 競合なし）。
-  - **名前空間グルーピング**：`manystore.kv`（値ストア）/ `manystore.file`（ファイル）facade を新設。トップは
-    後方互換でフラット再エクスポート（star import + noqa、`__all__` は dict.fromkeys 重複畳み込み）。
-  - **FileStore を方向別バイナリ API に置換**：`open(mode)` 廃止 → `open_reader`/`open_writer`。全 backend・
-    KeyValueFileStore・SafeFileStore・SyncFileStore Protocol・`tests/test_storage.py`（一括置換）を更新。
-    HttpFileStore は read-only で `open_writer` が `io.UnsupportedOperation`。`make check` 緑（59 passed, 1 skipped）。
-- **M019 P1〜P3 実装（ストレージ UI）**：`manystore/implement`（protocol/config/service/watcher・backend非依存）、
-  `manystore/server`（FastAPI app/routes/__main__/static・遅延 import）、`manystore/client`（ManystoreClient /
-  RemoteKeyValueStore）を追加。`pyproject` に `[project.optional-dependencies] server` と dev group。
-  `tests/ui/`（implement/server/client の 3 層）。`examples/manystore-ui.toml`・README 節を追加。
-  - **決定の巻き戻し**：当初「別パッケージ（uv workspace）」→ ユーザー選択で **`manystore` 配下に 3 層サブ
-    パッケージ＋extras** に確定（import 名前空間 `manystore.*` 統一、配布は extras+遅延 import で軽さ維持）。
-  - 監視は MVP では **PollingWatcher**（size 差分で created/modified/deleted、全 backend 対応・テスト容易）。
-    inotify(watchdog) ベースの LocalWatcher は後続最適化。`modified` は同一サイズ編集を取りこぼす既知制約。
-- **M018 完了（HTTP backend, read-only）**：ユーザー要望「http ストレージを read-only でよいから欲しい」を実装。
-  `backends/http_store.py`（GET で `get`/`open("rb")`、HEAD で `exists`。404→None/FileNotFoundError。書き込み・
-  一覧は `io.UnsupportedOperation`）。httpx を遅延 import。`create_key_value_store("http", http_base_url=...,
-  http_headers=...)` 配線、`__init__.__all__`・README・テスト（fake httpx client で 4 ケース）整備。
-  - **モジュール名**: 当初 `http.py` で作られていたが stdlib `http` パッケージと紛れるため `http_store.py` に
-    リネーム（**backend 識別子は `"http"` のまま**）。ユーザー指摘。
-  - **M005 修正**: httpx は当初「未使用＝削除」だったが http backend で使うので**残す**に変更。`redis` のみ未使用。
-- **プロセスの穴を2つ発見し、フックで修正**：
-  - (a) ユーザー要望（http backend）が**着手前に Memory Bank へ保存されず**、前回セッションで未コミットの試作だけ
-    残っていた（活動記録なし）。教訓は「要望は着手前に activeContext/タスクへ記録してから実装」。
-  - (b) **より根本**：SessionStart フック `dotfiles/bin/memory-bank-sessionstart` が「`.work/skills/memory-bank/`
-    の**ディレクトリ有無だけ**」を見ていた。① 完全に無ければ黙って no-op（警告なし）、② dir が在れば中身が空でも
-    「Memory Bank があります」と誤検知。つまり **Memory Bank の成立条件（`.work`＋6コア）が崩れても誰も警告しない**。
-    → フックを「**dir はあるがコアが欠けていれば警告して initialize を促す**」よう修正・実測検証（dotfiles 側の作業
-    ツリー変更。コミットは dotfiles 側に委ねる）。完全欠如はマーカー無しに全 repo で鳴らせないので no-op のまま。
-  - **dotfiles の位置づけを訂正**（※**この訂正は後に覆った**——上記 2026-06-21「dotfiles の位置づけを再訂正」参照）：
-    当時は「dotfiles はスキルのホストであって Memory Bank を持つ supervisor ではない」と判断したが、**現在の dotfiles は
-    `workers_dir: workers` を宣言し 6 コアの Memory Bank を持つ正式な supervisor**（manystore を `workers/` に symlink 配下）。
-    下り（dotfiles→manystore interrupt 投函）は当時から実績あり（M003 の m003-ci 指示）＝この点だけは一貫。
-- **UI 要望をバックログ化**：ユーザー要望「ストレージの UI が欲しい」を progress.md の **M019（相談）**へ。
-  未スコープ＋本体スコープ外のため、別パッケージ/別リポか着手前に要合意。
-
-- **juice 概念を削除**：manystore は juice と無関係な独立ライブラリなので、コード（`__init__`/`array_storage`/
-  `tests`/`pyproject`/README）と Memory Bank から juice・E006・「pristine（juice 都合）」の記述を一掃。設計
-  原則は「**最小・汎用に保つ（YAGNI）**」として残す。juice adapter のバックログ（旧 M005）も削除。
-- **M002 一部完了**：docker（nats / seaweedfs）で `tests/test_e2e_backends.py` を**パラメタライズ**追加
-  （同一 CRUD を local / nats / s3-virtual / s3-path に注入。実行 test は1つ、注入インスタンスだけ違う）。
-  **local / nats は実機で pass**。S3 は実機検証で **アドレッシングスタイル問題を発見**し、`addressing_style` を
-  **明示パラメータ化（既定 virtual＝ドメイン、`"path"` は opt-in）**に変更（`s3_addressing_style`）。
-- **M002 完了**: SeaweedFS の S3 認証は `weed shell s3.configure` で dev identity（`manystore`/`manystoresecret123`,
-  Admin）を登録して解決。`make e2e-up`（compose up + identity 登録）で 1 コマンド化し、テスト既定鍵もこの dev
-  identity に。`make check` で **s3-path 実機 pass**（47 passed, 1 skipped）。s3-virtual はローカルでは原理的 skip。
-- **M004 完了**：ルート `README.md` を作成（特徴・install・local/S3/NATS の接続例・`ConnectPolicy` プリセット・
-  `Safe*` ラッパ・その他公開 API・開発/CI/3.14 注記）。公開 API は `manystore/__init__.py` の `__all__` に準拠。
-- **M003 完了（supervisor 指示で着手）**：dotfiles（supervisor）が manystore の interrupt に投函した指示
-  （`20260620-1200-m003-ci.md`, priority high）を取り込み、GitHub Actions CI（`.github/workflows/ci.yml`：
-  setup-uv → `make check`）を追加。指示は `interrupt/archive/` へ退避。
-- **Python 3.14+ 前提を確定**：3.14 は注釈遅延評価が既定なので前方参照（自クラス戻り値注釈）はそのまま valid＝
-  `from __future__ import annotations` 不要。`requires-python = ">=3.14"` ＋ ruff `target-version = "py314"` に
-  し future import を全廃。ruff は py314 対応版が要るので `RUFF_VERSION` を 0.15.18 へ。`make check` 緑（44 passed）。
-- **M001 完了**：旧名残骸を監査（`git grep shoudou`）。実コードの残骸は NATS 既定バケット名のみで、
-  `manystore/backends/__init__.py` の `nats_bucket="shoudou_files"`→`"manystore_files"` に変更（既定値のみ・
-  テスト非依存）。`uv run pytest` で **44 passed**。
-- 本セッションで `Makefile`（`uvx ruff@<固定版>` の format / `uv run pytest` の test）を追加（M003 の一部）。
-- `shoudou_storage` を独立ライブラリ `manystore` として抽出し、import 名・プロジェクト名を `manystore` に
-  統一。関連 commit: `f80ba87` / `1983fc7` / `2d28010`。
-- Memory Bank を導入。当初は AGENT_LOOP.md / PROJECT.md の 2 ファイル構成だったが、
-  **Cline の Memory Bank（6 コアファイル）に準拠**するよう作り直し、作業フォルダ
-  `.work/skills/memory-bank/` 配下へ集約した。
+- **【残・M036】error-swallow 監査**: 「黙って既定値を返す」握り潰しの是正が残＝`S3KeyValueStore.exists`／
+  `NatsObjectKeyValueStore.exists`・`iter_all` の `except Exception: return False/[]`、`watcher` ループ等。route
+  handler の `except→error 応答`（変換）は対象外。要求7 fail-loud 方針の残適用。
+- **【要相談】aa.md 要求2＝plan ドキュメントの置き場所**: `m019/m021/m025/m028/m035-*-plan.md` が MB 直下に増殖。
+  案＝`.work/skills/flow-memory-bank/plans/` サブディレクトリへ集約（MB 直下はコア 6＋reference に寄せる）。ユーザーと
+  確定してから移動（勝手に動かさない）。
+- **【決定済】要求7=fail-loud**: 暗黙フォールバック禁止。capability 非対応は loud 失敗・非 native は明示 opt-in
+  （M030/M036 で iter_prefix に適用済）。
+- **Memory Bank は Cline 準拠の 6 コアファイル**。運用は共通スキル `flow`（旧 memory-bank）。`.work/` は gitignore
+  しない（状態の正本＝commit）。コミットは「切りのいいところ」でコード＋MB を 1 コミット、`main` 直は避け `agent`
+  ブランチ単線、push は明示時のみ。
+- **manystore は最小・汎用に保つ**：利用側都合で IF を拡張しない（YAGNI）。
+- **worker/supervisor**: 本 repo は dotfiles（`workers_dir: workers`）配下の worker。下り=interrupt 投函／上り=
+  `outbox/` へ pull 型エスカレ（親は直接知らない）。
 
 ## 次のステップ
 
-- バックログ（progress.md）から優先タスクを 1 つ選定し、本ファイルの「現在のフォーカス」に展開。
-
-## 進行中の決定・考慮事項
-
-- **Memory Bank は Cline 準拠の 6 ファイル**（projectbrief / productContext / activeContext /
-  systemPatterns / techContext / progress）。手順・運用は共通スキル `memory-bank`（`~/.claude/skills/`）に集約。
-- 作業フォルダ規約は `.work/skills/<スキル名>/`。`.work/` は gitignore しない（状態の正本＝commit する）。
-- **コミットをフローに組み込む**：Act Mode の終端で「切りのいいところ」（まとまり一段落＋検証緑＋
-  Memory Bank 更新済み）になったら、コード＋Memory Bank を 1 コミットにまとめる。`main` 直は避け branch を切る。
-  push は明示時のみ。
-- **manystore は最小・汎用に保つ**：利用側都合で IF を拡張しない。利用側固有の結線は利用側の adapter に閉じる。
+- ユーザーの M035 IDE refactor 完了を見て protocols.py 抽出（要求3）を仕上げる／aa.md 要求2 の置き場所を確定。
+- 実装サイクル候補: M036（error-swallow 監査）／M037（e2e 即 skip）／フェーズ2 `kv/json`／M032・M033・M034。
 
 ## 重要なパターン・好み / 学び
 
-- **フローは全て interrupt を介す＋参照系は reference/**（memory-bank 設計変更, 2026-06-21）：対話での要望・指示も
-  着手前に一旦 interrupt へ書き出してから取り込みフローで処理する（即答の雑談は除く）。横断的な参照定義・要件は
-  `reference/`（ファイル/ディレクトリ）に集約し、品質方針はその 1 エントリ（`reference/quality-policy.md`）。品質以外の
-  要件も reference に足せる。コア/SKILL 本体は中身を持たず reference を参照するだけ。
-- **品質チェックは組織の品質方針に従う（関心の分離）**：memory-bank は「品質チェックを行う」だけ・規約を持たない。
-  一般メソッドは [[quality]]、組織固有の適用は **組織の品質方針ファイル**（supervisor memory-bank `reference/quality-policy.md`）、
-  本 repo の techContext はそれを **`make check` に materialize するだけ**。検証は `make` 経由＝ベタ書き `uvx ruff …`
-  禁止（再現性）。スキル設計（dotfiles）も更新: memory-bank を最小化＋ reference/ 導入／quality に「関心の分離（俯瞰的/単体）」
-  「ドキュメントの書き方・読み方」節＋R10/R11／supervisor が drift を定期チェック。
+- **フローは全て interrupt を介す＋参照系は reference/**: 対話の作業要望も着手前に interrupt へ書き出してから取り込む
+  （funnel）。横断要件は `reference/` に集約（品質方針＝`reference/quality-policy.md`）。
+- **品質チェックは組織の品質方針に従う**: 検証は `make` 経由（`make check`）＝ベタ書き `uvx ruff …` 禁止（再現性）。
+- **設計原則の正本は repo の `docs/architecture.md`**（FileStore=KVS+IO・核は native primitive 側・conformance）。
+  Memory Bank は一時記憶ゆえ要約のみ。
 - ラッパは 1 枚、差し替えるのは backend だけ。抽象 IF を backend 固有事情で汚さない。
-- NATS backend は実 nats-py の API（`get_info` / `get().data`）に合わせる必要があった（過去バグ）。
+- NATS backend は実 nats-py の API（`get_info` / `get().data`）に合わせる（過去バグ）。
+- KV=バッファ概念／FileStore=バッファ無し概念。真の streaming はクライアント wrap で得る（サーバ越しに無理に通さない）。
