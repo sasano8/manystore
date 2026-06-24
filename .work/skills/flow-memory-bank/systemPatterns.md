@@ -77,6 +77,9 @@
 
 ## コンポーネント関係 / 重要な実装経路
 
-- `connect_key_value_store(backend, ...)` が入口 → `backends.create_key_value_store` → backend 具象。
-- 危険入力対策は `Safe*` ラッパが `validate_safe_path` で key/filename を検証してから委譲。
+- **推奨入口（ライブラリの顔）= `open_async_key_value_store` / `open_async_file_store`**（M032）＝Safe 包装必須の
+  接続 CM（`async with` で connect＋`Safe*` 包装、終了で aclose）。低レベルは `create_*`（生・未接続）/
+  `connect_key_value_store`（接続のみ・Safe 無し）。`create_file_store` は FileStore 版ファクトリ。
+- 危険入力対策は `Safe*` ラッパが `validate_safe_path` で key/filename を検証してから委譲。`SafeFileStore` は
+  `SafeKeyValueStore` を継承＝KVS 面（検証付き）＋ IO（open_reader/open_writer）の完全な FileStore。
 - 複数 backend の横断は `ArrayKeyValueStore`（キー先頭セグメント＝論理名で振り分け）。

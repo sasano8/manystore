@@ -6,7 +6,7 @@
 
 from pathlib import Path
 
-from ..protocols import AsyncKeyValueStore
+from ..protocols import AsyncFileStore, AsyncKeyValueStore
 from .http_store import HttpFileStore, HttpKeyValueStore
 from .local import LocalFileObject, LocalFileStore, LocalKeyValueStore
 from .memory import DictFileStore, DictKeyValueStore
@@ -26,6 +26,7 @@ __all__ = [
     "HttpKeyValueStore",
     "HttpFileStore",
     "create_key_value_store",
+    "create_file_store",
 ]
 
 
@@ -62,5 +63,46 @@ def create_key_value_store(
         return NatsObjectKeyValueStore(url=nats_url, bucket=nats_bucket)
     elif backend == "http":
         return HttpKeyValueStore(base_url=http_base_url, headers=http_headers)
+    else:
+        raise ValueError(f"unknown backend: {backend!r}")
+
+
+def create_file_store(
+    backend: str,
+    local_dir: Path | None = None,
+    s3_bucket: str = "",
+    s3_endpoint: str = "",
+    s3_region: str = "us-east-1",
+    s3_access_key: str = "",
+    s3_secret_key: str = "",
+    s3_addressing_style: str = "virtual",
+    nats_url: str = "",
+    nats_bucket: str = "manystore_files",
+    http_base_url: str = "",
+    http_headers: dict[str, str] | None = None,
+) -> AsyncFileStore:
+    """[create_key_value_store] の FileStore 版（backend → 完全な [FileStore]＝KVS + IO）。
+
+    http は read-only FileStore（書き込み・一覧は `io.UnsupportedOperation`）。引数は KVS 版と同形。
+    """
+    if backend == "memory":
+        return DictFileStore()  # プロセス内 dict（揮発・接続不要）
+    elif backend == "local":
+        if local_dir is None:
+            raise ValueError("local backend requires local_dir")
+        return LocalFileStore(local_dir)
+    elif backend == "s3":
+        return S3FileStore(
+            bucket=s3_bucket,
+            endpoint_url=s3_endpoint,
+            region=s3_region,
+            access_key=s3_access_key,
+            secret_key=s3_secret_key,
+            addressing_style=s3_addressing_style,
+        )
+    elif backend == "nats":
+        return NatsFileStore(url=nats_url, bucket=nats_bucket)
+    elif backend == "http":
+        return HttpFileStore(base_url=http_base_url, headers=http_headers)
     else:
         raise ValueError(f"unknown backend: {backend!r}")

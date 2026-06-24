@@ -84,11 +84,16 @@ class SafeKeyValueStore(KeyValueStoreBase):
         await self._store.aclose()
 
 
-class SafeFileStore:
-    """filename を [validate_safe_path] で検証してから委譲する [FileStore] ラッパ。"""
+class SafeFileStore(SafeKeyValueStore):
+    """filename/キーを [validate_safe_path] で検証してから委譲する [FileStore] ラッパ。
+
+    **FileStore = KeyValueStore + IO** なので、KVS 面（put/get/get_or_raise・iter/list/exists/
+    delete/cp/mv・connect/aclose）は [SafeKeyValueStore] からそのまま継承し（キー検証込み）、
+    FileStore 固有の IO（open_reader/open_writer）だけを filename 検証付きで足す。
+    """
 
     def __init__(self, store: AsyncFileStore) -> None:
-        self._store = store
+        super().__init__(store)  # 下層は完全な FileStore（KVS 面も持つ）
 
     async def open_reader(self, filename: str) -> AsyncFileObject:
         return await self._store.open_reader(validate_safe_path(filename))

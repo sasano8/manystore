@@ -15,6 +15,7 @@ from manystore import (
     ArrayKeyValueStore,
     AsyncToSyncKeyValueStore,
     ConnectPolicy,
+    DictFileStore,
     DictKeyValueStore,
     DownloadCache,
     HttpFileStore,
@@ -33,8 +34,11 @@ from manystore import (
     UnsafePathError,
     connect_key_value_store,
     connecting,
+    create_file_store,
     create_key_value_store,
     iter_prefix,
+    open_async_file_store,
+    open_async_key_value_store,
     validate_safe_path,
 )
 
@@ -1238,3 +1242,62 @@ def test_s3_iter_prefix_filters_server_side_and_iter_all_unchanged() -> None:
         assert via == ["a/2", "a/1"]
 
     asyncio.run(scenario())
+
+
+# ── 安全な入口（ライブラリの顔）＝open_async_* / create_file_store（M032） ──
+
+
+def test_open_async_key_value_store_is_safe_and_connected(tmp_path: Path) -> None:
+    # 顔: async with で Safe 包装＋接続済みの KVS を得る（生 backend を直接触らせない）。
+    async def scenario() -> None:
+        async with open_async_key_value_store("local", local_dir=tmp_path) as store:
+            assert isinstance(store, SafeKeyValueStore)  # Safe 包装は必須
+            await store.put("a/b.txt", b"hi")
+            assert await store.get("a/b.txt") == b"hi"
+            with pytest.raises(UnsafePathError):
+                await store.put("../escape", b"x")  # パストラバーサルは弾く
+
+    asyncio.run(scenario())
+
+
+def test_open_async_file_store_is_safe_full_filestore(tmp_path: Path) -> None:
+    # 顔: Safe 包装＋接続済みの完全な FileStore（= KVS + IO）。
+    async def scenario() -> None:
+        async with open_async_file_store("local", local_dir=tmp_path) as fs:
+            assert isinstance(fs, SafeFileStore)
+            # IO 面（filename 検証付き）
+            async with await fs.open_writer("k/v.bin") as w:
+                await w.write(b"data")
+            async with await fs.open_reader("k/v.bin") as r:
+                assert await r.read() == b"data"
+            # KVS 面も使える（FileStore = KVS + IO）＋キー検証
+            assert await fs.get("k/v.bin") == b"data"
+            assert await fs.exists("k/v.bin") is True
+            with pytest.raises(UnsafePathError):
+                await fs.open_reader("../escape")
+            with pytest.raises(UnsafePathError):
+                await fs.delete("../escape")  # KVS 面も検証付き
+
+    asyncio.run(scenario())
+
+
+def test_open_async_uses_memory_backend_without_connect() -> None:
+    # memory は接続不要・揮発。顔から開いても Safe 包装される。
+    async def scenario() -> None:
+        async with open_async_key_value_store("memory") as store:
+            assert isinstance(store, SafeKeyValueStore)
+            await store.put("k", b"v")
+            assert await store.get("k") == b"v"
+
+    asyncio.run(scenario())
+
+
+def test_create_file_store_maps_backends(tmp_path: Path) -> None:
+    # FileStore 版ファクトリ（生・未包装）。backend→FileStore のマッピング。
+    assert isinstance(create_file_store("memory"), DictFileStore)
+    assert isinstance(create_file_store("local", local_dir=tmp_path), LocalFileStore)
+    assert isinstance(create_file_store("http", http_base_url="http://x"), HttpFileStore)
+    with pytest.raises(ValueError):
+        create_file_store("nope")
+    with pytest.raises(ValueError):
+        create_file_store("local")  # local_dir 必須

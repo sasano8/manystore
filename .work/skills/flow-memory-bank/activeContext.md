@@ -19,11 +19,13 @@
   `plans/` へ集約（m028 は完了につき削除）・完了 interrupt を archive。
 - **バックログ4件を解決（2026-06-25）**: M036（error-swallow を fail-loud 化＝nats/s3 の exists・iter_all。test +3）・
   M033（limit 統一は波及済と確認＝コード変更なし）・M017（3.14+ で確定＝3.10+ 拡張は見送り）・M024（pull 型の文書追従）。
+- **M032 完了（2026-06-25）**: 安全な入口 `open_async_key_value_store` / `open_async_file_store`（Safe 包装必須の接続 CM）を
+  トップ公開。`create_file_store` 新設・`SafeFileStore` を `SafeKeyValueStore` 継承に作り直し（M027b の Safe 残も解消）。test +4。
 
 ## 次のステップ
 
 - 実装サイクル候補（`progress.md` 残作業から）: フェーズ2 `kv/json`／フェーズ3 `storage/manystore`／
-  M032（Safe 包装込みファクトリ）／M034（conformance spec 表出力）／M010（local 非ブロッキング化）。
+  M034（conformance spec 表出力）／M010（local 非ブロッキング化）／M011（既定で安全にするかの方針確定）。
 
 ## 進行中の決定・考慮事項
 

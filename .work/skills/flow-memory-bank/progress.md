@@ -35,8 +35,7 @@
 | ID | タスク | 優先 | 備考 |
 |----|--------|------|------|
 | M010 | local backend の非ブロッキング化 | 中 | `read_bytes`/`write` を `asyncio.to_thread` でオフロード（現状 event loop を塞ぐ）|
-| M011 | 既定で安全（キー検証）/方針明確化 | 中 | 生 backend はキー検証なし＝`../escape` 可。安全が `Safe*` opt-in の foot-gun。M032 と連動 |
-| M032 | Safe 包装込みファクトリをトップに | normal | `create_key_value_store` は生ストアを返す。安全包装込みの入口（例 `manystore.open_key_value_store`）が要望。未決＝関数名/FileStore 版/Safe 必須か |
+| M011 | 既定で安全（キー検証）/方針明確化 | 中 | 生 backend はキー検証なし＝`../escape` 可。安全が `Safe*` opt-in の foot-gun。**安全な入口は M032 で提供済**＝顔は `open_async_*`、生は `create_*`。残＝既定で安全にするか（生口を残すか）の方針確定 |
 | M012 | `list(prefix=...)` / pagination | 中 | prefix は M030 で capability 化済。継続トークンページングが未対応（M021 の continuation と関連）|
 | M013 | メタデータ / content-type | 中 | S3・NATS は native 対応だが共通 IF に無い |
 | M016 | テスト拡充（エラーパス/並行/大容量） | 中 | fake は happy path 中心 |
@@ -45,7 +44,7 @@
 | M021残 | S3 ゲートウェイ 残 | normal | S1/S2（GET/PUT/HEAD/DELETE/ListObjectsV2 + Multipart）実装済。残＝S3 passthrough（`SupportsPresign`+redirect/proxy）/ S4 SeaweedFS 実機 backend 疎通 / ListObjectsV2 continuation token ページング。設計 `plans/m021-s3-gateway-plan.md` |
 | M022b | conformance の run_middle/heavy/full ＋ spec（file/kv 寄り）検出・特性表・リプレイ | low | P1 存在チェック＋P2 run_light 完了。`tester.spec={"leaning":None}` は placeholder。実 backend（S3/NATS）適用も |
 | M034 | conformance 結果を docs に spec 表出力＋Makefile キック | normal | 各実装のメソッド×Implemented/Not を `docs/{file_storage,kv}_spec.md` に。M022b/M031 と統合が自然 |
-| M027b残 | FileStore=KVS+IO 波及（Safe・Sync 残） | low | S3/NATS/HTTP/Local 完了。残＝`SafeFileStore`（KVS 面も検証付き委譲）/ `SyncFileStore` Protocol 鏡映＋`AsyncToSyncFileStore` ブリッジ |
+| M027b残 | FileStore=KVS+IO 波及（Sync 残） | low | S3/NATS/HTTP/Local＋`SafeFileStore` 完了（Safe は M032 で `SafeKeyValueStore` 継承＝KVS 面も検証付き委譲に）。残＝`SyncFileStore` Protocol 鏡映＋`AsyncToSyncFileStore` ブリッジのみ |
 | M025残 | 名前空間再編 フェーズ2/3 | normal | フェーズ1（移設）＋addressing 再設計 完了。残＝フェーズ2 `kv/json`（JSON 検証）/ フェーズ3 `storage/manystore`（range/chunked streaming）。設計 `plans/m025-namespace-restructure-plan.md` |
 | M026 | stream インターフェース（第3の族・新コア IF） | 相談 | kv/storage の他に **stream**＝無境界チャネル（append/follow＝tail/subscribe）。FileStore で表せない＝新コア IF `StreamStore`。MVP=byte stream。最小・汎用と緊張するので **doc-first 合意必須**。詳細 `interrupt/archive/2026-06-23-stream-interface.md` |
 | M028b | ArrayStorage を HTTP に動的公開（context の mount/unmount） | low | `POST/DELETE /contexts` で動的 mount。backend 資格情報を HTTP から渡す＝認証設計が要る（M011 連動）。要設計 |
@@ -83,6 +82,11 @@
   今回は現状維持＝not-found→[]/False の正規化は契約上必要）。
 - **M024（2026-06-25）**: pull 型エスカレ（outbox）の文書追従完了＝MB に push 前提の残記述なし・旧スキル名なし・
   alias を `[[unit-quality]]` に統一。
+- **M032（2026-06-25・完了）**: 安全な入口（ライブラリの顔）を新設＝`open_async_key_value_store` /
+  `open_async_file_store`（トップ公開）。**Safe 包装必須の接続 CM**（`async with` で connect＋`Safe*` 包装、
+  終了で aclose。`policy`/`verify` も受ける）。併せて `create_file_store`（FileStore 版ファクトリ）新設と
+  `SafeFileStore` を `SafeKeyValueStore` 継承に作り直し（= KVS 面も検証付き＝M027b の Safe 残も解消）。
+  生ストアは `create_*`/`connect_*`（低レベル）に残置。test +4。
 
 ## 現状ステータス
 

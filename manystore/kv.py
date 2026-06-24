@@ -58,8 +58,31 @@ __all__ = [
     "ConnectPolicy",
     "connecting",
     "connect_key_value_store",
+    # safe factory（ライブラリの顔＝Safe 包装込みの入口）
+    "open_async_key_value_store",
     # safe path
     "SafeKeyValueStore",
     "validate_safe_path",
     "UnsafePathError",
 ]
+
+
+def open_async_key_value_store(
+    backend: str,
+    *,
+    verify: bool = True,
+    policy: ConnectPolicy | None = None,
+    **opts: object,
+):
+    """安全な KeyValueStore を開く入口（ライブラリの顔）＝[SafeKeyValueStore] 包装込みの接続 CM。
+
+    `async with open_async_key_value_store("local", local_dir=...) as store:` の形で使う。
+    キー検証付きの [SafeKeyValueStore] を connect して yield・終了時 aclose する。
+    **Safe 包装は必須**（生 backend を直接触らせない＝パストラバーサル等を防ぐ）。生が要るときだけ
+    低レベルの [create_key_value_store] / [connect_key_value_store] を使う。
+    """
+    return connecting(
+        lambda: SafeKeyValueStore(create_key_value_store(backend, **opts)),
+        verify=verify,
+        policy=policy,
+    )
