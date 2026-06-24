@@ -5,7 +5,16 @@
 
 ## 現在のフォーカス
 
-**M035 リファクタ完了（ユーザー IDE）＋ドキュメント参照の整理（2026-06-24）。次サイクル候補は下記。**
+**protocols.py 集約＋FileStoreBase＋iter_all async/limit 統一を実装中（interrupt
+`20260624-protocols-consolidation-and-filestorebase.md`）。残＝facade を protocols 参照に切替→`sync_storage.py` 削除。**
+
+- **完了・コミット済**: ① protocols.py に契約集約＋各 import を `..protocols` へ ② `FileStoreBase` 新設＋
+  `LocalFileStore(FileStoreBase)`（file 寄り＝primitive=open_reader/writer・KVS 面は IO から導出）③ **`iter_all`
+  を全 async ストアで `async def`（async ジェネレータ）に統一**（コルーチン化バグを是正）④ **`iter_all`/`list_all`
+  が `limit: int | None = None`**（limit は iter_all に一元適用・list は materialize）＝`_take` ヘルパ削除。
+- **残（次サイクル・このコミットには含めず）**: `kv.py`/`file.py` の sync Protocol import を `sync_storage`→
+  `protocols` に切替 → **`sync_storage.py` 削除**（interrupt item1）。`sync_storage.py` はユーザー指示で当面未着手＝
+  lint/format 赤が残る唯一のファイル（protocols.py 側に正規版が揃っている）。
 
 - ユーザーが IDE で実装ファイルを移動・改名済＝`manystore/stores/{base,array,safe,sync_bridge}.py`
   （旧 async_storage/array_storage/safe_path/async_to_sync_storage）＋ `conformance.py`→`conformancer/`。

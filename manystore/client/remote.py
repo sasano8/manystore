@@ -17,7 +17,8 @@ from collections.abc import AsyncIterator
 from urllib.parse import quote
 
 from ..implement.protocol import ContextInfo, EntryInfo
-from ..stores.base import FileInfo, KeyValueStoreBase, _kv_copy, _kv_move
+from ..protocols import FileInfo
+from ..stores.base import KeyValueStoreBase, _kv_copy, _kv_move
 
 
 def _quote_key(key: str) -> str:
@@ -109,12 +110,15 @@ class RemoteKeyValueStore(KeyValueStoreBase):
     async def get_or_raise(self, key: str) -> bytes:
         return await self._client.get_or_raise(self._context, key)
 
-    async def iter_all(self) -> AsyncIterator[FileInfo]:
-        for e in await self._client.list_entries(self._context, limit=10_000):
+    async def iter_all(self, limit: int | None = None) -> AsyncIterator[FileInfo]:
+        # HTTP 越しは真の無制限ができないので None は実上限 10_000 にクランプ（従来挙動）。
+        cap = limit if limit is not None else 10_000
+        for e in await self._client.list_entries(self._context, limit=cap):
             yield FileInfo(filename=e.key, size=e.size)
 
-    async def list_all(self, limit: int = 10) -> list[FileInfo]:
-        entries = await self._client.list_entries(self._context, limit=limit)
+    async def list_all(self, limit: int | None = None) -> list[FileInfo]:
+        cap = limit if limit is not None else 10_000
+        entries = await self._client.list_entries(self._context, limit=cap)
         return [FileInfo(filename=e.key, size=e.size) for e in entries]
 
     async def exists(self, key: str) -> bool:
@@ -134,3 +138,6 @@ class RemoteKeyValueStore(KeyValueStoreBase):
 
     async def aclose(self) -> None:
         await self._client.aclose()
+
+
+# TODO: Safepath Client もここに含んでしまうといいのかも？トランスポート層の話はどう整理しよう

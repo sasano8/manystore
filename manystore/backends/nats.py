@@ -14,7 +14,6 @@ from ..stores.base import (
     _kv_move,
     _KvReadFileObject,
     _KvWriteFileObject,
-    _take,
     scan_prefix,
 )
 
@@ -65,7 +64,7 @@ class NatsObjectKeyValueStore(KeyValueStoreBase, _NatsBase):
             raise FileNotFoundError(key) from e  # 欠損は FileNotFoundError に正規化
         return result.data or b""
 
-    async def iter_all(self) -> AsyncIterator[FileInfo]:
+    async def iter_all(self, limit: int | None = None) -> AsyncIterator[FileInfo]:
         obs = await self._get_obs()
         try:
             entries = await obs.list()
@@ -73,15 +72,15 @@ class NatsObjectKeyValueStore(KeyValueStoreBase, _NatsBase):
             entries = []
         entries = [e for e in entries if not e.deleted]
         entries.sort(key=lambda e: e.name, reverse=True)
-        for e in entries:
+        for e in entries[:limit]:  # limit=None は全件（スライスがそのまま全要素）
             yield FileInfo(filename=e.name, size=e.size or 0)
 
     def iter_prefix(self, prefix: str) -> AsyncIterator[FileInfo]:
         # NATS にサーバ側 prefix は無い＝scan で明示的に支える（暗黙 fallback ではない）。
         return scan_prefix(self, prefix)
 
-    async def list_all(self, limit: int = 10) -> list[FileInfo]:
-        return await _take(self.iter_all(), limit)
+    async def list_all(self, limit: int | None = None) -> list[FileInfo]:
+        return [info async for info in self.iter_all(limit)]
 
     async def exists(self, key: str) -> bool:
         obs = await self._get_obs()

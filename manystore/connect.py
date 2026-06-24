@@ -19,7 +19,7 @@ from contextlib import asynccontextmanager
 from dataclasses import dataclass
 
 from .backends import create_key_value_store
-from .stores.base import KeyValueStore
+from .protocols import KeyValueStore
 
 
 @dataclass(frozen=True)

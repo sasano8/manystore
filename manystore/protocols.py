@@ -1,0 +1,126 @@
+"""protocols — manystore の **契約（インターフェイス／Protocol）の唯一の置き場**。
+
+async 版と sync 版のストア抽象をここに集約する（実装は持たない＝[stores] サブパッケージや
+[backends] が担う）。これにより「インターフェイスはどこ？」が一意に定まり、**async↔sync の突合**も
+1 ファイルで完結する。
+
+対応関係（async ↔ sync）:
+- [KeyValueStore] ↔ [SyncKeyValueStore]（put/get がメインの値ストア。teardown は `aclose` ↔ `close`）。
+- [FileStore] ↔ [SyncFileStore]（**= KeyValueStore + open_reader/open_writer**。包含関係を継承で表す）。
+- [FileObject] ↔ [SyncFileObject]（ストリーム。`__aenter__/__aexit__` ↔ `__enter__/__exit__`）。
+- [SupportsPrefixListing] ↔ [SupportsSyncPrefixListing]（optional capability）。
+
+**FileStore = KeyValueStore + IO**（Protocol は包含を継承で表す）。ただし「どちらを native primitive と
+して実装するか」は backend 次第＝**基底実装クラスの選択**（file 寄り=`FileStoreBase`／kv 寄り=
+`KeyValueStoreBase`）で表現し、本 Protocol は契約のみを定める。
+"""
+
+from collections.abc import AsyncIterable, Iterator
+from typing import Protocol, TypedDict, runtime_checkable
+
+
+class FileInfo(TypedDict):
+    filename: str
+    size: int
+
+
+# ── async（一次） ──
+
+
+class KeyValueStore(Protocol):
+    async def put(self, key: str, value: bytes) -> None: ...
+    async def get_or_raise(self, key: str) -> bytes: ...
+    async def get(self, key: str, default: bytes | None = None) -> bytes | None: ...
+    async def iter_all(self, limit: int | None = None) -> AsyncIterable[FileInfo]: ...
+    # list_all は **全キーを平坦に**列挙する（'/' を含むネストキーも再帰的に＝1 階層だけではない）。
+    # `limit` は件数上限（`None` で全件）。階層の 1 段だけを返す概念は持たない（KVS はフラット）。
+    async def list_all(self, limit: int | None = None) -> list[FileInfo]: ...
+    async def exists(self, key: str) -> bool: ...
+    async def delete(self, key: str) -> None: ...
+    async def cp(self, src: str, dst: str) -> None: ...
+    async def mv(self, src: str, dst: str) -> None: ...
+    async def connect(self) -> None: ...
+    async def aclose(self) -> None: ...
+
+
+class FileObject(Protocol):
+    """`FileStore.open_reader`/`open_writer` が返すファイルオブジェクト（ストリーム）。"""
+
+    async def read(self, size: int = -1) -> bytes: ...
+    async def write(self, data: bytes) -> int: ...
+    async def close(self) -> None: ...
+    async def __aenter__(self) -> "FileObject": ...
+    async def __aexit__(self, *exc: object) -> None: ...
+
+
+class FileStore(KeyValueStore, Protocol):
+    """[KeyValueStore] にストリーム IO（open_reader/open_writer）を足したストア（バイナリ専用）。
+
+    モデル: **FileStore = KeyValueStore + {open_reader, open_writer}**。KVS 面（put/get/iter…・
+    connect/aclose）は [KeyValueStore] からそのまま継承し、FileStore は方向が型に出る IO 2 メソッド
+    だけを足す（= KeyValueStore は FileStore から IO を除いた部分集合）。
+
+    - `open_reader(filename)` … 読み取り用（write は `io.UnsupportedOperation`）。
+    - `open_writer(filename)` … 書き込み用（read は `io.UnsupportedOperation`）。
+    """
+
+    async def open_reader(self, filename: str) -> FileObject: ...
+    async def open_writer(self, filename: str) -> FileObject: ...
+
+
+@runtime_checkable
+class SupportsPrefixListing(Protocol):
+    """`prefix` 前方一致の列挙をネイティブに持つストアの **optional capability**。
+
+    core IF（[KeyValueStore]）には載せない（最小・汎用＝原則1）。サーバ側で prefix を絞れる backend は
+    native 実装、無い backend は `stores.base.scan_prefix` で明示的に opt-in。ディスパッチ
+    `stores.base.iter_prefix` は capability 非対応なら暗黙フォールバックせず loud に失敗する。
+    """
+
+    def iter_prefix(self, prefix: str) -> AsyncIterable[FileInfo]: ...
+
+
+# ── sync（async の同期版・突合用に 1:1 で並べる） ──
+
+
+class SyncKeyValueStore(Protocol):
+    """[KeyValueStore] の同期版（put/get がメイン）。teardown は async `aclose` ↔ sync `close`。"""
+
+    def put(self, key: str, value: bytes) -> None: ...
+    def get_or_raise(self, key: str) -> bytes: ...
+    def get(self, key: str, default: bytes | None = None) -> bytes | None: ...
+    def iter_all(self, limit: int | None = None) -> Iterator[FileInfo]: ...
+    def list_all(self, limit: int | None = None) -> list[FileInfo]: ...
+    def exists(self, key: str) -> bool: ...
+    def delete(self, key: str) -> None: ...
+    def cp(self, src: str, dst: str) -> None: ...
+    def mv(self, src: str, dst: str) -> None: ...
+    def connect(self) -> None: ...
+    def close(self) -> None: ...
+
+
+class SyncFileObject(Protocol):
+    """[FileObject] の同期版（ストリーム）。"""
+
+    def read(self, size: int = -1) -> bytes: ...
+    def write(self, data: bytes) -> int: ...
+    def close(self) -> None: ...
+    def __enter__(self) -> "SyncFileObject": ...
+    def __exit__(self, *exc: object) -> None: ...
+
+
+class SyncFileStore(SyncKeyValueStore, Protocol):
+    """[FileStore] の同期版＝**SyncKeyValueStore + open_reader/open_writer**（包含を継承で表す）。"""
+
+    def open_reader(self, filename: str) -> SyncFileObject: ...
+    def open_writer(self, filename: str) -> SyncFileObject: ...
+
+
+@runtime_checkable
+class SupportsSyncPrefixListing(Protocol):
+    """[SupportsPrefixListing] の同期版（optional capability）。"""
+
+    def iter_prefix(self, prefix: str) -> Iterator[FileInfo]: ...
+
+
+# TODO: manystore/implement/protocol.py これも移動した方がよい？

@@ -37,7 +37,7 @@ import uuid
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
-from ..stores.base import FileStore, KeyValueStore
+from ..protocols import FileStore, KeyValueStore
 
 
 def required_members(protocol: type) -> frozenset[str]:

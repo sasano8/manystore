@@ -1,13 +1,12 @@
-"""async storage — ストア抽象と共通ヘルパ（backend 非依存のコア）。
+"""stores.base — ストアの **基底実装クラス**と backend 横断の共通ヘルパ（契約は [protocols]）。
 
-2 種のストア抽象を定義する:
-- [KeyValueStore] … put/get がメインの値ストア（バイト列をキーで出し入れ）。
-- [FileStore] … `open` でファイルオブジェクト（[FileObject]）を取得するストリーム指向の抽象。
-
-具体的な backend（Local / S3 / NATS）の実装は [backends] サブパッケージに置く。ここには
-抽象（Protocol）と、backend 横断で使う小さなヘルパ（`_take` / `_atomic_write_bytes` /
-`_kv_copy` / `_kv_move`）、および 2 方向の汎用アダプタ（KVS→FileStore の [KeyValueFileStore] /
-FileStore→KVS の [KeyValueFromFileStore]）だけを置く。
+契約（Protocol）は [manystore.protocols] に集約してある。ここには「実装」だけを置く:
+- 基底クラス: [KeyValueStoreBase]（kv 寄り＝get_or_raise が primitive）/ [FileStoreBase]（file 寄り＝
+  open_reader/open_writer が primitive・KVS 面は IO から導出）。**backend は native primitive 側の基底を
+  継承する**（NATS/dict/HTTP=KeyValueStoreBase・Local=FileStoreBase）。
+- 共通ヘルパ（`_atomic_write_bytes` / `_kv_copy` / `_kv_move` / prefix capability の
+  [iter_prefix] ディスパッチ・[scan_prefix]）。
+- 2 方向の汎用アダプタ（KVS→FileStore の [KeyValueFileStore] / FileStore→KVS の [KeyValueFromFileStore]）。
 """
 
 import abc
@@ -17,31 +16,59 @@ import os
 import tempfile
 from collections.abc import AsyncIterator
 from pathlib import Path
-from typing import Protocol, TypedDict, runtime_checkable
+
+# 契約は [protocols] が唯一の置き場。ここでは型注釈・isinstance・導出のために import するだけで、
+# 再エクスポートはしない（利用側は protocols から取る＝参照の二重化を避ける）。
+from ..protocols import FileInfo, FileObject, FileStore, KeyValueStore, SupportsPrefixListing
+
+__all__ = [
+    "KeyValueStoreBase",
+    "FileStoreBase",
+    "KeyValueFileStore",
+    "KeyValueFromFileStore",
+    "iter_prefix",
+    "scan_prefix",
+]
 
 
-class FileInfo(TypedDict):
-    filename: str
-    size: int
+class FileStoreBase(abc.ABC):
+    """**file 寄り** ([FileStore]) backend の基底＝primitive は `open_reader`/`open_writer`（ストリーム）。
 
+    KVS 面（get_or_raise/put/get）は **IO から導出**する＝get は open_reader で全体読み、put は
+    open_writer で全体書き（**値境界でのみバッファ**。ストリーム性能は open_reader/open_writer を直接
+    使えば得られる）。よって **[KeyValueStoreBase] は継承しない**（kv 寄りの buffered primitive とは
+    逆向き）。filesystem-native な `LocalFileStore` のような「真実が IO 側」の backend が継承する。
 
-# ── Key-Value store（put/get がメイン） ──
+    対して **kv 寄り** backend（NATS/dict/HTTP＝whole get/put が native でバッファが元から生じる）は
+    [KeyValueStoreBase] を継承し、IO は whole の上に buffer 合成する。`open_reader`/`open_writer` は
+    **`@abstractmethod`**＝未実装ならインスタンス化時点で `TypeError`（実装漏れに必ず気づく）。
+    """
 
+    @abc.abstractmethod
+    async def open_reader(self, filename: str) -> FileObject:
+        """読み取りストリームを開く。欠損は `FileNotFoundError`。**サブクラス必須**（primitive）。"""
+        raise NotImplementedError
 
-class KeyValueStore(Protocol):
-    async def put(self, key: str, value: bytes) -> None: ...
-    async def get_or_raise(self, key: str) -> bytes: ...
-    async def get(self, key: str, default: bytes | None = None) -> bytes | None: ...
-    def iter_all(self) -> AsyncIterator[FileInfo]: ...
-    # list_all は **全キーを平坦に**列挙する（'/' を含むネストキーも再帰的に＝1 階層だけではない）。
-    # `limit` は安全のための件数上限。階層の 1 段だけを返す概念は持たない（KVS はフラット）。
-    async def list_all(self, limit: int = 10) -> list[FileInfo]: ...
-    async def exists(self, key: str) -> bool: ...
-    async def delete(self, key: str) -> None: ...
-    async def cp(self, src: str, dst: str) -> None: ...
-    async def mv(self, src: str, dst: str) -> None: ...
-    async def connect(self) -> None: ...
-    async def aclose(self) -> None: ...
+    @abc.abstractmethod
+    async def open_writer(self, filename: str) -> FileObject:
+        """書き込みストリームを開く。**サブクラス必須**（primitive）。"""
+        raise NotImplementedError
+
+    async def get(self, key: str, default: bytes | None = None) -> bytes | None:
+        try:
+            return await self.get_or_raise(key)
+        except FileNotFoundError:
+            return default
+
+    async def get_or_raise(self, key: str) -> bytes:
+        # open_reader（ストリーム primitive）で全体読み＝値境界でバッファ。
+        async with await self.open_reader(key) as f:
+            return await f.read()
+
+    async def put(self, key: str, value: bytes) -> None:
+        # open_writer（ストリーム primitive）で全体書き＝値境界でバッファ。
+        async with await self.open_writer(key) as f:
+            await f.write(value)
 
 
 class KeyValueStoreBase(abc.ABC):
@@ -66,29 +93,6 @@ class KeyValueStoreBase(abc.ABC):
             return await self.get_or_raise(key)
         except FileNotFoundError:
             return default
-
-
-async def _take(entries: AsyncIterator[FileInfo], limit: int) -> list[FileInfo]:
-    """非同期イテレータから先頭 `limit` 件を集めて返す（各 backend の list 共通実装）。"""
-    out: list[FileInfo] = []
-    async for info in entries:
-        out.append(info)
-        if len(out) >= limit:
-            break
-    return out
-
-
-@runtime_checkable
-class SupportsPrefixListing(Protocol):
-    """`prefix` 前方一致の列挙をネイティブに持つストアの **optional capability**。
-
-    core IF（[KeyValueStore]）には載せない（最小・汎用に保つ＝原則1）。S3 のように
-    サーバ側で prefix を絞れる backend は native 実装、サーバ側 prefix を持たない backend は
-    [scan_prefix] で明示的に opt-in して、いずれも自身が capability を**宣言**する。ディスパッチ
-    [iter_prefix] は capability を持たないストアでは暗黙フォールバックせず loud に失敗する。
-    """
-
-    def iter_prefix(self, prefix: str) -> AsyncIterator[FileInfo]: ...
 
 
 def iter_prefix(store: KeyValueStore, prefix: str) -> AsyncIterator[FileInfo]:
@@ -152,42 +156,6 @@ async def _kv_move(store: KeyValueStore, src: str, dst: str) -> None:
     """copy→delete で src を dst へ移動する汎用実装（原子的ではない）。"""
     await _kv_copy(store, src, dst)
     await store.delete(src)
-
-
-# ── File store（open でファイルオブジェクトを取得） ──
-
-
-class FileObject(Protocol):
-    """`FileStore.open` が返すファイルオブジェクト（ストリーム）。"""
-
-    async def read(self, size: int = -1) -> bytes: ...
-    async def write(self, data: bytes) -> int: ...
-    async def close(self) -> None: ...
-    async def __aenter__(self) -> FileObject: ...
-    async def __aexit__(self, *exc: object) -> None: ...
-
-
-class FileStore(KeyValueStore, Protocol):
-    """[KeyValueStore] にストリーム IO（open_reader/open_writer）を足したストア（バイナリ専用）。
-
-    モデル: **FileStore = KeyValueStore + {open_reader, open_writer}**。put/get/get_or_raise・
-    iter_all/list_all/exists/delete/cp/mv・connect/aclose は KeyValueStore からそのまま継承（流用）
-    し、FileStore は方向が型に出る IO 2 メソッドだけを足す。逆に言えば **KeyValueStore は FileStore
-    から IO を除いた部分集合**。
-
-    - `open_reader(filename)` … 読み取り用（write は `io.UnsupportedOperation`）。
-    - `open_writer(filename)` … 書き込み用（read は `io.UnsupportedOperation`）。
-    どちらもバイナリ（bytes）専用。テキストの符号化は利用側の責務にする。
-
-    変換: **KVS→FileStore** は無い IO の埋め合わせが要る（[KeyValueFileStore] が get/put から
-    open_reader/open_writer を合成）。**FileStore→KVS** は IO を落とすだけ
-    （[KeyValueFromFileStore]＝残りはそのまま流用）。filesystem-native な [backends.LocalFileStore]
-    が「真実の実装」の代表例。S3/NATS/HTTP の FileStore は IO 以外（put/get/iter 等）を段階的に
-    備える（未実装なら呼び出し時に AttributeError／非対応エラー）。
-    """
-
-    async def open_reader(self, filename: str) -> FileObject: ...
-    async def open_writer(self, filename: str) -> FileObject: ...
 
 
 # ── KeyValueStore を FileStore として被せる汎用アダプタ ──
@@ -260,6 +228,7 @@ class KeyValueFileStore(KeyValueStoreBase):
 
     # ── 合成する IO（KVS に無い分の埋め合わせ） ──
 
+    # TODO: KeyValueStore は open_reader, open_writer を持たないという整理でいいと思う。後はファイルストアと同じ。
     async def open_reader(self, filename: str) -> FileObject:
         return _KvReadFileObject(await self._store.get_or_raise(filename))
 
@@ -274,13 +243,14 @@ class KeyValueFileStore(KeyValueStoreBase):
     async def get_or_raise(self, key: str) -> bytes:
         return await self._store.get_or_raise(key)
 
-    def iter_all(self) -> AsyncIterator[FileInfo]:
-        return self._store.iter_all()
+    async def iter_all(self, limit: int | None = None) -> AsyncIterator[FileInfo]:
+        async for info in self._store.iter_all(limit):  # 下層の async iter を limit ごと素通し
+            yield info
 
     def iter_prefix(self, prefix: str) -> AsyncIterator[FileInfo]:
         return iter_prefix(self._store, prefix)  # 下層の capability をそのまま伝播（非対応は loud）
 
-    async def list_all(self, limit: int = 10) -> list[FileInfo]:
+    async def list_all(self, limit: int | None = None) -> list[FileInfo]:
         return await self._store.list_all(limit)
 
     async def exists(self, key: str) -> bool:
@@ -323,15 +293,16 @@ class KeyValueFromFileStore(KeyValueStoreBase):
     async def get_or_raise(self, key: str) -> bytes:
         return await self._store.get_or_raise(key)
 
-    def iter_all(self) -> AsyncIterator[FileInfo]:
-        return self._store.iter_all()
+    async def iter_all(self, limit: int | None = None) -> AsyncIterator[FileInfo]:
+        async for info in self._store.iter_all(limit):  # 下層 FileStore の async iter を素通し
+            yield info
 
     def iter_prefix(self, prefix: str) -> AsyncIterator[FileInfo]:
         return iter_prefix(
             self._store, prefix
         )  # 下層 FileStore の capability を伝播（非対応は loud）
 
-    async def list_all(self, limit: int = 10) -> list[FileInfo]:
+    async def list_all(self, limit: int | None = None) -> list[FileInfo]:
         return await self._store.list_all(limit)
 
     async def exists(self, key: str) -> bool:

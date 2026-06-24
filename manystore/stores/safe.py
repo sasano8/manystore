@@ -51,8 +51,9 @@ class SafeKeyValueStore(KeyValueStoreBase):
     async def get_or_raise(self, key: str) -> bytes:
         return await self._store.get_or_raise(validate_safe_path(key))
 
-    def iter_all(self) -> AsyncIterator[FileInfo]:
-        return self._store.iter_all()
+    async def iter_all(self, limit: int | None = None) -> AsyncIterator[FileInfo]:
+        async for info in self._store.iter_all(limit):  # 下層の async iter を limit ごと素通し
+            yield info
 
     def iter_prefix(self, prefix: str) -> AsyncIterator[FileInfo]:
         # prefix を validate して内側へ委譲（capability 伝播）。空 prefix は「全件」を意味する
@@ -61,7 +62,7 @@ class SafeKeyValueStore(KeyValueStoreBase):
             validate_safe_path(prefix)
         return _iter_prefix(self._store, prefix)
 
-    async def list_all(self, limit: int = 10) -> list[FileInfo]:
+    async def list_all(self, limit: int | None = None) -> list[FileInfo]:
         return await self._store.list_all(limit)
 
     async def exists(self, key: str) -> bool:

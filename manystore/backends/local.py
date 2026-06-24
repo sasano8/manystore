@@ -14,14 +14,11 @@ from collections.abc import AsyncIterator
 from pathlib import Path
 from typing import BinaryIO
 
-from ..stores.base import (
-    FileInfo,
-    FileObject,
+from ..protocols import FileInfo, FileObject
+from ..stores.base import (  # protocols に寄せる
+    FileStoreBase,
     KeyValueFromFileStore,
-    KeyValueStoreBase,
-    _atomic_write_bytes,
     _kv_copy,
-    _take,
     scan_prefix,
 )
 
@@ -93,15 +90,14 @@ class _LocalAtomicWriter:
             await self.close()
 
 
-class LocalFileStore(KeyValueStoreBase):
+class LocalFileStore(FileStoreBase):
     """ローカルファイルシステムの「真実の実装」（完全な [FileStore]＝KeyValueStore + IO）。
 
-    `open_reader`/`open_writer` のストリーム IO に加え、put/get/get_or_raise（全体）・
-    iter/list/exists/delete・cp/mv・vacuum までを filesystem-native に提供する＝KeyValueStore も
-    そのまま満たす。KVS ビュー（IO を隠したもの）が要るときは
-    `KeyValueFromFileStore(LocalFileStore(...))`（＝[LocalKeyValueStore]）で被せる＝実装の二重持ちを
-    避ける。get は基底 [KeyValueStoreBase] が get_or_raise から与える。書き込みは temp+rename で
-    原子的（all-or-nothing）。バイナリ専用。
+    **file 寄り**＝primitive は `open_reader`/`open_writer`（ストリーム）なので [FileStoreBase] を継承し、
+    put/get/get_or_raise（全体）は基底が IO から導出する（値境界でのみバッファ）。本クラスは IO 2 つ＋
+    名前空間操作（iter/list/exists/delete・cp/mv・vacuum）を filesystem-native に実装する＝KeyValueStore も
+    満たす。KVS ビュー（IO を隠したもの）は `KeyValueFromFileStore(LocalFileStore(...))`（＝[LocalKeyValueStore]）
+    で被せる＝実装の二重持ちを避ける。書き込みは open_writer の temp+rename で原子的（all-or-nothing）。バイナリ専用。
     """
 
     def __init__(self, directory: Path) -> None:
@@ -110,32 +106,18 @@ class LocalFileStore(KeyValueStoreBase):
         self._dir = Path(directory).resolve()
         self._dir.mkdir(parents=True, exist_ok=True)
 
-    # ── ストリーム入出力 ──
+    # ── ストリーム入出力（primitive）。put/get_or_raise/get は [FileStoreBase] が導出 ──
 
     async def open_reader(self, filename: str) -> FileObject:
         return LocalFileObject((self._dir / filename).open("rb"))
 
     async def open_writer(self, filename: str) -> FileObject:
-        return _LocalAtomicWriter(self._dir / filename)  # temp+rename で all-or-nothing
-
-    # ── 全体 put/get ──
-
-    async def put(self, key: str, value: bytes) -> None:
-        # キーに '/' を含む場合に備えて親ディレクトリを作る（s3/nats の
-        # フラットキー規約＝任意の '/' を含むキーをそのまま置けるのに合わせる）。
-        path = self._dir / key
-        path.parent.mkdir(parents=True, exist_ok=True)
-        # temp+rename で原子的に書く（途中失敗で既存値が壊れない＝all-or-nothing）。
-        _atomic_write_bytes(path, value)
-
-    async def get_or_raise(self, key: str) -> bytes:
-        # 自身の open_reader を流用（欠損なら open("rb") が FileNotFoundError）。
-        async with await self.open_reader(key) as f:
-            return await f.read()
+        # 親ディレクトリ作成＋temp+rename で all-or-nothing（'/' を含むネストキーもそのまま置ける）。
+        return _LocalAtomicWriter(self._dir / filename)
 
     # ── 名前空間操作（filesystem-native） ──
 
-    async def iter_all(self) -> AsyncIterator[FileInfo]:
+    async def iter_all(self, limit: int | None = None) -> AsyncIterator[FileInfo]:
         # 再帰列挙（rglob）。キーは self._dir からの相対 posix パスにし、'/' を含む
         # ネストキーも列挙する（s3/nats のフラットキー列挙と規約を揃える）。
         files = sorted(
@@ -143,15 +125,15 @@ class LocalFileStore(KeyValueStoreBase):
             key=lambda p: p.relative_to(self._dir).as_posix(),
             reverse=True,
         )
-        for f in files:
+        for f in files[:limit]:  # limit=None は全件（スライスがそのまま全要素）
             yield FileInfo(filename=f.relative_to(self._dir).as_posix(), size=f.stat().st_size)
 
     def iter_prefix(self, prefix: str) -> AsyncIterator[FileInfo]:
         # filesystem にサーバ側 prefix は無い＝scan で明示的に支える（暗黙 fallback ではない）。
         return scan_prefix(self, prefix)
 
-    async def list_all(self, limit: int = 10) -> list[FileInfo]:
-        return await _take(self.iter_all(), limit)
+    async def list_all(self, limit: int | None = None) -> list[FileInfo]:
+        return [info async for info in self.iter_all(limit)]
 
     async def exists(self, filename: str) -> bool:
         return (self._dir / filename).is_file()

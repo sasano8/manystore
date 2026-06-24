@@ -15,7 +15,6 @@ from ..stores.base import (
     _kv_move,
     _KvReadFileObject,
     _KvWriteFileObject,
-    _take,
     scan_prefix,
 )
 
@@ -40,15 +39,16 @@ class DictKeyValueStore(KeyValueStoreBase):
         except KeyError as e:
             raise FileNotFoundError(key) from e  # 欠損は FileNotFoundError に正規化
 
-    async def iter_all(self) -> AsyncIterator[FileInfo]:
-        for key in sorted(self._data, reverse=True):  # 名前降順（他 backend と整合）
+    async def iter_all(self, limit: int | None = None) -> AsyncIterator[FileInfo]:
+        # 名前降順（他 backend と整合）。limit=None は全件（スライスがそのまま全要素）。
+        for key in sorted(self._data, reverse=True)[:limit]:
             yield FileInfo(filename=key, size=len(self._data[key]))
 
     def iter_prefix(self, prefix: str) -> AsyncIterator[FileInfo]:
         return scan_prefix(self, prefix)  # dict にサーバ側 prefix は無い＝scan で明示的に支える
 
-    async def list_all(self, limit: int = 10) -> list[FileInfo]:
-        return await _take(self.iter_all(), limit)
+    async def list_all(self, limit: int | None = None) -> list[FileInfo]:
+        return [info async for info in self.iter_all(limit)]
 
     async def exists(self, key: str) -> bool:
         return key in self._data

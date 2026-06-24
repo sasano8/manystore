@@ -12,7 +12,8 @@ KVS の get/exists と FileStore の read のみ実装する。httpx はメソ�
 import io
 from collections.abc import AsyncIterator
 
-from ..stores.base import FileInfo, FileObject, KeyValueStoreBase, _KvReadFileObject
+from ..protocols import FileInfo, FileObject
+from ..stores.base import KeyValueStoreBase, _KvReadFileObject  # TODO: protocols に寄せる
 
 
 def _read_only(op: str) -> None:
@@ -64,7 +65,7 @@ class HttpKeyValueStore(KeyValueStoreBase, _HttpBase):
             resp.raise_for_status()
             return resp.content
 
-    async def iter_all(self) -> AsyncIterator[FileInfo]:
+    async def iter_all(self, limit: int | None = None) -> AsyncIterator[FileInfo]:
         raise io.UnsupportedOperation("http backend is read-only: list/iter")
         yield  # 未到達（この関数を async generator にするため）
 
@@ -73,7 +74,7 @@ class HttpKeyValueStore(KeyValueStoreBase, _HttpBase):
         raise io.UnsupportedOperation("http backend is read-only: iter_prefix")
         yield  # 未到達（async generator 化のため）
 
-    async def list_all(self, limit: int = 10) -> list[FileInfo]:
+    async def list_all(self, limit: int | None = None) -> list[FileInfo]:
         _read_only("list_all")
 
     async def exists(self, key: str) -> bool:
