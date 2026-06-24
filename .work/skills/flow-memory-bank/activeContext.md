@@ -17,18 +17,16 @@
   こと＝`KeyValueFileStore` に修正。詳細は systemPatterns「コア」へ昇格済。
 - **memory clean 実施（2026-06-25）**: progress の完了行を畳み込み・解決済み「既知の問題」を GC・plan ファイルを
   `plans/` へ集約（m028 は完了につき削除）・完了 interrupt を archive。
+- **バックログ4件を解決（2026-06-25）**: M036（error-swallow を fail-loud 化＝nats/s3 の exists・iter_all。test +3）・
+  M033（limit 統一は波及済と確認＝コード変更なし）・M017（3.14+ で確定＝3.10+ 拡張は見送り）・M024（pull 型の文書追従）。
 
 ## 次のステップ
 
-- 実装サイクル候補（`progress.md` 残作業から）: **M036**（error-swallow 監査）／フェーズ2 `kv/json`／
-  フェーズ3 `storage/manystore`／M032（Safe 包装込みファクトリ）・M033（iter_all limit 統一は完了済→残は IF 波及）・
-  M034（conformance spec 表出力）。
+- 実装サイクル候補（`progress.md` 残作業から）: フェーズ2 `kv/json`／フェーズ3 `storage/manystore`／
+  M032（Safe 包装込みファクトリ）／M034（conformance spec 表出力）／M010（local 非ブロッキング化）。
 
 ## 進行中の決定・考慮事項
 
-- **【残・M036】error-swallow 監査**: 「黙って既定値を返す」握り潰しの是正＝`S3KeyValueStore.exists`／
-  `NatsObjectKeyValueStore.exists`・`iter_all` の `except Exception: return False/[]`、watcher ループ等。route
-  handler の `except→error 応答`（変換）は対象外。fail-loud 方針（要求7＝決定済）の残適用。
 - **manystore は最小・汎用に保つ**：利用側都合で IF を拡張しない（YAGNI）。
 - **worker/supervisor**: 本 repo は dotfiles（`workers_dir: workers`）配下の worker。下り=interrupt 投函／
   上り=`outbox/` へ pull 型エスカレ（親は直接知らない）。

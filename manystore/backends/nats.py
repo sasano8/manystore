@@ -65,10 +65,15 @@ class NatsObjectKeyValueStore(KeyValueStoreBase, _NatsBase):
         return result.data or b""
 
     async def iter_all(self, limit: int | None = None) -> AsyncIterator[FileInfo]:
+        from nats.js.errors import NotFoundError
+
         obs = await self._get_obs()
         try:
             entries = await obs.list()
-        except Exception:
+        except NotFoundError:
+            # TODO: 将来握りつぶしなので取っ払う
+            # 空ストアは list() が NotFoundError＝空扱い。接続断・認証等の本物のエラーは
+            # 握り潰さず伝播させる（fail-loud。空と障害を取り違えない）。
             entries = []
         entries = [e for e in entries if not e.deleted]
         entries.sort(key=lambda e: e.name, reverse=True)
@@ -83,12 +88,17 @@ class NatsObjectKeyValueStore(KeyValueStoreBase, _NatsBase):
         return [info async for info in self.iter_all(limit)]
 
     async def exists(self, key: str) -> bool:
+        from nats.js.errors import NotFoundError
+
         obs = await self._get_obs()
         try:
             info = await obs.get_info(key)  # ObjectStore に info は無い。get_info が正
-            return not info.deleted
-        except Exception:
+        except NotFoundError:
+            # TODO: 将来握りつぶしなので取っ払う
+            # 欠損/削除済み（ObjectNotFoundError/ObjectDeletedError は NotFoundError 派生）のみ
+            # False。接続断・認証等の本物のエラーは握り潰さず伝播（fail-loud）。
             return False
+        return not info.deleted
 
     async def delete(self, key: str) -> None:
         obs = await self._get_obs()

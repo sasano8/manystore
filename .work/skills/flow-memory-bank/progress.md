@@ -34,7 +34,6 @@
 
 | ID | タスク | 優先 | 備考 |
 |----|--------|------|------|
-| M036 | error-swallow 監査（fail-loud の残適用） | normal | prefix capability 分は完了。残＝`S3/Nats.exists`・`Nats.iter_all` の `except Exception: return False/[]`、watcher ループ等の握り潰し是正。route の例外→応答変換は対象外 |
 | M010 | local backend の非ブロッキング化 | 中 | `read_bytes`/`write` を `asyncio.to_thread` でオフロード（現状 event loop を塞ぐ）|
 | M011 | 既定で安全（キー検証）/方針明確化 | 中 | 生 backend はキー検証なし＝`../escape` 可。安全が `Safe*` opt-in の foot-gun。M032 と連動 |
 | M032 | Safe 包装込みファクトリをトップに | normal | `create_key_value_store` は生ストアを返す。安全包装込みの入口（例 `manystore.open_key_value_store`）が要望。未決＝関数名/FileStore 版/Safe 必須か |
@@ -43,16 +42,13 @@
 | M016 | テスト拡充（エラーパス/並行/大容量） | 中 | fake は happy path 中心 |
 | M014 | 操作レベル retry/timeout | 低 | 現状 connect のみ |
 | M015 | logging（操作・リトライ可視化） | 低 | 観測性なし |
-| M017 | Python サポート範囲（3.10+ へ広げるか） | 相談 | `>=3.14` は採用障壁。広げるなら future import 復活＋ruff 設定。3.14純度 vs 採用のトレードオフ |
 | M021残 | S3 ゲートウェイ 残 | normal | S1/S2（GET/PUT/HEAD/DELETE/ListObjectsV2 + Multipart）実装済。残＝S3 passthrough（`SupportsPresign`+redirect/proxy）/ S4 SeaweedFS 実機 backend 疎通 / ListObjectsV2 continuation token ページング。設計 `plans/m021-s3-gateway-plan.md` |
 | M022b | conformance の run_middle/heavy/full ＋ spec（file/kv 寄り）検出・特性表・リプレイ | low | P1 存在チェック＋P2 run_light 完了。`tester.spec={"leaning":None}` は placeholder。実 backend（S3/NATS）適用も |
 | M034 | conformance 結果を docs に spec 表出力＋Makefile キック | normal | 各実装のメソッド×Implemented/Not を `docs/{file_storage,kv}_spec.md` に。M022b/M031 と統合が自然 |
-| M033 | `iter_all`/`list_all` の limit 統一の波及 | normal | コア IF の limit 受け取りは実施済（iter_all/list_all が `limit:int|None`・`_take` 撤去）。残＝全ラッパ/Sync 波及と conformance 確認 |
 | M027b残 | FileStore=KVS+IO 波及（Safe・Sync 残） | low | S3/NATS/HTTP/Local 完了。残＝`SafeFileStore`（KVS 面も検証付き委譲）/ `SyncFileStore` Protocol 鏡映＋`AsyncToSyncFileStore` ブリッジ |
 | M025残 | 名前空間再編 フェーズ2/3 | normal | フェーズ1（移設）＋addressing 再設計 完了。残＝フェーズ2 `kv/json`（JSON 検証）/ フェーズ3 `storage/manystore`（range/chunked streaming）。設計 `plans/m025-namespace-restructure-plan.md` |
 | M026 | stream インターフェース（第3の族・新コア IF） | 相談 | kv/storage の他に **stream**＝無境界チャネル（append/follow＝tail/subscribe）。FileStore で表せない＝新コア IF `StreamStore`。MVP=byte stream。最小・汎用と緊張するので **doc-first 合意必須**。詳細 `interrupt/archive/2026-06-23-stream-interface.md` |
 | M028b | ArrayStorage を HTTP に動的公開（context の mount/unmount） | low | `POST/DELETE /contexts` で動的 mount。backend 資格情報を HTTP から渡す＝認証設計が要る（M011 連動）。要設計 |
-| M024 | 上りエスカレ pull 型化の文書追従＋スキル参照名の層エイリアス統一 | low | 機構（outbox）は導入済。残＝MB 文書内の push 前提記述と旧名参照の追従 |
 
 > **ゴール段階**: G1=配布できる（M005〜M008 完了）→ G2=安心して使える（M009〜M011・M016）→
 > G3=機能十分（M012〜M015）→ G4=広く使える（M017 判断）。
@@ -78,6 +74,15 @@
 - **M035**: 実装を `manystore/stores/` へ分類（base/array/safe/sync_bridge）＋`conformancer/`。完了 plan 削除。
 - **M037**: テスト軽重分離（`@pytest.mark.slow`・`make test`/`test-all`）＋未整備依存の早期 skip。fast ~0.65s。
 - **protocols.py 集約（2026-06-25）**: `stores/base.py` 削除＋既定実装を protocols.py へ全面集約（詳細は systemPatterns）。
+- **M033（2026-06-25）**: `iter_all`/`list_all` の limit 統一は全面波及済と確認＝全 backend・全ラッパ
+  （Safe/Array/sync_bridge/remote）が `limit:int|None` シグネチャで forward、`list_all` は `iter_all(limit)` 参照。
+- **M036（2026-06-25・完了）**: error-swallow を fail-loud 化。`nats.iter_all`（空ストアの `NotFoundError` のみ []・
+  他は伝播）／`nats.exists`・`s3.exists`（not-found〔NotFoundError／404〕のみ False・認証/5xx/接続断は伝播）。
+  test +3（s3 非 404 伝播・nats 空は非エラー・nats 実エラー伝播）。watcher ポーリングは意図的レジリエンスとして存置。
+  ※nats の not-found catch 自体を将来 `obs.watch()` ベース再実装で取っ払う TODO をコード内に残置（ユーザー判断で
+  今回は現状維持＝not-found→[]/False の正規化は契約上必要）。
+- **M024（2026-06-25）**: pull 型エスカレ（outbox）の文書追従完了＝MB に push 前提の残記述なし・旧スキル名なし・
+  alias を `[[unit-quality]]` に統一。
 
 ## 現状ステータス
 
@@ -100,5 +105,7 @@ error-swallow 監査 M036 / Safe 既定化 M011・M032 / テスト拡充）と U
 - **fail-loud（要求7）**: 暗黙フォールバックで失敗・非対応を握り潰さない。capability 非対応は loud 失敗・非 native は明示 opt-in。
 - **protocols.py = 契約＋既定実装の唯一の源泉**（2026-06-25）: backend が継承・流用する base/adapter/helper を 1 ファイルに集約し
   二重参照を断つ（`stores/base.py`・`sync_storage.py` 削除）。
+- **Python サポート範囲は 3.14+ で確定（M017 見送り・2026-06-25）**: 3.10+ へ広げる案は YAGNI で見送り
+  （広げると future import 復活＋ruff 設定の負担。3.14 純度を優先）。需要が出たら再検討。
 - Memory Bank: Cline 準拠 6 コア。作業フォルダ `.work/skills/flow-memory-bank/`（`.work/` は commit する正本）。
   完了 plan は削除し、残フェーズの plan のみ `plans/` に保持。

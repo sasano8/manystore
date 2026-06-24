@@ -387,6 +387,16 @@ class _FakeS3:
         self.objects: dict[str, bytes] = {}
         self._uploads: dict[str, dict] = {}
         self._uid = 0
+        self.head_error_code: str | None = None  # set して head_object のエラー Code を差し替える
+
+    async def head_object(self, Bucket: str, Key: str) -> dict:
+        from botocore.exceptions import ClientError
+
+        if self.head_error_code is not None:  # fail-loud 検証用（404 以外のエラー）
+            raise ClientError({"Error": {"Code": self.head_error_code}}, "HeadObject")
+        if Key not in self.objects:
+            raise ClientError({"Error": {"Code": "404"}}, "HeadObject")  # 実 client と同形
+        return {"ContentLength": len(self.objects[Key])}
 
     async def __aenter__(self) -> _FakeS3:
         return self
@@ -484,6 +494,24 @@ def test_s3_file_store_is_full_kvs() -> None:
         assert await store.get("missing", b"d") == b"d"
         with pytest.raises(FileNotFoundError):
             await store.get_or_raise("missing")
+        assert await store.exists("kv") is True  # head_object 200
+        assert await store.exists("missing") is False  # head_object 404
+
+    asyncio.run(scenario())
+
+
+def test_s3_exists_propagates_non_404() -> None:
+    # fail-loud: 404/NoSuchKey/NotFound 以外（認証・5xx・接続断）は握り潰さず伝播する。
+    from botocore.exceptions import ClientError
+
+    fake = _FakeS3()
+    fake.head_error_code = "500"
+    store = S3KeyValueStore("bucket")
+    store._session = lambda: fake
+
+    async def scenario() -> None:
+        with pytest.raises(ClientError):
+            await store.exists("k")
 
     asyncio.run(scenario())
 
@@ -514,19 +542,28 @@ class _FakeNatsObs:
 
     async def get(self, name: str, writeinto=None, show_deleted=False) -> _FakeObjResult:
         if name not in self.objects:
-            raise KeyError(name)  # ObjectNotFound 相当
+            from nats.js.errors import ObjectNotFoundError
+
+            raise ObjectNotFoundError  # 実 nats-py と同形（欠損）
         return _FakeObjResult(self.objects[name])
 
     async def get_info(self, name: str, show_deleted=False) -> _FakeObjInfo:
         if name not in self.objects:
-            raise KeyError(name)
+            from nats.js.errors import ObjectNotFoundError
+
+            raise ObjectNotFoundError
         return _FakeObjInfo(name, len(self.objects[name]))
 
     async def delete(self, name: str) -> None:
         self.objects.pop(name, None)
 
     async def list(self, ignore_deletes=False) -> list[_FakeObjInfo]:
-        return [_FakeObjInfo(n, len(v)) for n, v in self.objects.items()]
+        infos = [_FakeObjInfo(n, len(v)) for n, v in self.objects.items()]
+        if not infos:
+            from nats.js.errors import NotFoundError
+
+            raise NotFoundError  # 実 nats-py は空ストアで NotFoundError を上げる
+        return infos
 
 
 def _patch_obs(store, fake: _FakeNatsObs) -> None:
@@ -592,6 +629,35 @@ def test_nats_kvs_exists_uses_get_info() -> None:
         assert await store.exists("k") is False
         await store.put("k", b"v")
         assert await store.exists("k") is True
+
+    asyncio.run(scenario())
+
+
+def test_nats_iter_all_empty_is_not_error() -> None:
+    # 空ストアは list() が NotFoundError を上げるが iter_all は [] 扱い（エラーにしない）。
+    store = NatsObjectKeyValueStore("nats://x", "bucket")
+    _patch_obs(store, _FakeNatsObs())
+
+    async def scenario() -> None:
+        assert [i async for i in store.iter_all()] == []
+
+    asyncio.run(scenario())
+
+
+def test_nats_iter_all_propagates_real_error() -> None:
+    # fail-loud: 空（NotFoundError）以外の障害（接続断など）は握り潰さず伝播する。
+    store = NatsObjectKeyValueStore("nats://x", "bucket")
+    fake = _FakeNatsObs()
+
+    async def boom(ignore_deletes: bool = False) -> list:
+        raise RuntimeError("connection lost")
+
+    fake.list = boom
+    _patch_obs(store, fake)
+
+    async def scenario() -> None:
+        with pytest.raises(RuntimeError):
+            [i async for i in store.iter_all()]
 
     asyncio.run(scenario())
 

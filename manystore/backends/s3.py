@@ -91,12 +91,18 @@ class S3KeyValueStore(KeyValueStoreBase, _S3Base):
         return [info async for info in self.iter_all(limit)]
 
     async def exists(self, key: str) -> bool:
+        from botocore.exceptions import ClientError
+
         async with self._session() as client:
             try:
                 await client.head_object(Bucket=self._bucket, Key=key)
-                return True
-            except Exception:
-                return False
+            except ClientError as e:
+                # 404/NoSuchKey/NotFound のみ「無い」＝False。認証・5xx・接続断などは
+                # 握り潰さず伝播させる（fail-loud）。
+                if e.response.get("Error", {}).get("Code") in ("404", "NoSuchKey", "NotFound"):
+                    return False
+                raise
+            return True
 
     async def delete(self, key: str) -> None:
         async with self._session() as client:
