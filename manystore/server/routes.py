@@ -11,12 +11,16 @@ KeyValueStore と 1:1 で対応する薄い HTTP アダプタ:
 
 interrupt 投入は「featured な local context への PUT」として、この汎用 PUT で成立する
 （専用エンドポイントは持たない＝UI は汎用のまま）。
+
+エラー応答は **`application/problem+json`**（RFC 9457）で返す（[to_problem]）。ドメイン例外
+（[ManystoreError]）は status/title 付き problem に、欠損は 404 problem に写す。想定外の例外は
+握りつぶさず再送出（＝本物の 500）。S3 ゲートウェイは S3 互換 XML を返すため別系統（不採用）。
 """
 
 from dataclasses import asdict
 
-from ..implement.service import ContextNotFound, ReadOnlyContext, StorageService
-from ..safe_path import UnsafePathError
+from ..exceptions import PROBLEM_JSON, ContextNotFound, ManystoreError, to_problem
+from ..implement.service import StorageService
 
 
 def build_router(service: StorageService):
@@ -28,23 +32,25 @@ def build_router(service: StorageService):
     """
     from fastapi import (
         APIRouter,
-        HTTPException,
         Request,
         Response,
         WebSocket,
         WebSocketDisconnect,
     )
+    from fastapi.responses import JSONResponse
 
     app = APIRouter()
 
-    def _http_error(exc: Exception) -> HTTPException:
-        if isinstance(exc, ContextNotFound):
-            return HTTPException(status_code=404, detail=f"unknown context: {exc}")
-        if isinstance(exc, ReadOnlyContext):
-            return HTTPException(status_code=403, detail=f"read-only context: {exc}")
-        if isinstance(exc, UnsafePathError):
-            return HTTPException(status_code=400, detail=str(exc))
-        raise exc
+    def _problem(exc: Exception) -> JSONResponse:
+        """例外を `application/problem+json` の [JSONResponse] に変換する。"""
+        problem = to_problem(exc)
+        return JSONResponse(problem, status_code=problem["status"], media_type=PROBLEM_JSON)
+
+    def _on_error(exc: Exception) -> JSONResponse:
+        """ドメイン例外は problem へ、想定外は再送出（握りつぶさず本物の 500 にする）。"""
+        if not isinstance(exc, ManystoreError):
+            raise exc
+        return _problem(exc)
 
     @app.get("/contexts")
     async def list_contexts() -> dict[str, object]:
@@ -55,11 +61,11 @@ def build_router(service: StorageService):
         }
 
     @app.get("/contexts/{context}/keys")
-    async def list_keys(context: str, prefix: str = "", limit: int = 1000) -> dict[str, object]:
+    async def list_keys(context: str, prefix: str = "", limit: int = 1000):
         try:
             entries = await service.list_entries(context, prefix=prefix, limit=limit)
         except Exception as exc:
-            raise _http_error(exc) from exc
+            return _on_error(exc)
         return {"entries": [asdict(e) for e in entries]}
 
     @app.head("/contexts/{context}/objects/{key:path}")
@@ -67,7 +73,7 @@ def build_router(service: StorageService):
         try:
             ok = await service.exists(context, key)
         except Exception as exc:
-            raise _http_error(exc) from exc
+            return _on_error(exc)
         return Response(status_code=200 if ok else 404)
 
     @app.get("/contexts/{context}/objects/{key:path}")
@@ -75,9 +81,9 @@ def build_router(service: StorageService):
         try:
             data = await service.get(context, key)
         except Exception as exc:
-            raise _http_error(exc) from exc
+            return _on_error(exc)
         if data is None:
-            raise HTTPException(status_code=404, detail="not found")
+            return _problem(FileNotFoundError("not found"))  # 404 problem
         return Response(content=data, media_type="application/octet-stream")
 
     @app.put("/contexts/{context}/objects/{key:path}", status_code=204)
@@ -86,7 +92,7 @@ def build_router(service: StorageService):
         try:
             await service.put(context, key, body)
         except Exception as exc:
-            raise _http_error(exc) from exc
+            return _on_error(exc)
         return Response(status_code=204)
 
     @app.delete("/contexts/{context}/objects/{key:path}", status_code=204)
@@ -94,7 +100,7 @@ def build_router(service: StorageService):
         try:
             await service.delete(context, key)
         except Exception as exc:
-            raise _http_error(exc) from exc
+            return _on_error(exc)
         return Response(status_code=204)
 
     @app.websocket("/contexts/{context}/events")

@@ -14,7 +14,11 @@
   自身の status、その他は stdlib 既定写像、未知 500。io.UnsupportedOperation は ValueError サブクラスゆえ順序で先判定）。
 - 元モジュール（safe_path/service/multipart）は再エクスポートで後方互換、トップ `manystore` も公開。
   test +6（`tests/test_exceptions.py`）。`make check` 緑（**115 passed, 1 skipped**）。
-- **スコープ**: 「メソッドを用意しておく」まで＝HTTP ルートの応答形式は不変（routes 採用は follow-up）。
+- **HTTP ルート採用済（2026-06-24 後続・ユーザー要望「http ルートに採用」）**: native REST
+  （`server/routes.py`）の**エラー応答を `application/problem+json` に載せ替え**。`_http_error`(HTTPException)
+  を `_on_error`（ManystoreError→`to_problem`→`JSONResponse(media_type=PROBLEM_JSON)`、想定外は再送出）に置換、
+  欠損 GET は 404 problem。各 route を `return _on_error(exc)` に。**S3 ゲートウェイは S3 互換 XML のまま不採用**
+  （aiobotocore 互換）。test +1（`test_error_responses_are_problem_json`）。`make check` 緑（**116 passed, 1 skipped**）。
 
 ## （旧フォーカス）
 

@@ -51,6 +51,33 @@ def test_readonly_and_unknown(tmp_path: Path) -> None:
         assert client.get("/contexts/missing/keys").status_code == 404
 
 
+def test_error_responses_are_problem_json(tmp_path: Path) -> None:
+    # エラーは application/problem+json（RFC 9457）で返す。status は本文にも入る。
+    with _client(tmp_path) as client:
+        ro = client.put("/contexts/ro/objects/a.txt", content=b"x")
+        assert ro.status_code == 403
+        assert ro.headers["content-type"].startswith("application/problem+json")
+        body = ro.json()
+        assert body["status"] == 403 and body["title"] == "Read-Only Context"
+
+        # 不明 context は 404 problem。
+        nf = client.get("/contexts/missing/keys")
+        assert nf.status_code == 404
+        assert nf.headers["content-type"].startswith("application/problem+json")
+        assert nf.json()["title"] == "Context Not Found"
+
+        # 不正キー（パストラバーサル）は 400 problem。%2e%2e で `..` を素通しさせる
+        # （生の `../` は URL 正規化で畳まれてルートに届かないため）。
+        bad = client.get("/contexts/work/objects/%2e%2e/escape")
+        assert bad.status_code == 400
+        assert bad.json()["title"] == "Unsafe Path"
+
+        # 欠損キーの GET は 404 problem。
+        miss = client.get("/contexts/work/objects/nope.txt")
+        assert miss.status_code == 404
+        assert miss.headers["content-type"].startswith("application/problem+json")
+
+
 def test_ws_live_notification(tmp_path: Path) -> None:
     with (
         _client(tmp_path) as client,
