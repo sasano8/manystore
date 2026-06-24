@@ -4,7 +4,7 @@
 （ファイル指向の [manystore.file] と名前空間で分離）。トップ `manystore` からも再エクスポートする。
 """
 
-from ..connect import ConnectPolicy, connect_key_value_store, connecting
+from .connect import ConnectPolicy, connect_key_value_store, connecting
 from ..protocols import (
     AsyncKeyValueStore,
     FileInfo,

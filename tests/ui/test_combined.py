@@ -24,7 +24,7 @@ from manystore.serving.services.service import StorageService
 
 uvicorn = pytest.importorskip("uvicorn")
 
-from manystore.combined import create_combined_app  # noqa: E402
+from manystore.serving.combined import create_combined_app  # noqa: E402
 
 _ACCESS_KEY = "gw-test-access"
 _SECRET_KEY = "gw-test-secret"

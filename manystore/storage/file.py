@@ -5,7 +5,7 @@
 トップ `manystore` からも再エクスポートする。
 """
 
-from ..connect import ConnectPolicy, connecting
+from .connect import ConnectPolicy, connecting
 from ..protocols import (
     AsyncFileObject,
     AsyncFileStore,
