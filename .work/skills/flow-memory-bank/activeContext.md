@@ -2,6 +2,23 @@
 
 ## 現在のフォーカス
 
+**M028 HTTP の context を ArrayStorage に寄せる（実装完了・2026-06-24・ユーザー要望/対話）。**
+ユーザー指摘「HTTP の `contexts` は ArrayStorage の第一階層＝ArrayStorage をそのまま公開すればよい」に対応。
+`StorageService` を `ArrayKeyValueStore` バックに変更し、自前の `_stores: dict` ＋手書き振り分けを廃止。
+
+- connect で各 context を `SafeKeyValueStore` で包んで `self._array.mount(name, store)`（mount が connect も担う）。
+- CRUD は `(context, key)`→`self._array["{ctx}/{key}"]` に合成して委譲＝振り分けは ArrayStorage 任せ。
+  `validate_safe_path` の service 重複を撤去（mount した SafeKeyValueStore が subkey を検証）。
+- existence/ContextNotFound は `self._array.mounts()` を正に判定。`list_entries` は `array.iter_all()`
+  （`<name>/` 前置の横断列挙）を `"{ctx}/"` で切り出し prefix 絞り＝対象 context の順序・limit 挙動は不変。
+- **ArrayStorage を汚さない**＝writable ポリシー・context メタ（list_contexts/featured/default_context）・
+  per-context PollingWatcher は service 層に残置。watcher は mount したのと同一 store を掴む（参照は service 保持）。
+- **不変条件**: core IF 不変・HTTP ルート(`/contexts/...`)不変・新依存ゼロ・振る舞い保存。変更は
+  `implement/service.py` のみ（+ test）。test +1（`test_contexts_are_isolated_first_segment`）。`make check` 緑
+  （**109 passed, 1 skipped**）。残: 動的 mount 公開は **M028b（未着手・M011 認証連動）**。
+
+## （旧フォーカス）
+
 **M022 FileStoreTester に op 毎の状態スナップショットを追加（実装完了・2026-06-24・ユーザー要望/対話）。**
 「メソッドが返り値を返すだけでなく、その後ストアがどんな状態になるかの検証が重要」というユーザー指摘に対応。
 `conformance.py` の `_check` が op を reference/target に適用するたびに、**返り値**（expected/actual）に加えて

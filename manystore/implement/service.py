@@ -1,15 +1,18 @@
 """service — protocol を manystore の [KeyValueStore] へ写す中核（[StorageService]）。
 
-config の各 context を `create_key_value_store` で生成し、[SafeKeyValueStore] で包んで
-（キー検証）保持する。一覧は backend の `iter_all()` を prefix で絞り込む（`list_all(limit)` は
-prefix を持たないため）。各 context に [PollingWatcher] を 1 本張り、WS 購読へ fan-out する。
+HTTP の **context（第一階層）は [ArrayKeyValueStore] の mount に対応**する。config の各 context を
+`create_key_value_store` で生成 → [SafeKeyValueStore]（キー検証）で包み ArrayStorage に `mount` し、
+(context, key) を `<context>/<key>` キーへ合成して 1 本の合成ストアへ写す＝**振り分けは ArrayStorage
+に委譲**（service は writable・メタ・watcher だけを上載せ）。一覧は ArrayStorage の `iter_all()`
+（各 mount を `<name>/` 前置する横断列挙）を context で切り出し prefix 絞り。各 context に
+[PollingWatcher] を 1 本張り WS 購読へ fan-out する。
 
 HTTP には一切依存しない＝この層だけで単体テストできる。
 """
 
-from ..async_storage import KeyValueStore
+from ..array_storage import ArrayKeyValueStore
 from ..backends import create_key_value_store
-from ..safe_path import SafeKeyValueStore, validate_safe_path
+from ..safe_path import SafeKeyValueStore
 from .config import AppConfig
 from .protocol import ContextInfo, EntryInfo
 from .watcher import PollingWatcher
@@ -29,38 +32,40 @@ class StorageService:
     def __init__(self, config: AppConfig, *, watch_interval: float = 1.0) -> None:
         self._config = config
         self._watch_interval = watch_interval
-        self._stores: dict[str, KeyValueStore] = {}
+        # context = 第一階層の合成ストア。振り分け・横断列挙・跨ぎ cp/mv は ArrayStorage に委譲。
+        self._array = ArrayKeyValueStore()
         self._watchers: dict[str, PollingWatcher] = {}
 
     # ── ライフサイクル ──
 
     async def connect(self) -> None:
-        """全 context のストアを生成・接続し、ウォッチャを起動する。"""
+        """全 context のストアを生成して ArrayStorage に mount し、ウォッチャを起動する。"""
         for name, cc in self._config.contexts.items():
             raw = create_key_value_store(cc.backend, **cc.opts)  # type: ignore[arg-type]
-            store = SafeKeyValueStore(raw)
-            await store.connect()
-            self._stores[name] = store
+            store = SafeKeyValueStore(raw)  # キー検証は mount したストア側で効く
+            await self._array.mount(name, store)  # mount が connect も担う＝第一階層へ割り当て
             watcher = PollingWatcher(store, name, interval=self._watch_interval)
             await watcher.start()
             self._watchers[name] = watcher
 
     async def aclose(self) -> None:
-        """ウォッチャを止め、全ストアを閉じる。"""
+        """ウォッチャを止め、ArrayStorage（＝全 mount）を閉じる。"""
         for watcher in self._watchers.values():
             await watcher.aclose()
         self._watchers.clear()
-        for store in self._stores.values():
-            await store.aclose()
-        self._stores.clear()
+        await self._array.aclose()
 
     # ── 参照 ──
 
-    def _store(self, context: str) -> KeyValueStore:
-        try:
-            return self._stores[context]
-        except KeyError:
-            raise ContextNotFound(context) from None
+    def _require_context(self, context: str) -> None:
+        """未公開の context を弾く（ArrayStorage の mount 表を正とする）。"""
+        if context not in self._array.mounts():
+            raise ContextNotFound(context)
+
+    def _key(self, context: str, key: str) -> str:
+        """HTTP の (context, key) を ArrayStorage の `<context>/<key>` キーへ合成する。"""
+        self._require_context(context)
+        return f"{context}/{key}"
 
     def list_contexts(self) -> list[ContextInfo]:
         return [
@@ -96,11 +101,15 @@ class StorageService:
     async def list_entries(
         self, context: str, prefix: str = "", limit: int = 1000
     ) -> list[EntryInfo]:
-        """context 内のエントリを prefix で絞って返す（`iter_all()` を走査）。"""
-        store = self._store(context)
+        """context 内を prefix 絞りで返す（ArrayStorage の横断列挙を context で切り出す）。"""
+        self._require_context(context)
+        scope = f"{context}/"
         out: list[EntryInfo] = []
-        async for info in store.iter_all():
-            key = info["filename"]
+        async for info in self._array.iter_all():
+            fn = info["filename"]
+            if not fn.startswith(scope):
+                continue  # 別 context のエントリ
+            key = fn[len(scope) :]
             if prefix and not key.startswith(prefix):
                 continue
             out.append(EntryInfo(key=key, size=info["size"]))
@@ -109,18 +118,18 @@ class StorageService:
         return out
 
     async def get(self, context: str, key: str) -> bytes | None:
-        return await self._store(context).get(validate_safe_path(key))
+        return await self._array.get(self._key(context, key))
 
     async def exists(self, context: str, key: str) -> bool:
-        return await self._store(context).exists(validate_safe_path(key))
+        return await self._array.exists(self._key(context, key))
 
     async def put(self, context: str, key: str, value: bytes) -> None:
         self._require_writable(context)
-        await self._store(context).put(validate_safe_path(key), value)
+        await self._array.put(self._key(context, key), value)
 
     async def delete(self, context: str, key: str) -> None:
         self._require_writable(context)
-        await self._store(context).delete(validate_safe_path(key))
+        await self._array.delete(self._key(context, key))
 
     def _require_writable(self, context: str) -> None:
         cc = self._config.contexts.get(context)
