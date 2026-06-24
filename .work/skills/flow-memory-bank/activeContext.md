@@ -2,6 +2,19 @@
 
 ## 現在のフォーカス
 
+**G1 配布前提を整備（M005/M006/M008 完了・M007 見送り・2026-06-24・ユーザー要望）。** 配布できる状態に。
+
+- **M005**: 未使用依存 `redis` を `pyproject` から削除（import ゼロ＝juice 残骸）＋`uv lock`（Removed redis v8.0.0）。
+- **M006**: **MIT**（ユーザー選択）。`LICENSE`（Copyright (c) 2026 sasano8）作成＋README に「ライセンス」節。
+- **M008**: `[project]` に readme/license="MIT"(PEP 639 SPDX)/license-files/authors/keywords/classifiers/`[project.urls]`。
+  `uv build` で wheel METADATA 2.4 を検証（License-Expression: MIT・Author-email・Project-URL・redis 消滅・LICENSE 同梱）。
+- **M007（py.typed）は見送り（ユーザー判断）**: py.typed を入れると型チェッカが公開 API を厳格化し、`__all__`/再
+  エクスポート規則を満たさない名前が private 化（補完に出ない）＝運用コスト増。py.typed 自体が隠蔽するわけでは
+  ないが厳格化を避けるため不採用。`Typing :: Typed` classifier も付けない。
+- `make check` 緑（**118 passed, 1 skipped**）。
+
+## （旧フォーカス）
+
 **M027c get_or_raise を client/service へ波及＋未実装を検知する網（実装完了・2026-06-24・ユーザー要望/対話）。**
 ユーザー要望「get_or_raise を client・service へ波及」＋質問「インターフェースが関係するものに実装されて
 いなければ気づけるようにできるか？」に対応。

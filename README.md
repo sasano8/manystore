@@ -180,3 +180,7 @@ make check       # format 確認 + test（CI と同じ）
 - テストは **pytest**（S3 / NATS は in-memory fake で検証）。
 - CI は GitHub Actions（`.github/workflows/ci.yml`）で push / PR ごとに `make check`。
 - 実 backend（minio / 実 NATS）疎通は `docker-compose.yml` を起動して検証する。
+
+## ライセンス
+
+[MIT](LICENSE) © sasano8
