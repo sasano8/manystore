@@ -10,7 +10,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 from ..implement.service import StorageService
-from .routes import build_router
+from .routes import KV_RAW_PREFIX, build_router
 
 STATIC_DIR = Path(__file__).parent / "static"
 
@@ -33,9 +33,9 @@ def create_app(service: StorageService):
             await service.aclose()
 
     app = FastAPI(title="manystore storage UI", lifespan=lifespan)
-    # native REST/WS は NS=`/kv/raw` 配下（M025改・combined と一貫）。bucket 一覧が
-    # `GET /kv/raw/` になるので、`/` を同梱フロントエンドの StaticFiles に明け渡せる。
-    app.include_router(build_router(service), prefix="/kv/raw")
+    # native REST/WS は NS=`KV_RAW_PREFIX`（M025改・combined と一貫）。bucket 一覧が
+    # `GET {KV_RAW_PREFIX}/` になるので、`/` を同梱フロントエンドの StaticFiles に明け渡せる。
+    app.include_router(build_router(service), prefix=KV_RAW_PREFIX)
 
     if STATIC_DIR.is_dir():
         # 同梱フロントエンド（ビルドレス Web UI）。`/` で index.html を返す。

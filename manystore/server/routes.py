@@ -33,11 +33,16 @@ from dataclasses import asdict
 from ..exceptions import PROBLEM_JSON, ContextNotFound, ManystoreError, to_problem
 from ..implement.service import StorageService
 
+# native REST/WS を application に include する際の NS prefix（M025・単一正本）。
+# combined / 単体 server（app.py）/ client（base_url）はこの 1 定数を参照し、prefix を散らさない
+# （付け替えはここだけ・ベタ書きの drift を防ぐ）。NS=bucket 一覧は `GET {KV_RAW_PREFIX}/`。
+KV_RAW_PREFIX = "/kv/raw"
+
 
 def build_router(service: StorageService):
     """`service` を載せた manystore ネイティブ REST/WS ルートの [APIRouter] を返す。
 
-    統合アプリ・単体アプリとも `app.include_router(build_router(service), prefix="/kv/raw")`
+    統合アプリ・単体アプリとも `app.include_router(build_router(service), prefix=KV_RAW_PREFIX)`
     で前置する（NS=`/kv/raw`）。相対パス（`/{bucket}/...` 等）は prefix が前置されるだけで
     本体は不変。fastapi は遅延 import。
     """

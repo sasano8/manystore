@@ -21,6 +21,10 @@
 - 破壊的変更（未リリース＝互換エイリアス無し）。`make check` 緑（**118 passed, 1 skipped**）。test 改修＝
   `test_server`/`test_combined`(URL を {bucket}/{path} 化)・`test_client`(base_url に /kv/raw)。設計は
   `m025-namespace-restructure-plan.md`。
+- **NS prefix を単一正本化（M025改 後追いの anti-drift・2026-06-24）**: `/kv/raw`/`/storage/s3` のベタ書きを
+  `server/routes.KV_RAW_PREFIX`・`gateway/routes.STORAGE_S3_PREFIX` 定数に集約。`combined.py`/`server/app.py`/
+  client base_url を組む `test_client.py` がこの定数を参照（付け替えはここ 1 か所）。`test_combined`/`test_server`
+  は**ワイヤ契約を独立に固定する**目的で具体 URL リテラルのまま残置（定数由来にすると prefix 誤変更を検知できない）。
 - **未決（M030 以降）**: prefix capability の着手（次サイクル）／`GET /kv/raw/`(bucket 一覧)に featured/default を
   載せるか（現状は載せている＝UI が使用）／フェーズ2 kv/json・フェーズ3 storage/manystore／UI フラット化に伴う
   大規模 bucket の遅延ロード喪失（後回し可）。

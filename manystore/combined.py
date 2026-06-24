@@ -27,8 +27,10 @@
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
+from .gateway.routes import STORAGE_S3_PREFIX
 from .gateway.routes import build_router as build_s3_router
 from .implement.service import StorageService
+from .server.routes import KV_RAW_PREFIX
 from .server.routes import build_router as build_native_router
 
 
@@ -53,6 +55,6 @@ def create_combined_app(service: StorageService):
     app = FastAPI(title="manystore combined (REST + S3)", lifespan=lifespan)
     # APIRouter を prefix 付きで include（mount ではない＝lifespan は統合アプリが一本化）。
     # 第1階層は buffer 性で分ける: /kv=バッファ系・/storage=ストリーミング系（M025）。
-    app.include_router(build_native_router(service), prefix="/kv/raw")
-    app.include_router(build_s3_router(service), prefix="/storage/s3")
+    app.include_router(build_native_router(service), prefix=KV_RAW_PREFIX)
+    app.include_router(build_s3_router(service), prefix=STORAGE_S3_PREFIX)
     return app

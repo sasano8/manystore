@@ -44,6 +44,10 @@ from . import multipart
 
 _XML = "application/xml"
 
+# S3 互換ゲートウェイを application に include する際の NS prefix（M025・単一正本）。
+# combined がこの定数で前置し、S3 クライアントは `endpoint_url=<host>{STORAGE_S3_PREFIX}` を向ける。
+STORAGE_S3_PREFIX = "/storage/s3"
+
 # ListObjectsV2 の S1 既定上限（continuation token は未実装＝この上限で打ち切る）。
 DEFAULT_MAX_KEYS = 1000
 

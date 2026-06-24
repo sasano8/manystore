@@ -13,6 +13,7 @@ from manystore.client import RemoteKeyValueStore
 from manystore.implement.config import parse_config
 from manystore.implement.service import StorageService
 from manystore.server.app import create_app
+from manystore.server.routes import KV_RAW_PREFIX  # native NS prefix の単一正本
 
 
 async def test_remote_kvs_roundtrip(tmp_path: Path) -> None:
@@ -25,8 +26,8 @@ async def test_remote_kvs_roundtrip(tmp_path: Path) -> None:
     await service.connect()
     app = create_app(service)
     transport = httpx.ASGITransport(app=app)
-    # base_url は native NS（/kv/raw）のルートを指す。
-    store = RemoteKeyValueStore("http://test/kv/raw", "work", transport=transport)
+    # base_url = host + native NS prefix（router アタッチ先と同じ定数で組む＝ベタ書きしない）。
+    store = RemoteKeyValueStore(f"http://test{KV_RAW_PREFIX}", "work", transport=transport)
     try:
         assert await store.get("a.txt") is None
         await store.put("a.txt", b"hello")
@@ -57,7 +58,7 @@ async def test_remote_get_or_raise_and_default(tmp_path: Path) -> None:
     await service.connect()
     app = create_app(service)
     store = RemoteKeyValueStore(
-        "http://test/kv/raw", "work", transport=httpx.ASGITransport(app=app)
+        f"http://test{KV_RAW_PREFIX}", "work", transport=httpx.ASGITransport(app=app)
     )
     try:
         # サーバ層（StorageService）の get_or_raise も欠損で FileNotFoundError。
