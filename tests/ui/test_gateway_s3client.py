@@ -27,6 +27,9 @@ from contextlib import closing
 
 import pytest
 
+# 全テストが uvicorn を別スレッド実 listen＋実 aiobotocore 往復＝待ち支配なので module 全体を slow に（R13）。
+pytestmark = pytest.mark.slow
+
 uvicorn = pytest.importorskip("uvicorn")
 
 from manystore.gateway.app import create_gateway  # noqa: E402

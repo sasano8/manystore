@@ -7,6 +7,11 @@
 
 **実装/プロトコル分離リファクタ（M035）＋ conformancer 化（M031）をユーザーが IDE で駆動中（2026-06-24）。**
 
+> ⚠️ **ツリーが現在 red（ユーザーの in-flight 改名）**: `stores/async_storage.py` が `base.py` へ未改名なのに
+> `conformancer/__init__.py:40` が `from .stores.base import`（しかも相対レベル誤り＝`..stores.base` が正）を参照し
+> `test_conformance.py` が collection error。`kv.py` 等はまだ `stores.async_storage` を import＝**改名が中途**。
+> エージェントは触らない（ユーザーの IDE refactor 領域）。ユーザーが async_storage→base 改名を完了させれば解消。
+
 - ユーザーが IDE refactor で move-symbol を実行中＝コミット `60f2405`(async_storage→base)/`a37abde`(array)/
   `862f824`(async_to_sync→sync_bridge)/`61e2d43`(safe_path→safe)/`fd6ef1a`(conformance→conformancer)。
   現状 `manystore/stores/` に `async_storage.py`/`array_storage.py`/`async_to_sync_storage.py`/`safe_path.py` が移動済

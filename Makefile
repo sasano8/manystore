@@ -12,7 +12,7 @@ SRC := manystore tests
 E2E_S3_ACCESS_KEY := manystore
 E2E_S3_SECRET_KEY := manystoresecret123
 
-.PHONY: format format-check lint test check ui e2e-up e2e-down
+.PHONY: format format-check lint test test-all check ui e2e-up e2e-down
 
 # ストレージ UI / サーバを開発設定で起動（既定 http://127.0.0.1:8000）。
 # 既定ストレージは .cache/manystore_dev（使い捨て・起動時に自動作成）。PORT=xxxx で上書き可。
@@ -40,11 +40,15 @@ lint:
 pylint:
 	uvx pylint@$(PYLINT_VERSION) manystore --enable=duplicate-code
 
-# テスト
+# テスト（内ループ既定＝fast のみ。slow=実 backend/ネットワーク/ポーリング待ちを除外＝R13）
 test:
+	uv run pytest -m "not slow"
+
+# 全テスト（CI / 明示時。slow も含めて回す）
+test-all:
 	uv run pytest
 
-# 一括検証（format 確認 + test）
+# 一括検証（format 確認 + fast test）＝内ループの「検証緑」判定
 check: format-check test
 
 # 実 backend E2E の起動＋S3 identity 登録（これで s3-path / nats ケースが走る）

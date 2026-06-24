@@ -118,6 +118,7 @@ async def test_service_readonly_and_unknown_context(tmp_path: Path) -> None:
         await service.aclose()
 
 
+@pytest.mark.slow  # ポーリング検知を asyncio.sleep で待つ＝待ち支配（R13）
 async def test_polling_watcher_detects_changes(tmp_path: Path) -> None:
     store = LocalKeyValueStore(tmp_path)
     watcher = PollingWatcher(store, "work", interval=0.05)

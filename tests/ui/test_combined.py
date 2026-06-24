@@ -134,6 +134,7 @@ def _make_client(endpoint: str):
     )
 
 
+@pytest.mark.slow  # uvicorn 別スレッド実 listen＋実 aiobotocore 往復＝待ち支配（R13）
 async def test_combined_s3_client_roundtrip(combined_endpoint: str) -> None:
     """統合 `/storage/s3` 経由で実 S3 クライアント PUT→GET→HEAD→List→DELETE が往復する。"""
     payload = b"hello-via-combined-s3"
@@ -162,6 +163,7 @@ async def test_combined_s3_client_roundtrip(combined_endpoint: str) -> None:
             await s3.get_object(Bucket="work", Key=key)
 
 
+@pytest.mark.slow  # uvicorn 別スレッド実 listen＋実 aiobotocore 往復＝待ち支配（R13）
 async def test_combined_s3_client_multipart_roundtrip(combined_endpoint: str) -> None:
     """統合 `/storage/s3` 経由で multipart（Create→UploadPart×3→Complete→GET 一致）が往復する。"""
     key = "big/object.bin"

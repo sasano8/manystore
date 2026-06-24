@@ -68,3 +68,6 @@ testpaths = ["tests"]
 addopts = "-ra"
 # `async def test_*` を自動で非同期テストとして実行（マーカ不要）。既存の asyncio.run スタイルとも共存。
 asyncio_mode = "auto"
+# 軽重分離（R13）: 待ち支配（実 backend 起動・ネットワーク・sleep/ポーリング）のテストは `slow`。
+# 内ループ `make test` は `-m "not slow"` で除外、`make test-all` で全部走る。
+markers = ["slow: 実バックエンド/ネットワーク/ポーリング待ちを伴う重いテスト"]
