@@ -11,7 +11,7 @@ HTTP には一切依存しない＝この層だけで単体テストできる。
 """
 
 from ..array_storage import ArrayKeyValueStore
-from ..async_storage import iter_prefix as _iter_prefix
+from ..stores.async_storage import iter_prefix as _iter_prefix
 from ..backends import create_key_value_store
 from ..exceptions import ContextNotFound, ReadOnlyContext  # 集約先（後方互換で再エクスポート）
 from ..safe_path import SafeKeyValueStore

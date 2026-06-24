@@ -10,7 +10,7 @@
 from collections.abc import Iterator
 from typing import Protocol
 
-from .async_storage import FileInfo
+from .stores.async_storage import FileInfo
 
 
 class SyncKeyValueStore(Protocol):

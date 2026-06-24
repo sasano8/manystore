@@ -21,7 +21,7 @@ from manystore import (
     S3FileStore,
     S3KeyValueStore,
 )
-from manystore.async_storage import KeyValueStoreBase
+from manystore.stores.async_storage import KeyValueStoreBase
 from manystore.client import RemoteKeyValueStore
 from manystore.conformance import (
     FileStoreTester,

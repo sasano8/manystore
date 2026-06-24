@@ -16,7 +16,7 @@ httpx を遅延 import する。
 from collections.abc import AsyncIterator
 from urllib.parse import quote
 
-from ..async_storage import FileInfo, KeyValueStoreBase, _kv_copy, _kv_move
+from ..stores.async_storage import FileInfo, KeyValueStoreBase, _kv_copy, _kv_move
 from ..implement.protocol import ContextInfo, EntryInfo
 
 

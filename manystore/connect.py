@@ -18,7 +18,7 @@ from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 
-from .async_storage import KeyValueStore
+from .stores.async_storage import KeyValueStore
 from .backends import create_key_value_store
 
 

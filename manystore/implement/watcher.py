@@ -14,7 +14,7 @@ import contextlib
 from collections.abc import AsyncIterator
 from typing import Protocol
 
-from ..async_storage import KeyValueStore
+from ..stores.async_storage import KeyValueStore
 from .protocol import Event
 
 

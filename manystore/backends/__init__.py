@@ -6,7 +6,7 @@
 
 from pathlib import Path
 
-from ..async_storage import KeyValueStore
+from ..stores.async_storage import KeyValueStore
 from .http_store import HttpFileStore, HttpKeyValueStore
 from .local import LocalFileObject, LocalFileStore, LocalKeyValueStore
 from .memory import DictFileStore, DictKeyValueStore
