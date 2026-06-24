@@ -2,6 +2,22 @@
 
 ## 現在のフォーカス
 
+**M009 例外を exceptions に集約＋Problem Details 変換（実装完了・2026-06-24・ユーザー要望/対話）。**
+ユーザー要望「例外を exceptions にまとめたい／application/problem+json に変換できるメソッドを用意」に対応。
+
+- 新 `manystore/exceptions.py` に散在 4 例外（`UnsafePathError`/`ContextNotFound`/`ReadOnlyContext`/
+  `NoSuchUpload`）を集約。基底 `ManystoreError(Exception)`＝`status`/`title`/`type` を持ち、`to_problem()` で
+  **RFC 9457 Problem Details(dict)** を返す。メディアタイプ定数 `PROBLEM_JSON="application/problem+json"`。
+- 各ドメイン例外は**現行の stdlib 例外（KeyError/ValueError/PermissionError）を先頭に残したまま**
+  `ManystoreError` を多重継承＝`isinstance`/`str` 後方互換（既存 `except`／HTTP 写像を壊さない）。
+- モジュール関数 `to_problem(exc, *, instance=None)` は **任意の例外**を problem に写す（ManystoreError は
+  自身の status、その他は stdlib 既定写像、未知 500。io.UnsupportedOperation は ValueError サブクラスゆえ順序で先判定）。
+- 元モジュール（safe_path/service/multipart）は再エクスポートで後方互換、トップ `manystore` も公開。
+  test +6（`tests/test_exceptions.py`）。`make check` 緑（**115 passed, 1 skipped**）。
+- **スコープ**: 「メソッドを用意しておく」まで＝HTTP ルートの応答形式は不変（routes 採用は follow-up）。
+
+## （旧フォーカス）
+
 **M028 HTTP の context を ArrayStorage に寄せる（実装完了・2026-06-24・ユーザー要望/対話）。**
 ユーザー指摘「HTTP の `contexts` は ArrayStorage の第一階層＝ArrayStorage をそのまま公開すればよい」に対応。
 `StorageService` を `ArrayKeyValueStore` バックに変更し、自前の `_stores: dict` ＋手書き振り分けを廃止。

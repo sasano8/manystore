@@ -8,10 +8,9 @@
 from collections.abc import AsyncIterator
 
 from .async_storage import FileInfo, FileObject, FileStore, KeyValueStore, KeyValueStoreBase
+from .exceptions import UnsafePathError  # 集約先（後方互換: ここからも import できる）
 
-
-class UnsafePathError(ValueError):
-    """安全でないキー/パスが渡された。"""
+__all__ = ["UnsafePathError", "validate_safe_path", "SafeKeyValueStore", "SafeFileStore"]
 
 
 def validate_safe_path(path: str) -> str:

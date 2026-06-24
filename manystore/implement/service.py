@@ -12,18 +12,13 @@ HTTP には一切依存しない＝この層だけで単体テストできる。
 
 from ..array_storage import ArrayKeyValueStore
 from ..backends import create_key_value_store
+from ..exceptions import ContextNotFound, ReadOnlyContext  # 集約先（後方互換で再エクスポート）
 from ..safe_path import SafeKeyValueStore
 from .config import AppConfig
 from .protocol import ContextInfo, EntryInfo
 from .watcher import PollingWatcher
 
-
-class ContextNotFound(KeyError):
-    """指定された context が公開されていない。"""
-
-
-class ReadOnlyContext(PermissionError):
-    """書き込み不可（writable=false）の context に書き込もうとした。"""
+__all__ = ["StorageService", "ContextNotFound", "ReadOnlyContext"]
 
 
 class StorageService:

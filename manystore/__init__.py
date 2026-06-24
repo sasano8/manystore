@@ -20,9 +20,33 @@
 """
 
 from . import file, kv
+from .exceptions import PROBLEM_JSON as PROBLEM_JSON
+from .exceptions import ContextNotFound as ContextNotFound
+from .exceptions import ManystoreError as ManystoreError
+from .exceptions import NoSuchUpload as NoSuchUpload
+from .exceptions import ReadOnlyContext as ReadOnlyContext
+from .exceptions import UnsafePathError as UnsafePathError
+from .exceptions import to_problem as to_problem
 from .file import *  # noqa: F403  （後方互換: ファイル群をトップにフラット再エクスポート）
 from .kv import *  # noqa: F403  （後方互換: KV 群をトップにフラット再エクスポート）
 
 # グループ名前空間（`manystore.kv` / `manystore.file`）＋ 後方互換のフラット名。
 # 共有名（FileInfo / validate_safe_path / UnsafePathError）が両グループに出るので重複を畳む。
-__all__ = list(dict.fromkeys(["kv", "file", *kv.__all__, *file.__all__]))
+# 例外は `manystore.exceptions` に集約し、基底・変換・主要ドメイン例外をトップにも公開する。
+__all__ = list(
+    dict.fromkeys(
+        [
+            "kv",
+            "file",
+            *kv.__all__,
+            *file.__all__,
+            "ManystoreError",
+            "to_problem",
+            "PROBLEM_JSON",
+            "ContextNotFound",
+            "ReadOnlyContext",
+            "NoSuchUpload",
+            "UnsafePathError",
+        ]
+    )
+)
