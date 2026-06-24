@@ -38,7 +38,7 @@ def test_reexport_from_original_modules() -> None:
     from manystore.gateway.multipart import NoSuchUpload as MpNoSuchUpload
     from manystore.implement.service import ContextNotFound as SvcCtx
     from manystore.implement.service import ReadOnlyContext as SvcRo
-    from manystore.stores.safe_path import UnsafePathError as SpUnsafe
+    from manystore.stores.safe import UnsafePathError as SpUnsafe
 
     assert SpUnsafe is UnsafePathError
     assert SvcCtx is ContextNotFound
