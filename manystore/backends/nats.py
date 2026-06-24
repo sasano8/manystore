@@ -6,7 +6,7 @@ nats-py はメソッド内で遅延 import する。FileStore は read=全体取
 import contextlib
 from collections.abc import AsyncIterator
 
-from ..stores.async_storage import (
+from ..stores.base import (
     FileInfo,
     FileObject,
     KeyValueStoreBase,

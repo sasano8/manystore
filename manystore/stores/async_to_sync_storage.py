@@ -13,7 +13,7 @@
 import asyncio
 from collections.abc import Iterator
 
-from .async_storage import FileInfo, KeyValueStore
+from .base import FileInfo, KeyValueStore
 
 
 class AsyncToSyncKeyValueStore:

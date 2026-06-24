@@ -5,7 +5,7 @@
 """
 
 from .stores.array_storage import DEFAULT_CACHE_DIR, ArrayKeyValueStore, DownloadCache
-from .stores.async_storage import (
+from .stores.base import (
     FileInfo,
     KeyValueFromFileStore,
     KeyValueStore,

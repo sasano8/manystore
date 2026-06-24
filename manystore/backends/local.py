@@ -14,7 +14,7 @@ from collections.abc import AsyncIterator
 from pathlib import Path
 from typing import BinaryIO
 
-from ..stores.async_storage import (
+from ..stores.base import (
     FileInfo,
     FileObject,
     KeyValueFromFileStore,

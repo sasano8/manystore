@@ -5,7 +5,7 @@
 トップ `manystore` からも再エクスポートする。
 """
 
-from .stores.async_storage import FileInfo, FileObject, FileStore, KeyValueFileStore
+from .stores.base import FileInfo, FileObject, FileStore, KeyValueFileStore
 from .backends import (
     DictFileStore,
     HttpFileStore,
