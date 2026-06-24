@@ -23,7 +23,7 @@ from manystore import (
 )
 from manystore.stores.base import KeyValueStoreBase
 from manystore.client import RemoteKeyValueStore
-from manystore.conformance import (
+from manystore.conformancer import (
     FileStoreTester,
     assert_file_store,
     assert_key_value_store,
