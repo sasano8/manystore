@@ -14,7 +14,7 @@ from .backends import (
     NatsFileStore,
     S3FileStore,
 )
-from .safe_path import SafeFileStore, UnsafePathError, validate_safe_path
+from .stores.safe_path import SafeFileStore, UnsafePathError, validate_safe_path
 from .sync_storage import SyncFileObject, SyncFileStore
 
 __all__ = [

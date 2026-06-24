@@ -39,7 +39,7 @@ from ..implement.s3map import (
     render_list_v2,
 )
 from ..implement.service import ContextNotFound, ReadOnlyContext, StorageService
-from ..safe_path import UnsafePathError
+from ..stores.safe_path import UnsafePathError
 from . import multipart
 
 _XML = "application/xml"

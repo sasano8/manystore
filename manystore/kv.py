@@ -24,7 +24,7 @@ from .backends import (
     create_key_value_store,
 )
 from .connect import ConnectPolicy, connect_key_value_store, connecting
-from .safe_path import SafeKeyValueStore, UnsafePathError, validate_safe_path
+from .stores.safe_path import SafeKeyValueStore, UnsafePathError, validate_safe_path
 from .sync_storage import SyncKeyValueStore
 
 __all__ = [

@@ -14,7 +14,7 @@ from ..stores.array_storage import ArrayKeyValueStore
 from ..stores.async_storage import iter_prefix as _iter_prefix
 from ..backends import create_key_value_store
 from ..exceptions import ContextNotFound, ReadOnlyContext  # 集約先（後方互換で再エクスポート）
-from ..safe_path import SafeKeyValueStore
+from ..stores.safe_path import SafeKeyValueStore
 from .config import AppConfig
 from .protocol import ContextInfo, EntryInfo
 from .watcher import PollingWatcher

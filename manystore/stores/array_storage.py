@@ -21,7 +21,7 @@ from .async_storage import (
     _take,
 )
 from .async_storage import iter_prefix as _iter_prefix
-from ..safe_path import validate_safe_path
+from .safe_path import validate_safe_path
 
 # ダウンロードキャッシュのデフォルト先（ホーム配下）。
 DEFAULT_CACHE_DIR = Path.home() / ".cache" / "manystore"
