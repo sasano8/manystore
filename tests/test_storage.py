@@ -15,6 +15,7 @@ from manystore import (
     ArrayKeyValueStore,
     AsyncToSyncKeyValueStore,
     ConnectPolicy,
+    DictKeyValueStore,
     DownloadCache,
     HttpFileStore,
     HttpKeyValueStore,
@@ -25,12 +26,15 @@ from manystore import (
     NatsFileStore,
     NatsObjectKeyValueStore,
     S3FileStore,
+    S3KeyValueStore,
     SafeFileStore,
     SafeKeyValueStore,
+    SupportsPrefixListing,
     UnsafePathError,
     connect_key_value_store,
     connecting,
     create_key_value_store,
+    iter_prefix,
     validate_safe_path,
 )
 
@@ -414,6 +418,28 @@ class _FakeS3:
         if Key not in self.objects:
             raise self.exceptions.NoSuchKey  # 欠損は NoSuchKey（実 client と同形）
         return {"Body": _FakeBody(self.objects[Key])}
+
+    def get_paginator(self, name: str) -> _FakeS3Paginator:
+        assert name == "list_objects_v2"
+        return _FakeS3Paginator(self)
+
+
+class _FakeS3Paginator:
+    """`list_objects_v2` のページャ fake。`Prefix=` をサーバ側で効かせる（実 S3 と同形）。"""
+
+    def __init__(self, fake: _FakeS3) -> None:
+        self._fake = fake
+
+    async def _pages(self, Bucket: str, Prefix: str = ""):
+        contents = [
+            {"Key": k, "Size": len(v)}
+            for k, v in self._fake.objects.items()
+            if k.startswith(Prefix)  # サーバ側 prefix 絞り
+        ]
+        yield {"Contents": contents}
+
+    def paginate(self, Bucket: str, Prefix: str = ""):
+        return self._pages(Bucket, Prefix)
 
 
 def test_s3_file_store_streams_multipart_write_and_read() -> None:
@@ -1008,3 +1034,127 @@ def test_create_key_value_store_http_wiring() -> None:
     assert isinstance(store, HttpKeyValueStore)
     assert store._base_url == _HTTP_BASE
     assert store._headers == {"Authorization": "Bearer t"}
+
+
+# ── M030: prefix を optional capability に移設（SupportsPrefixListing + iter_prefix ヘルパ） ──
+
+
+class _PrefixRecorder:
+    """ネイティブ `iter_prefix` を持つ最小ストア。呼ばれた prefix / iter_all 使用を記録する。"""
+
+    def __init__(self, keys: dict[str, int]) -> None:
+        self._keys = dict(keys)  # filename -> size
+        self.prefix_calls: list[str] = []
+        self.iter_all_used = False
+
+    async def connect(self) -> None: ...
+
+    async def aclose(self) -> None: ...
+
+    async def iter_prefix(self, prefix: str):
+        self.prefix_calls.append(prefix)
+        for k, size in sorted(self._keys.items(), reverse=True):  # 既存 iter_all と同じ降順
+            if k.startswith(prefix):
+                yield {"filename": k, "size": size}
+
+    async def iter_all(self):
+        self.iter_all_used = True
+        for k, size in sorted(self._keys.items(), reverse=True):
+            yield {"filename": k, "size": size}
+
+
+def test_iter_prefix_helper_falls_back_to_startswith_scan() -> None:
+    # ネイティブを持たない store（Dict）は iter_all()+startswith に総なめフォールバックする。
+    store = DictKeyValueStore()
+    assert not isinstance(store, SupportsPrefixListing)
+
+    async def scenario() -> None:
+        await store.put("a/1", b"x")
+        await store.put("a/2", b"yy")
+        await store.put("b/1", b"zzz")
+        got = sorted([i["filename"] async for i in iter_prefix(store, "a/")])
+        assert got == ["a/1", "a/2"]  # b/1 は除外
+        empty = sorted([i["filename"] async for i in iter_prefix(store, "")])
+        assert empty == ["a/1", "a/2", "b/1"]  # 空 prefix = 全件
+
+    asyncio.run(scenario())
+
+
+def test_iter_prefix_helper_uses_native_capability() -> None:
+    # ネイティブを持つ store はヘルパがそれに委譲し、iter_all 総なめに落ちない。
+    rec = _PrefixRecorder({"a/1": 1, "a/2": 2, "b/1": 3})
+    assert isinstance(rec, SupportsPrefixListing)
+
+    async def scenario() -> None:
+        got = [i["filename"] async for i in iter_prefix(rec, "a/")]
+        assert got == ["a/2", "a/1"]  # ネイティブ（降順）
+        assert rec.prefix_calls == ["a/"]  # サーバ側 prefix が渡る
+        assert rec.iter_all_used is False  # 総なめしていない
+
+    asyncio.run(scenario())
+
+
+def test_safe_store_iter_prefix_validates_then_delegates_native() -> None:
+    rec = _PrefixRecorder({"ok/1": 1, "ok/2": 2, "no/1": 3})
+    safe = SafeKeyValueStore(rec)
+
+    async def scenario() -> None:
+        got = [i["filename"] async for i in safe.iter_prefix("ok/")]
+        assert got == ["ok/2", "ok/1"]
+        assert rec.prefix_calls == ["ok/"]  # 検証後にネイティブへ委譲
+        assert rec.iter_all_used is False
+        # 不正な prefix は委譲前に弾く（traversal）。
+        with pytest.raises(UnsafePathError):
+            async for _ in safe.iter_prefix("../etc"):
+                pass
+        # 空 prefix は「全件」＝検証を飛ばす（validate_safe_path は空を弾くため）。
+        allk = [i["filename"] async for i in safe.iter_prefix("")]
+        assert allk == ["ok/2", "ok/1", "no/1"]
+
+    asyncio.run(scenario())
+
+
+def test_array_store_iter_prefix_routes_to_single_mount() -> None:
+    m1 = _PrefixRecorder({"x/1": 1, "y/2": 2})
+    m2 = _PrefixRecorder({"x/9": 9})
+    arr = ArrayKeyValueStore()
+
+    async def scenario() -> None:
+        await arr.mount("m1", m1)
+        await arr.mount("m2", m2)
+        # `<mount>/<subprefix>` は単一 mount へ振り分け subprefix を委譲（他 mount は触らない）。
+        got = [i["filename"] async for i in arr.iter_prefix("m1/x/")]
+        assert got == ["m1/x/1"]  # m1 の x/* のみ・mount 名で再前置
+        assert m1.prefix_calls == ["x/"]
+        assert m2.prefix_calls == []  # m2 は走査されない
+        assert m2.iter_all_used is False
+        # `/` 無しの prefix は（部分）mount 名一致＝該当 mount を丸ごと列挙する。
+        whole = sorted([i["filename"] async for i in arr.iter_prefix("m1")])
+        assert whole == ["m1/x/1", "m1/y/2"]
+        # 無い mount は空。
+        assert [i async for i in arr.iter_prefix("zzz/a")] == []
+
+    asyncio.run(scenario())
+
+
+def test_s3_iter_prefix_filters_server_side_and_iter_all_unchanged() -> None:
+    fake = _FakeS3()
+    store = S3KeyValueStore("bucket")
+    store._session = lambda: fake  # 接続を fake に差し替え
+
+    async def scenario() -> None:
+        await store.put("a/1", b"x")
+        await store.put("a/2", b"yy")
+        await store.put("b/1", b"zzz")
+        assert isinstance(store, SupportsPrefixListing)
+        # ネイティブ prefix 絞り（サーバ側 list_objects_v2(Prefix=…)）・降順は不変。
+        got = [i["filename"] async for i in store.iter_prefix("a/")]
+        assert got == ["a/2", "a/1"]
+        # iter_all は iter_prefix("") と等価（全件・降順）。
+        allk = [i["filename"] async for i in store.iter_all()]
+        assert allk == ["b/1", "a/2", "a/1"]
+        # 汎用ヘルパ越しでもネイティブを通る。
+        via = [i["filename"] async for i in iter_prefix(store, "a/")]
+        assert via == ["a/2", "a/1"]
+
+    asyncio.run(scenario())

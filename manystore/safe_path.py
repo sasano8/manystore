@@ -7,7 +7,14 @@
 
 from collections.abc import AsyncIterator
 
-from .async_storage import FileInfo, FileObject, FileStore, KeyValueStore, KeyValueStoreBase
+from .async_storage import (
+    FileInfo,
+    FileObject,
+    FileStore,
+    KeyValueStore,
+    KeyValueStoreBase,
+)
+from .async_storage import iter_prefix as _iter_prefix
 from .exceptions import UnsafePathError  # 集約先（後方互換: ここからも import できる）
 
 __all__ = ["UnsafePathError", "validate_safe_path", "SafeKeyValueStore", "SafeFileStore"]
@@ -46,6 +53,13 @@ class SafeKeyValueStore(KeyValueStoreBase):
 
     def iter_all(self) -> AsyncIterator[FileInfo]:
         return self._store.iter_all()
+
+    def iter_prefix(self, prefix: str) -> AsyncIterator[FileInfo]:
+        # prefix を validate して内側へ委譲（capability 伝播）。空 prefix は「全件」を意味する
+        # ので検証を飛ばす（validate_safe_path は空を弾くため）。ネイティブ有無はヘルパが判定。
+        if prefix:
+            validate_safe_path(prefix)
+        return _iter_prefix(self._store, prefix)
 
     async def list_all(self, limit: int = 10) -> list[FileInfo]:
         return await self._store.list_all(limit)

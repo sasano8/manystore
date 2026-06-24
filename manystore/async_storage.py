@@ -17,7 +17,7 @@ import os
 import tempfile
 from collections.abc import AsyncIterator
 from pathlib import Path
-from typing import Protocol, TypedDict
+from typing import Protocol, TypedDict, runtime_checkable
 
 
 class FileInfo(TypedDict):
@@ -76,6 +76,35 @@ async def _take(entries: AsyncIterator[FileInfo], limit: int) -> list[FileInfo]:
         if len(out) >= limit:
             break
     return out
+
+
+@runtime_checkable
+class SupportsPrefixListing(Protocol):
+    """`prefix` 前方一致の列挙をネイティブに持つストアの **optional capability**。
+
+    core IF（[KeyValueStore]）には載せない（最小・汎用に保つ＝原則1）。S3 のように
+    サーバ側で prefix を絞れる backend だけがこれを実装し、横断ヘルパ [iter_prefix] が
+    あれば使い・無ければ `iter_all()`+startswith で総なめにフォールバックする。
+    """
+
+    def iter_prefix(self, prefix: str) -> AsyncIterator[FileInfo]: ...
+
+
+async def iter_prefix(store: KeyValueStore, prefix: str) -> AsyncIterator[FileInfo]:
+    """`store` の `prefix` 前方一致エントリを列挙する汎用ヘルパ（capability フォールバック）。
+
+    `store` が [SupportsPrefixListing]（ネイティブ `iter_prefix`）を持てばそれに委譲する
+    （S3=サーバ側 `list_objects_v2(Prefix=…)` で絞る）。無ければ `iter_all()` を総なめして
+    キー名を `startswith(prefix)` で絞る（現状の汎用フィルタと等価）。ラッパ（[SafeKeyValueStore]
+    / [ArrayKeyValueStore]）はこのヘルパ経由で内側へ委譲し、ネイティブ効率を素通しする。
+    """
+    if isinstance(store, SupportsPrefixListing):
+        async for info in store.iter_prefix(prefix):
+            yield info
+        return
+    async for info in store.iter_all():
+        if info["filename"].startswith(prefix):
+            yield info
 
 
 def _atomic_write_bytes(path: Path, data: bytes) -> None:

@@ -20,6 +20,7 @@ from .async_storage import (
     _kv_move,
     _take,
 )
+from .async_storage import iter_prefix as _iter_prefix
 from .safe_path import validate_safe_path
 
 # ダウンロードキャッシュのデフォルト先（ホーム配下）。
@@ -77,6 +78,27 @@ class ArrayKeyValueStore(KeyValueStoreBase):
         for name in sorted(self._mounts, reverse=True):
             async for info in self._mounts[name].iter_all():
                 yield FileInfo(filename=f"{name}/{info['filename']}", size=info["size"])
+
+    async def iter_prefix(self, prefix: str) -> AsyncIterator[FileInfo]:
+        # capability 伝播（[SupportsPrefixListing]）。prefix の第一セグメントで mount を絞り、
+        # 残り（subprefix）を mount 内のネイティブ iter_prefix へ委譲して S3 native を素通しする。
+        name, sep, subprefix = prefix.partition("/")
+        if sep:
+            # `<mount>/<subprefix>`: 単一 mount へルーティング（無ければ空）。
+            store = self._mounts.get(name)
+            if store is None:
+                return
+            async for info in _iter_prefix(store, subprefix):
+                yield FileInfo(filename=f"{name}/{info['filename']}", size=info["size"])
+        else:
+            # `/` 無し＝（部分）mount 名一致。prefix に '/' が無いとき
+            # `<mount>/<sub>`.startswith(prefix) ⟺ <mount>.startswith(prefix) なので、
+            # 該当 mount を丸ごと列挙すればよい（subprefix は空）。
+            for mname in sorted(self._mounts, reverse=True):
+                if not mname.startswith(prefix):
+                    continue
+                async for info in self._mounts[mname].iter_all():
+                    yield FileInfo(filename=f"{mname}/{info['filename']}", size=info["size"])
 
     async def list_all(self, limit: int = 10) -> list[FileInfo]:
         return await _take(self.iter_all(), limit)

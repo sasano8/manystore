@@ -2,8 +2,29 @@
 
 ## 現在のフォーカス
 
-**M025改 HTTP addressing 再設計（実装完了・2026-06-24・ユーザー要望/対話）。次は M030（prefix capability）。**
-着手順はユーザー確定＝**M025改 → M030**。M025改 を実装・コミットし、次サイクルで M030 に入る。
+**M030 prefix capability 移設（実装完了・2026-06-24・ユーザー要望/対話）。次はフェーズ2 kv/json facade。**
+
+- prefix を **optional capability** に移設＝`async_storage.SupportsPrefixListing`（`@runtime_checkable`
+  Protocol・`iter_prefix(prefix)`）＋汎用ヘルパ `async_storage.iter_prefix(store, prefix)`（ネイティブ有→
+  委譲／無→`iter_all()`+startswith フォールバック）。両者を `manystore.kv` facade で公開（トップ再エクスポート）。
+- **S3=ネイティブ**: `S3KeyValueStore.iter_prefix` が `list_objects_v2(Prefix=…)` でサーバ側絞り。`iter_all` は
+  `iter_prefix("")` に委譲（順序=降順 reverse=True・挙動不変）。NATS/HTTP/local/dict=ネイティブ無→フォールバック。
+- **伝播（M027b 同型）**: `SafeKeyValueStore.iter_prefix`（prefix を validate→空は全件で検証スキップ→ヘルパで内側委譲）／
+  `ArrayKeyValueStore.iter_prefix`（第一セグメントで mount 振り分け→subprefix をヘルパ委譲→`<mount>/`再前置。`/`無し
+  prefix は mount 名一致で丸ごと列挙）。委譲があるので S3 native がラッパ越しでも隠れない。
+- **設計判断（plan からの逸脱・記録）**: plan は「`service.list_entries` の prefix 引数撤去＋gateway/multipart を
+  ヘルパ経由に差し替え」だったが、**`list_entries(context, prefix="", limit=)` のシグネチャは維持し実装だけ capability
+  ヘルパ経由に差し替えた**。理由=汎用 startswith フィルタの所在は service→capability へ移る（plan の真意は達成）一方、
+  gateway は `service` だけに依存する境界を保て churn が最小（gateway/multipart は無改修で透過的にネイティブ効率を得る）。
+- 変更: `async_storage.py`(capability+helper)・`backends/s3.py`(native+iter_all 委譲)・`safe_path.py`・`array_storage.py`・
+  `implement/service.py`(list_entries 再配線)・`kv.py`(公開)。test +5（`tests/test_storage.py` 末尾＝helper fallback/native・
+  Safe validate+委譲・Array routing・S3 server-side prefix。`_FakeS3` に paginator fake 追加）。`make check` 緑（**123 passed, 1 skipped**）。
+- **未決（次サイクル以降）**: フェーズ2 `kv/json`（PUT で JSON 検証 400／GET application/json・保存=素通し vs 正規化 未決）／
+  フェーズ3 `storage/manystore`（FileStore streaming・range/chunked）。
+
+## （旧フォーカス）M025改 HTTP addressing 再設計（実装完了・2026-06-24）
+
+着手順はユーザー確定＝**M025改 → M030**（両方完了）。
 
 - **addressing**: native REST を `contexts/{ctx}/objects/{key}` → **`{bucket}/{path}`**（NS=`/kv/raw`）に再設計。
   `contexts`/`objects`/`keys` 飾りを廃止し表層語を bucket に統一（内部 `StorageService` の context 命名は不変）。

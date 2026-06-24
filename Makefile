@@ -3,6 +3,7 @@
 
 # ruff のピン留めバージョン（更新時はここだけ変える）
 RUFF_VERSION := 0.15.18
+PYLINT_VERSION := latest
 
 # lint/format/test の対象
 SRC := manystore tests
@@ -33,6 +34,11 @@ format-check:
 # lint のみ
 lint:
 	uvx ruff@$(RUFF_VERSION) check $(SRC)
+	# pylint src --enable=duplicate-code
+	# pyright basedpyright
+
+pylint:
+	uvx pylint@$(PYLINT_VERSION) manystore --enable=duplicate-code
 
 # テスト
 test:

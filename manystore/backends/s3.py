@@ -66,15 +66,20 @@ class S3KeyValueStore(KeyValueStoreBase, _S3Base):
             async with resp["Body"] as stream:
                 return await stream.read()
 
-    async def iter_all(self) -> AsyncIterator[FileInfo]:
+    async def iter_prefix(self, prefix: str) -> AsyncIterator[FileInfo]:
+        # ネイティブ prefix 絞り（capability [SupportsPrefixListing]）。サーバ側で
+        # `Prefix=` を効かせるので、ラッパ越しでも総なめに落ちない（M030）。
         async with self._session() as client:
             paginator = client.get_paginator("list_objects_v2")
             objects: list[dict] = []
-            async for page in paginator.paginate(Bucket=self._bucket):
+            async for page in paginator.paginate(Bucket=self._bucket, Prefix=prefix):
                 objects.extend(page.get("Contents", []))
         objects.sort(key=lambda o: o["Key"], reverse=True)
         for o in objects:
             yield FileInfo(filename=o["Key"], size=o["Size"])
+
+    def iter_all(self) -> AsyncIterator[FileInfo]:
+        return self.iter_prefix("")  # 全件＝空 prefix（順序・挙動は不変）
 
     async def list_all(self, limit: int = 10) -> list[FileInfo]:
         return await _take(self.iter_all(), limit)
