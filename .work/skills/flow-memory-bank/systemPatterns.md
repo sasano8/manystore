@@ -86,6 +86,8 @@
 - 危険入力対策は `Safe*` ラッパが `validate_safe_path` で key/filename を検証してから委譲。`SafeFileStore` は
   `SafeKeyValueStore` を継承＝KVS 面（検証付き）＋ IO（open_reader/open_writer）の完全な FileStore。
 - 複数 backend の横断は `ArrayKeyValueStore`（キー先頭セグメント＝論理名で振り分け）。`mount`/`unmount` は
-  **登録のみ（同期・I/O なし）**で connect/aclose しない（M011-②）。接続ライフサイクルは顔
+  **登録のみ（現状 I/O なし）**で connect/aclose しない（M011-②）。**インターフェースは非同期**にしてある
+  ＝将来の動的マウント（M028b）で「connect＋登録」を `asyncio.Lock` で直列化する余地を残すため（現状の本体は
+  `await` 点を持たず原子的）。接続ライフサイクルは顔
   `open_async_array_store(mounts)`（`SafeKeyValueStore(ArrayKeyValueStore)` 包装＝全 mount を connect/aclose する CM）が
   一括で担う＝mount の登録と接続の二重責務を分離。`StorageService` は明示 connect + 同期 mount。

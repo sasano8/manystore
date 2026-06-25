@@ -49,7 +49,7 @@
 | M027b残 | FileStore=KVS+IO 波及（Sync 残） | low | S3/NATS/HTTP/Local＋`SafeFileStore` 完了（Safe は M032 で `SafeKeyValueStore` 継承＝KVS 面も検証付き委譲に）。残＝`SyncFileStore` Protocol 鏡映＋`AsyncToSyncFileStore` ブリッジのみ |
 | M025残 | 名前空間再編 フェーズ2/3 | normal | フェーズ1（移設）＋addressing 再設計 完了。残＝フェーズ2 `kv/json`（JSON 検証）/ フェーズ3 `storage/manystore`（range/chunked streaming）。設計 `plans/m025-namespace-restructure-plan.md` |
 | M026 | stream インターフェース（第3の族・新コア IF） | 相談 | kv/storage の他に **stream**＝無境界チャネル（append/follow＝tail/subscribe）。FileStore で表せない＝新コア IF `StreamStore`。MVP=byte stream。最小・汎用と緊張するので **doc-first 合意必須**（着手時に設計を起こす。旧 interrupt は GC 済＝git 履歴に残存）|
-| M028b | ArrayStorage を HTTP に動的公開（context の mount/unmount） | low | `POST/DELETE /contexts` で動的 mount。backend 資格情報を HTTP から渡す＝認証設計が要る（M011 連動）。要設計 |
+| M028b | ArrayStorage を HTTP に動的公開（context の mount/unmount） | low | `POST/DELETE /contexts` で動的 mount。backend 資格情報を HTTP から渡す＝認証設計が要る（M011 連動）。**動的化の核**＝非同期 `attach`/`detach`（connect→登録 / 登録解除→aclose を `asyncio.Lock` で直列化。並行 POST/DELETE の競合・リーク防止）。`mount`/`unmount` の IF は既に非同期化済（中身は登録のみ）＝ロック実装を後付けできる。要設計 |
 
 > **ゴール段階**: G1=配布できる（M005〜M008 完了）→ G2=安心して使える（M009〜M011・M016）→
 > G3=機能十分（M012〜M015）→ G4=広く使える（M017 判断）。
@@ -88,7 +88,7 @@
 - **M024（2026-06-25）**: pull 型エスカレ（outbox）の文書追従完了＝MB に push 前提の残記述なし・旧スキル名なし・
   alias を `[[unit-quality]]` に統一。
 - **M011（2026-06-26・完了）**: 安全入口の最終形＝**入口の命名マトリクスを確定**（2 コミット）。
-  - **②責務分離（C1）**: `ArrayKeyValueStore.mount`/`unmount` を**登録のみ（同期・I/O なし）**に分離（mount が
+  - **②責務分離（C1）**: `ArrayKeyValueStore.mount`/`unmount` を**登録のみ（I/O なし）**に分離（mount が
     connect も担う二重責務を解消）。接続は顔 `open_async_array_store(mounts)` の CM が一括で担う。`StorageService.connect`
     は明示 connect + 同期 mount に追従。
   - **①命名（C2）**: 低レベル factory を `create_key_value_store`/`create_file_store` →

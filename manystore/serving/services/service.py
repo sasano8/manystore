@@ -40,7 +40,7 @@ class StorageService:
             raw = create_unsafe_key_value_store(cc.backend, **cc.opts)  # type: ignore[arg-type]
             store = SafeKeyValueStore(raw)  # キー検証は mount したストア側で効く
             await store.connect()  # mount は登録のみ＝接続は明示的に行う（責務分離）
-            self._array.mount(name, store)  # 第一階層へ登録（同期・I/O なし）
+            await self._array.mount(name, store)  # 第一階層へ登録（I/O なし。mount は非同期 IF）
             watcher = PollingWatcher(store, name, interval=self._watch_interval)
             await watcher.start()
             self._watchers[name] = watcher

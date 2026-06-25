@@ -1,7 +1,8 @@
 """array storage — 複数の KeyValueStore を論理名（マウント先）配下に束ねる合成ストア。
 
-`mount(name, store)` で論理名に backend を割り当て（**登録のみ・同期・I/O なし**）、キー
-`"<name>/<subkey>"` の先頭セグメントで振り分ける。接続は別途＝合成ストアの `connect()`（全 mount を
+`await mount(name, store)` で論理名に backend を割り当て（現状は**登録のみ**＝I/O なし。非同期 IF は
+将来の動的マウント余地）、キー `"<name>/<subkey>"` の先頭セグメントで振り分ける。接続は別途＝合成
+ストアの `connect()`（全 mount を
 connect）か、顔の入口 [open_async_array_store]（mount 群を connect する CM）が一括で担う（mount は
 登録と接続の二重責務を持たない）。論理名はディレクトリのように振る舞い、全 backend を「論理名配下に
 存在しているかのように」横断できる（[KeyValueStore] を満たす）。
@@ -34,20 +35,23 @@ class ArrayKeyValueStore(KeyValueStoreBase):
     def __init__(self) -> None:
         self._mounts: dict[str, AsyncKeyValueStore] = {}
 
-    def mount(self, name: str, store: AsyncKeyValueStore) -> None:
-        """論理名 `name` に backend を割り当てる（**登録のみ・同期・I/O なし**）。
+    async def mount(self, name: str, store: AsyncKeyValueStore) -> None:
+        """論理名 `name` に backend を割り当てる（現状は**登録のみ**＝I/O なし）。
 
+        **インターフェースは非同期**にしてある＝将来の動的マウントで「connect＋登録」を
+        `asyncio.Lock` で直列化する余地を残すため（現状の本体は `await` 点を持たない＝原子的）。
         name は単一セグメント（'/' を含まない）。connect はしない＝接続は合成ストアの `connect()`
-        か顔の [open_async_array_store] が一括で担う（mount は登録と接続の二重責務を持たない）。
+        か顔の [open_async_array_store] が一括で担う。
         """
         if not name or "/" in name:
             raise ValueError(f"mount name must be a single segment: {name!r}")
         self._mounts[name] = store
 
-    def unmount(self, name: str) -> AsyncKeyValueStore | None:
+    async def unmount(self, name: str) -> AsyncKeyValueStore | None:
         """論理名を外して登録解除し、外した backend を返す（無ければ None。**aclose はしない**）。
 
-        mount と対称に登録のみを外す（I/O なし）。外した backend の `aclose` は呼び出し側の責務。
+        mount と対称（非同期 IF・現状は登録解除のみ・I/O なし）。外した backend の `aclose` は
+        呼び出し側の責務。
         """
         return self._mounts.pop(name, None)
 

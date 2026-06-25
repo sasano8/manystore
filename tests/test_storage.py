@@ -914,8 +914,8 @@ def test_array_kvs_mount_and_route(tmp_path: Path) -> None:
     arr = ArrayKeyValueStore()
 
     async def scenario() -> None:
-        arr.mount("docs", LocalKeyValueStore(tmp_path / "docs"))  # 登録のみ（同期・I/O なし）
-        arr.mount("imgs", LocalKeyValueStore(tmp_path / "imgs"))
+        await arr.mount("docs", LocalKeyValueStore(tmp_path / "docs"))  # 登録のみ（I/O なし）
+        await arr.mount("imgs", LocalKeyValueStore(tmp_path / "imgs"))
         await arr.put("docs/a.txt", b"A")
         await arr.put("imgs/p/q.bin", b"B")  # サブディレクトリ込み
         assert await arr.get("docs/a.txt") == b"A"
@@ -944,8 +944,8 @@ def test_array_kvs_cp_mv_across_mounts(tmp_path: Path) -> None:
     arr = ArrayKeyValueStore()
 
     async def scenario() -> None:
-        arr.mount("a", LocalKeyValueStore(tmp_path / "a"))
-        arr.mount("b", LocalKeyValueStore(tmp_path / "b"))
+        await arr.mount("a", LocalKeyValueStore(tmp_path / "a"))
+        await arr.mount("b", LocalKeyValueStore(tmp_path / "b"))
         await arr.put("a/x", b"data")
         await arr.cp("a/x", "b/y")  # mount 跨ぎ copy
         assert await arr.get("b/y") == b"data"
@@ -977,7 +977,7 @@ def test_array_mount_is_registration_only() -> None:
     rec = _LifecycleRecorder()
 
     async def scenario() -> None:
-        arr.mount("x", rec)  # 同期・登録のみ
+        await arr.mount("x", rec)  # 登録のみ（非同期 IF だが現状 I/O なし）
         assert rec.connected is False  # mount は connect しない（二重責務を持たない）
         assert arr.mounts() == ["x"]
         await arr.connect()  # 接続は合成ストア側でまとめて行う
@@ -1229,8 +1229,8 @@ def test_array_store_iter_prefix_routes_to_single_mount() -> None:
     arr = ArrayKeyValueStore()
 
     async def scenario() -> None:
-        arr.mount("m1", m1)
-        arr.mount("m2", m2)
+        await arr.mount("m1", m1)
+        await arr.mount("m2", m2)
         # `<mount>/<subprefix>` は単一 mount へ振り分け subprefix を委譲（他 mount は触らない）。
         got = [i["filename"] async for i in arr.iter_prefix("m1/x/")]
         assert got == ["m1/x/1"]  # m1 の x/* のみ・mount 名で再前置
@@ -1334,10 +1334,11 @@ def test_create_safe_factories_wrap_without_connecting(tmp_path: Path) -> None:
     assert isinstance(kv, SafeKeyValueStore)
     fs = create_safe_file_store("local", local_dir=tmp_path)
     assert isinstance(fs, SafeFileStore)
-    arr = create_safe_array_store({"docs": create_unsafe_key_value_store("memory")})
-    assert isinstance(arr, SafeKeyValueStore)
 
     async def scenario() -> None:
+        # create_safe_array_store は async（mount が非同期 IF のため）＝構築のみ・未接続。
+        arr = await create_safe_array_store({"docs": create_unsafe_key_value_store("memory")})
+        assert isinstance(arr, SafeKeyValueStore)
         # 未接続でも memory backend は使える（接続不要）＋ Safe 検証が効く。
         await kv.connect()
         await kv.put("a/b", b"v")

@@ -27,7 +27,8 @@
 - **【完了】安全入口の最終形（M011）**: 入口の命名マトリクス（3×3）を確定＝**unsafe**（`create_unsafe_{key_value,file}_store`
   ＝生・未接続・キー検証なし／array は `ArrayKeyValueStore` 直）/ **safe**（`create_safe_{key_value,file,array}_store`
   ＝Safe 包装・未接続）/ **顔**（`open_async_{key_value,file,array}_store`＝Safe 包装＋接続 CM）。生口はトップ公開に残す
-  （ユーザー確定＝格下げせず名前で明示のみ）。`ArrayKeyValueStore.mount`/`unmount` は登録のみ（同期）。
+  （ユーザー確定＝格下げせず名前で明示のみ）。`ArrayKeyValueStore.mount`/`unmount` は登録のみ（**IF は
+  非同期化済＝将来 M028b の動的マウントで `asyncio.Lock` を後付けできる余地。本体は現状 I/O なし**）。
 - **manystore は最小・汎用に保つ**：利用側都合で IF を拡張しない（YAGNI）。
 - **worker/supervisor**: 本 repo は dotfiles（`workers_dir: workers`）配下の worker。下り=interrupt 投函／
   上り=`outbox/` へ pull 型エスカレ（親は直接知らない）。

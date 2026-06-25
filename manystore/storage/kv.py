@@ -5,6 +5,7 @@
 """
 
 from collections.abc import Mapping
+from contextlib import asynccontextmanager
 
 from ..protocols import (
     AsyncKeyValueStore,
@@ -83,8 +84,8 @@ def create_safe_key_value_store(backend: str, **opts: object) -> SafeKeyValueSto
     return SafeKeyValueStore(create_unsafe_key_value_store(backend, **opts))
 
 
-def create_safe_array_store(mounts: Mapping[str, AsyncKeyValueStore]) -> SafeKeyValueStore:
-    """安全な合成ストアを**構築のみ**で返す（未接続）。
+async def create_safe_array_store(mounts: Mapping[str, AsyncKeyValueStore]) -> SafeKeyValueStore:
+    """安全な合成ストアを**構築のみ**で返す（未接続）。async＝`mount` が非同期 IF のため。
 
     `mounts`（論理名 → backend）を [ArrayKeyValueStore] に**登録**し（mount は I/O なし）、
     [SafeKeyValueStore] で 1 枚包む（合成キー `<mount>/<subkey>` を検証）。接続は呼び出し側に委ねる
@@ -92,7 +93,7 @@ def create_safe_array_store(mounts: Mapping[str, AsyncKeyValueStore]) -> SafeKey
     """
     arr = ArrayKeyValueStore()
     for name, store in mounts.items():
-        arr.mount(name, store)  # 登録のみ（同期・I/O なし）
+        await arr.mount(name, store)  # 登録のみ（I/O なし。mount は非同期 IF）
     return SafeKeyValueStore(arr)  # connect/aclose は下層 array へ委譲＝全 mount を一括
 
 
@@ -118,7 +119,8 @@ def open_async_key_value_store(
     )
 
 
-def open_async_array_store(
+@asynccontextmanager
+async def open_async_array_store(
     mounts: Mapping[str, AsyncKeyValueStore],
     *,
     verify: bool = True,
@@ -132,4 +134,7 @@ def open_async_array_store(
     時に全 mount を connect・終了時に aclose する。**接続ライフサイクルはこの CM が一括で担う**
     （mount は登録のみで connect しない＝二重責務を解消）。キー検証は合成キー。
     """
-    return connecting(lambda: create_safe_array_store(mounts), verify=verify, policy=policy)
+    # 登録は事前に済ませ（I/O なし）、接続ライフサイクルは connecting に委ねる。
+    safe = await create_safe_array_store(mounts)
+    async with connecting(lambda: safe, verify=verify, policy=policy) as store:
+        yield store
