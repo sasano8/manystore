@@ -14,6 +14,9 @@
 
 > 完了マイルストーンの詳細は `progress.md` に集約。ここには溜めない（重複は memory clean で畳む）。
 
+- 【最重要】ユーザー指摘＝`KeyValueStoreBase`(ABC) が `AsyncKeyValueStore`(Protocol) と完全一致しない（get_or_raise
+  だけ abstract・残り 9 メソッド未強制＝部分実装が黙って通る・fail-loud でない）。interrupt 経由で **M043** として
+  バックログ最上段に積んだ（最重要）。archive 退避済。実装は別サイクル。
 - TODO 規約＋`make grep-todo` 要望：配置を unit-quality（定義）／supervisor・flow（参照）に合意。**親正本の skill は
   worker から編集不可**（ガード発火＝役割モデル）→ `outbox/2026-06-26-todo-convention-and-grep-todo.md` に上りエスカレ。
   repo ローカルは実施：Makefile に `make grep-todo` 追加＋既存マーカー4件を `# TODO(<id>)` 書式へ整合（M040/M041/M042 を backlog 化）。
@@ -28,6 +31,7 @@
 
 ## 次のステップ
 
+- **最優先候補＝M043（ABC 基底 ↔ Protocol 契約の lockstep 保証・最重要）**。着手時は是正案①〜③から選定。
 - 実装サイクル候補（`progress.md` 残作業から）: **M011（安全入口の最終形）**＝下記「進行中の決定」の命名/格下げ/
   Array enter_context を実装／フェーズ2 `kv/json`／フェーズ3 `storage/manystore`。
 

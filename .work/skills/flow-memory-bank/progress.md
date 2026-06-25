@@ -39,6 +39,7 @@
 
 | ID | タスク | 優先 | 備考 |
 |----|--------|------|------|
+| **M043** | **ABC 基底 ↔ Protocol 契約の lockstep 保証** | **最重要** | `KeyValueStoreBase`(ABC) は `get_or_raise` だけ abstract で、`AsyncKeyValueStore`(Protocol) の残り（put/iter_all/list_all/exists/delete/cp/mv/connect/aclose）を宣言も強制もしない＝**部分実装でもインスタンス化が通り黙って Protocol を破れる**（fail-loud でない）。「protocols.py=契約＋既定実装の唯一の源泉」と緊張。是正案＝①基底に全面 `@abstractmethod`/既定 ②conformancer で base↔Protocol parity を assert ③Protocol 単一宣言へ再構成。`FileStoreBase` も対称点検。設計 `interrupt/archive/2026-06-26-base-protocol-drift.md` |
 | M012 | `list(prefix=...)` / pagination | 中 | prefix は M030 で capability 化済。継続トークンページングが未対応（M021 の continuation と関連）|
 | M013 | メタデータ / content-type | 中 | S3・NATS は native 対応だが共通 IF に無い |
 | M016 | テスト拡充（エラーパス/並行/大容量） | 中 | fake は happy path 中心 |
