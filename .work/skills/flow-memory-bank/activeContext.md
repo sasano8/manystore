@@ -14,6 +14,9 @@
 
 > 完了マイルストーンの詳細は `progress.md` に集約。ここには溜めない（重複は memory clean で畳む）。
 
+- 【最重要】protocols.py 契約準拠を**横展開の必須ゲート**にすべき、というメタ判断を supervisor へ上りエスカレ
+  （`outbox/2026-06-26-protocols-conformance-is-load-bearing.md`）。証拠は M043。横断ルール化の是非・置き場・
+  ブロッカー扱いの確定を supervisor に仰ぐ（実装は M043 として worker 側に在る）。
 - 【最重要】ユーザー指摘＝`KeyValueStoreBase`(ABC) が `AsyncKeyValueStore`(Protocol) と完全一致しない（get_or_raise
   だけ abstract・残り 9 メソッド未強制＝部分実装が黙って通る・fail-loud でない）。interrupt 経由で **M043** として
   バックログ最上段に積んだ（最重要）。archive 退避済。実装は別サイクル。
