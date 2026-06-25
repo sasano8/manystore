@@ -15,7 +15,6 @@ from ...protocols import (
     _kv_move,
     _KvReadFileObject,
     _KvWriteFileObject,
-    scan_prefix,
 )
 
 
@@ -40,16 +39,20 @@ class DictKeyValueStore(KeyValueStoreBase):
         except KeyError as e:
             raise FileNotFoundError(key) from e  # 欠損は FileNotFoundError に正規化
 
-    async def iter_all(self, limit: int | None = None) -> AsyncIterator[FileInfo]:
-        # 名前降順（他 backend と整合）。limit=None は全件（スライスがそのまま全要素）。
-        for key in sorted(self._data, reverse=True)[:limit]:
+    async def iter_all(self, limit: int | None = None, prefix: str = "") -> AsyncIterator[FileInfo]:
+        # 名前降順（他 backend と整合）。dict にサーバ側 prefix は無い＝scan+filter で支える。
+        # prefix で絞ってから limit を適用する（limit は「絞り込み後」の件数上限）。
+        count = 0
+        for key in sorted(self._data, reverse=True):
+            if prefix and not key.startswith(prefix):
+                continue
+            if limit is not None and count >= limit:
+                return
             yield FileInfo(filename=key, size=len(self._data[key]))
+            count += 1
 
-    def iter_prefix(self, prefix: str) -> AsyncIterator[FileInfo]:
-        return scan_prefix(self, prefix)  # dict にサーバ側 prefix は無い＝scan で明示的に支える
-
-    async def list_all(self, limit: int | None = None) -> list[FileInfo]:
-        return [info async for info in self.iter_all(limit)]
+    async def list_all(self, limit: int | None = None, prefix: str = "") -> list[FileInfo]:
+        return [info async for info in self.iter_all(limit, prefix)]
 
     async def exists(self, key: str) -> bool:
         return key in self._data

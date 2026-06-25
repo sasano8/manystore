@@ -64,16 +64,12 @@ class HttpKeyValueStore(KeyValueStoreBase, _HttpBase):
             resp.raise_for_status()
             return resp.content
 
-    async def iter_all(self, limit: int | None = None) -> AsyncIterator[FileInfo]:
+    async def iter_all(self, limit: int | None = None, prefix: str = "") -> AsyncIterator[FileInfo]:
+        # read-only＝列挙不可。明示的に非対応を上げる（暗黙 scan に落とさない）。
         raise io.UnsupportedOperation("http backend is read-only: list/iter")
         yield  # 未到達（この関数を async generator にするため）
 
-    async def iter_prefix(self, prefix: str) -> AsyncIterator[FileInfo]:
-        # read-only＝列挙不可。明示的に非対応を上げる（暗黙 scan に落とさない）。
-        raise io.UnsupportedOperation("http backend is read-only: iter_prefix")
-        yield  # 未到達（async generator 化のため）
-
-    async def list_all(self, limit: int | None = None) -> list[FileInfo]:
+    async def list_all(self, limit: int | None = None, prefix: str = "") -> list[FileInfo]:
         _read_only("list_all")
 
     async def exists(self, key: str) -> bool:

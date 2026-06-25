@@ -11,7 +11,6 @@ HTTP には一切依存しない＝この層だけで単体テストできる。
 """
 
 from ...exceptions import ContextNotFound, ReadOnlyContext  # 集約先（後方互換で再エクスポート）
-from ...protocols import iter_prefix as _iter_prefix
 from ...storage.backends import create_unsafe_key_value_store
 from ...storage.surfaces.array import ArrayKeyValueStore
 from ...storage.surfaces.safe import SafeKeyValueStore
@@ -100,16 +99,15 @@ class StorageService:
     ) -> list[EntryInfo]:
         """context 内を prefix 絞りで返す。
 
-        prefix フィルタは **capability 経由**（M030）＝ `iter_prefix` ヘルパが backend の
-        ネイティブ prefix 列挙（S3 `list_objects_v2(Prefix=…)`）を素通しし、無ければ
-        `iter_all()`+startswith に汎用フォールバックする。ArrayStorage が第一セグメント
-        （=context）で mount を絞るので、別 context は走査しない。`<context>/` を剥がして
-        bucket 相対キーへ戻す。
+        prefix フィルタは **`iter_all(prefix=…)`** に委譲＝S3 はサーバ側 `list_objects_v2(Prefix=…)`
+        で native に絞り、native を持たない backend は scan+filter で支える。ArrayStorage が
+        第一セグメント（=context）で mount を絞るので、別 context は走査しない。`<context>/` を
+        剥がして bucket 相対キーへ戻す。
         """
         self._require_context(context)
         scope = f"{context}/"
         out: list[EntryInfo] = []
-        async for info in _iter_prefix(self._array, scope + prefix):
+        async for info in self._array.iter_all(prefix=scope + prefix):
             key = info["filename"][len(scope) :]
             out.append(EntryInfo(key=key, size=info["size"]))
             if len(out) >= limit:

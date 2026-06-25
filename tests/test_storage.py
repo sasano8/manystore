@@ -30,7 +30,6 @@ from manystore import (
     S3KeyValueStore,
     SafeFileStore,
     SafeKeyValueStore,
-    SupportsPrefixListing,
     UnsafePathError,
     connect_key_value_store,
     connecting,
@@ -39,7 +38,6 @@ from manystore import (
     create_safe_key_value_store,
     create_unsafe_file_store,
     create_unsafe_key_value_store,
-    iter_prefix,
     open_async_array_store,
     open_async_file_store,
     open_async_key_value_store,
@@ -1154,122 +1152,96 @@ def test_create_unsafe_key_value_store_http_wiring() -> None:
     assert store._headers == {"Authorization": "Bearer t"}
 
 
-# ── M030: prefix を optional capability に移設（SupportsPrefixListing + iter_prefix ヘルパ） ──
+# ── prefix を iter_all/list_all の引数に畳む（capability iter_prefix は廃止） ──
 
 
-class _PrefixRecorder:
-    """ネイティブ `iter_prefix` を持つ最小ストア。呼ばれた prefix / iter_all 使用を記録する。"""
+class _IterAllRecorder:
+    """`iter_all(limit, prefix)` を持つ最小ストア。受け取った prefix を記録する。"""
 
     def __init__(self, keys: dict[str, int]) -> None:
         self._keys = dict(keys)  # filename -> size
         self.prefix_calls: list[str] = []
-        self.iter_all_used = False
 
     async def connect(self) -> None: ...
 
     async def aclose(self) -> None: ...
 
-    async def iter_prefix(self, prefix: str):
+    async def iter_all(self, limit: int | None = None, prefix: str = ""):
         self.prefix_calls.append(prefix)
-        for k, size in sorted(self._keys.items(), reverse=True):  # 既存 iter_all と同じ降順
-            if k.startswith(prefix):
-                yield {"filename": k, "size": size}
-
-    async def iter_all(self):
-        self.iter_all_used = True
-        for k, size in sorted(self._keys.items(), reverse=True):
+        count = 0
+        for k, size in sorted(self._keys.items(), reverse=True):  # 降順
+            if prefix and not k.startswith(prefix):
+                continue
+            if limit is not None and count >= limit:
+                return
             yield {"filename": k, "size": size}
+            count += 1
 
 
-def test_dict_store_supports_prefix_via_explicit_scan() -> None:
-    # サーバ側 prefix を持たない backend（Dict）は scan_prefix で **明示的に** capability を支える
-    # （暗黙フォールバックではなく、自身が SupportsPrefixListing として宣言する）。
+def test_dict_store_prefix_via_scan_filter() -> None:
+    # サーバ側 prefix を持たない backend（Dict）は iter_all(prefix=) を scan+filter で支える。
     store = DictKeyValueStore()
-    assert isinstance(store, SupportsPrefixListing)
 
     async def scenario() -> None:
         await store.put("a/1", b"x")
         await store.put("a/2", b"yy")
         await store.put("b/1", b"zzz")
-        got = sorted([i["filename"] async for i in iter_prefix(store, "a/")])
+        got = sorted([i["filename"] async for i in store.iter_all(prefix="a/")])
         assert got == ["a/1", "a/2"]  # b/1 は除外
-        empty = sorted([i["filename"] async for i in iter_prefix(store, "")])
-        assert empty == ["a/1", "a/2", "b/1"]  # 空 prefix = 全件
+        empty = sorted([i["filename"] async for i in store.iter_all()])
+        assert empty == ["a/1", "a/2", "b/1"]  # 既定 prefix="" = 全件
+        # limit は prefix 絞り込み後の件数上限。
+        one = [i["filename"] async for i in store.iter_all(limit=1, prefix="a/")]
+        assert one == ["a/2"]  # 降順先頭
 
     asyncio.run(scenario())
 
 
-def test_iter_prefix_dispatch_fails_loud_without_capability() -> None:
-    # capability（iter_prefix）を持たない store は **暗黙フォールバックせず即 NotImplementedError**
-    # ＝「prefix 非対応」という事実を隠さない（fail-loud）。
-    class _NoPrefixStore:
-        async def iter_all(self):
-            yield {"filename": "a", "size": 1}
-
-    store = _NoPrefixStore()
-    assert not isinstance(store, SupportsPrefixListing)
-    with pytest.raises(NotImplementedError):
-        iter_prefix(store, "a")  # 呼び出し時点で即座に失敗（イテレーション前）
-
-
-def test_iter_prefix_helper_uses_native_capability() -> None:
-    # ネイティブを持つ store はヘルパがそれに委譲し、iter_all 総なめに落ちない。
-    rec = _PrefixRecorder({"a/1": 1, "a/2": 2, "b/1": 3})
-    assert isinstance(rec, SupportsPrefixListing)
-
-    async def scenario() -> None:
-        got = [i["filename"] async for i in iter_prefix(rec, "a/")]
-        assert got == ["a/2", "a/1"]  # ネイティブ（降順）
-        assert rec.prefix_calls == ["a/"]  # サーバ側 prefix が渡る
-        assert rec.iter_all_used is False  # 総なめしていない
-
-    asyncio.run(scenario())
-
-
-def test_safe_store_iter_prefix_validates_then_delegates_native() -> None:
-    rec = _PrefixRecorder({"ok/1": 1, "ok/2": 2, "no/1": 3})
+def test_safe_store_iter_all_validates_prefix_then_delegates() -> None:
+    rec = _IterAllRecorder({"ok/1": 1, "ok/2": 2, "no/1": 3})
     safe = SafeKeyValueStore(rec)
 
     async def scenario() -> None:
-        got = [i["filename"] async for i in safe.iter_prefix("ok/")]
+        got = [i["filename"] async for i in safe.iter_all(prefix="ok/")]
         assert got == ["ok/2", "ok/1"]
-        assert rec.prefix_calls == ["ok/"]  # 検証後にネイティブへ委譲
-        assert rec.iter_all_used is False
+        assert rec.prefix_calls == ["ok/"]  # 検証後に下層 iter_all(prefix=) へ委譲
         # 不正な prefix は委譲前に弾く（traversal）。
         with pytest.raises(UnsafePathError):
-            async for _ in safe.iter_prefix("../etc"):
+            async for _ in safe.iter_all(prefix="../etc"):
                 pass
         # 空 prefix は「全件」＝検証を飛ばす（validate_safe_path は空を弾くため）。
-        allk = [i["filename"] async for i in safe.iter_prefix("")]
+        allk = [i["filename"] async for i in safe.iter_all()]
         assert allk == ["ok/2", "ok/1", "no/1"]
 
     asyncio.run(scenario())
 
 
-def test_array_store_iter_prefix_routes_to_single_mount() -> None:
-    m1 = _PrefixRecorder({"x/1": 1, "y/2": 2})
-    m2 = _PrefixRecorder({"x/9": 9})
+def test_array_store_iter_all_prefix_routes_to_single_mount() -> None:
+    m1 = _IterAllRecorder({"x/1": 1, "y/2": 2})
+    m2 = _IterAllRecorder({"x/9": 9})
     arr = ArrayKeyValueStore()
 
     async def scenario() -> None:
         await arr.mount("m1", m1)
         await arr.mount("m2", m2)
         # `<mount>/<subprefix>` は単一 mount へ振り分け subprefix を委譲（他 mount は触らない）。
-        got = [i["filename"] async for i in arr.iter_prefix("m1/x/")]
+        got = [i["filename"] async for i in arr.iter_all(prefix="m1/x/")]
         assert got == ["m1/x/1"]  # m1 の x/* のみ・mount 名で再前置
-        assert m1.prefix_calls == ["x/"]
+        assert m1.prefix_calls == ["x/"]  # subprefix を下層 iter_all へ素通し
         assert m2.prefix_calls == []  # m2 は走査されない
-        assert m2.iter_all_used is False
         # `/` 無しの prefix は（部分）mount 名一致＝該当 mount を丸ごと列挙する。
-        whole = sorted([i["filename"] async for i in arr.iter_prefix("m1")])
+        whole = sorted([i["filename"] async for i in arr.iter_all(prefix="m1")])
         assert whole == ["m1/x/1", "m1/y/2"]
         # 無い mount は空。
-        assert [i async for i in arr.iter_prefix("zzz/a")] == []
+        assert [i async for i in arr.iter_all(prefix="zzz/a")] == []
+        # prefix 無し＝全 mount 横断（mount 名降順）。
+        everything = [i["filename"] async for i in arr.iter_all()]
+        assert sorted(everything) == ["m1/x/1", "m1/y/2", "m2/x/9"]
 
     asyncio.run(scenario())
 
 
-def test_s3_iter_prefix_filters_server_side_and_iter_all_unchanged() -> None:
+def test_s3_iter_all_filters_server_side() -> None:
     fake = _FakeS3()
     store = S3KeyValueStore("bucket")
     store._session = lambda: fake  # 接続を fake に差し替え
@@ -1278,16 +1250,12 @@ def test_s3_iter_prefix_filters_server_side_and_iter_all_unchanged() -> None:
         await store.put("a/1", b"x")
         await store.put("a/2", b"yy")
         await store.put("b/1", b"zzz")
-        assert isinstance(store, SupportsPrefixListing)
         # ネイティブ prefix 絞り（サーバ側 list_objects_v2(Prefix=…)）・降順は不変。
-        got = [i["filename"] async for i in store.iter_prefix("a/")]
+        got = [i["filename"] async for i in store.iter_all(prefix="a/")]
         assert got == ["a/2", "a/1"]
-        # iter_all は iter_prefix("") と等価（全件・降順）。
+        # 既定 prefix="" は全件・降順。
         allk = [i["filename"] async for i in store.iter_all()]
         assert allk == ["b/1", "a/2", "a/1"]
-        # 汎用ヘルパ越しでもネイティブを通る。
-        via = [i["filename"] async for i in iter_prefix(store, "a/")]
-        assert via == ["a/2", "a/1"]
 
     asyncio.run(scenario())
 

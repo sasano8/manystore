@@ -132,14 +132,14 @@ class LoadBalancedKeyValueStore(KeyValueStoreBase):
         # probe-all: 各 member を順に get、最初に見つかった値を返す（全滅は FileNotFoundError）。
         raise NotImplementedError("loadbalancer scaffold: get_or_raise")
 
-    async def iter_all(self, limit: int | None = None) -> AsyncIterator[FileInfo]:
-        # 全 member を横断（鍵は member 名で prefix しない）。同一鍵が複数 member にある場合の
+    async def iter_all(self, limit: int | None = None, prefix: str = "") -> AsyncIterator[FileInfo]:
+        # 全 member を横断（鍵は member 名で前置しない）。prefix は各 member の iter_all へ委譲。
         # TODO(M040): dedup 方針は本実装で決定（同一鍵が複数 member にある場合）。
         raise NotImplementedError("loadbalancer scaffold: iter_all")
         yield  # 未到達（async generator 化のため）
 
-    async def list_all(self, limit: int | None = None) -> list[FileInfo]:
-        return [info async for info in self.iter_all(limit)]
+    async def list_all(self, limit: int | None = None, prefix: str = "") -> list[FileInfo]:
+        return [info async for info in self.iter_all(limit, prefix)]
 
     async def exists(self, key: str) -> bool:
         raise NotImplementedError("loadbalancer scaffold: exists")  # probe-all

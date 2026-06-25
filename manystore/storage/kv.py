@@ -12,10 +12,7 @@ from ..protocols import (
     FileInfo,
     KeyValueFromFileStore,
     KeyValueStoreBase,
-    SupportsPrefixListing,
     SyncKeyValueStore,
-    iter_prefix,
-    scan_prefix,
 )
 from .backends import (
     DictKeyValueStore,
@@ -36,10 +33,6 @@ __all__ = [
     # abstraction
     "AsyncKeyValueStore",
     "KeyValueStoreBase",
-    # optional capability（prefix 列挙）
-    "SupportsPrefixListing",
-    "iter_prefix",
-    "scan_prefix",
     # backends
     "DictKeyValueStore",
     "LocalKeyValueStore",

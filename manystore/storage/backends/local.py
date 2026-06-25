@@ -28,7 +28,6 @@ from ...protocols import (
     FileStoreBase,
     KeyValueFromFileStore,
     _kv_copy,
-    scan_prefix,
 )
 
 # 同期関数をワーカースレッドへ逃がす（event loop を塞がない）。
@@ -150,9 +149,10 @@ class LocalFileStore(FileStoreBase):
 
     # ── 名前空間操作（filesystem-native） ──
 
-    async def iter_all(self, limit: int | None = None) -> AsyncIterator[FileInfo]:
+    async def iter_all(self, limit: int | None = None, prefix: str = "") -> AsyncIterator[FileInfo]:
         # 再帰列挙（rglob）。キーは self._dir からの相対 posix パスにし、'/' を含む
         # ネストキーも列挙する（s3/nats のフラットキー列挙と規約を揃える）。
+        # filesystem にサーバ側 prefix は無い＝scan+filter で支える（絞り込み後に limit 適用）。
         # rglob/stat は同期 syscall なので、走査と FileInfo 構築を丸ごとスレッドへ逃がす。
         def _scan() -> list[FileInfo]:
             files = sorted(
@@ -160,20 +160,21 @@ class LocalFileStore(FileStoreBase):
                 key=lambda p: p.relative_to(self._dir).as_posix(),
                 reverse=True,
             )
-            return [  # limit=None は全件（スライスがそのまま全要素）
-                FileInfo(filename=f.relative_to(self._dir).as_posix(), size=f.stat().st_size)
-                for f in files[:limit]
-            ]
+            out: list[FileInfo] = []
+            for f in files:
+                name = f.relative_to(self._dir).as_posix()
+                if prefix and not name.startswith(prefix):
+                    continue
+                if limit is not None and len(out) >= limit:
+                    break
+                out.append(FileInfo(filename=name, size=f.stat().st_size))
+            return out
 
         for info in await _offload(_scan):
             yield info
 
-    def iter_prefix(self, prefix: str) -> AsyncIterator[FileInfo]:
-        # filesystem にサーバ側 prefix は無い＝scan で明示的に支える（暗黙 fallback ではない）。
-        return scan_prefix(self, prefix)
-
-    async def list_all(self, limit: int | None = None) -> list[FileInfo]:
-        return [info async for info in self.iter_all(limit)]
+    async def list_all(self, limit: int | None = None, prefix: str = "") -> list[FileInfo]:
+        return [info async for info in self.iter_all(limit, prefix)]
 
     async def exists(self, filename: str) -> bool:
         return await _offload((self._dir / filename).is_file)

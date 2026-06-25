@@ -14,7 +14,6 @@ from ...protocols import (
     _kv_move,
     _KvReadFileObject,
     _KvWriteFileObject,
-    scan_prefix,
 )
 
 
@@ -65,7 +64,7 @@ class NatsObjectKeyValueStore(KeyValueStoreBase, _NatsBase):
             raise FileNotFoundError(key) from e  # 欠損は FileNotFoundError に正規化
         return result.data or b""
 
-    async def iter_all(self, limit: int | None = None) -> AsyncIterator[FileInfo]:
+    async def iter_all(self, limit: int | None = None, prefix: str = "") -> AsyncIterator[FileInfo]:
         from nats.js.errors import NotFoundError
 
         obs = await self._get_obs()
@@ -78,15 +77,18 @@ class NatsObjectKeyValueStore(KeyValueStoreBase, _NatsBase):
             entries = []
         entries = [e for e in entries if not e.deleted]
         entries.sort(key=lambda e: e.name, reverse=True)
-        for e in entries[:limit]:  # limit=None は全件（スライスがそのまま全要素）
+        # NATS にサーバ側 prefix は無い＝scan+filter で支える。prefix で絞ってから limit を適用。
+        count = 0
+        for e in entries:
+            if prefix and not e.name.startswith(prefix):
+                continue
+            if limit is not None and count >= limit:
+                return
             yield FileInfo(filename=e.name, size=e.size or 0)
+            count += 1
 
-    def iter_prefix(self, prefix: str) -> AsyncIterator[FileInfo]:
-        # NATS にサーバ側 prefix は無い＝scan で明示的に支える（暗黙 fallback ではない）。
-        return scan_prefix(self, prefix)
-
-    async def list_all(self, limit: int | None = None) -> list[FileInfo]:
-        return [info async for info in self.iter_all(limit)]
+    async def list_all(self, limit: int | None = None, prefix: str = "") -> list[FileInfo]:
+        return [info async for info in self.iter_all(limit, prefix)]
 
     async def exists(self, key: str) -> bool:
         from nats.js.errors import NotFoundError

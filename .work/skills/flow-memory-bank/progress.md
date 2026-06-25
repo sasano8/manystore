@@ -49,7 +49,7 @@
 | M022b | conformance の run_middle/heavy/full ＋ spec（file/kv 寄り）検出・特性表・リプレイ | low | P1 存在チェック＋P2 run_light 完了。`tester.spec={"leaning":None}` は placeholder。実 backend（S3/NATS）適用も |
 | M027b残 | FileStore=KVS+IO 波及（Sync 残） | low | S3/NATS/HTTP/Local＋`SafeFileStore` 完了（Safe は M032 で `SafeKeyValueStore` 継承＝KVS 面も検証付き委譲に）。残＝`SyncFileStore` Protocol 鏡映＋`AsyncToSyncFileStore` ブリッジのみ |
 | M025残 | 名前空間再編 フェーズ2/3 | normal | フェーズ1（移設）＋addressing 再設計 完了。残＝フェーズ2 `kv/json`（JSON 検証）/ フェーズ3 `storage/manystore`（range/chunked streaming）。設計 `plans/m025-namespace-restructure-plan.md` |
-| M026 | stream インターフェース（第3の族・新コア IF） | 相談 | kv/storage の他に **stream**＝無境界チャネル（append/follow＝tail/subscribe）。FileStore で表せない＝新コア IF `StreamStore`。MVP=byte stream。最小・汎用と緊張するので **doc-first 合意必須**（着手時に設計を起こす。旧 interrupt は GC 済＝git 履歴に残存）|
+| M026 | stream インターフェース（第3の族・新コア IF） | 相談 | kv/storage の他に **stream**＝無境界チャネル（append/follow＝tail/subscribe）。FileStore で表せない＝新コア IF `StreamStore`。MVP=byte stream。最小・汎用と緊張するので **doc-first 合意必須**（着手時に設計を起こす。旧 interrupt は GC 済＝git 履歴に残存）。**分割軸の確定（2026-06-26 対話）**＝stream を切る軸は「jsonl vs pub/sub」でなく **「送信単位ごとに応答チャネルがあるか」の1点**。(A) 片方向 fire-and-forget（`write->None`/`AsyncIterable`・エラー＝stream の死）＝**StreamStore＝コアに属す（FileStore IO 寄り・原則6）**／(B) 単位ごとに応答（`request->Response`＋相関ID・エラー＝per-unit ステータス＝N 個の request-response 多重化）＝**メッセージング/トランスポートでストレージ抽象でない→コア IF に載せず `client/` の別レイヤ（仮称 Exchange/RPC）として別途 doc-first**（YAGNI・projectbrief スコープ・原則6 の client wrap 方針）。中間 reliable one-way（配送 ack/no app 応答）は (A) の信頼性オプション。設計 `interrupt/archive/2026-06-26-stream-if-split-axis.md` |
 | M028b | ArrayStorage を HTTP に動的公開（context の mount/unmount） | low | `POST/DELETE /contexts` で動的 mount。backend 資格情報を HTTP から渡す＝認証設計が要る（M011 連動）。**動的化の核**＝非同期 `attach`/`detach`（connect→登録 / 登録解除→aclose を `asyncio.Lock` で直列化。並行 POST/DELETE の競合・リーク防止）。`mount`/`unmount` の IF は既に非同期化済（中身は登録のみ）＝ロック実装を後付けできる。要設計 |
 | M039 | IPFS backend 本実装 | 相談 | scaffold 配置済（`backends/ipfs.py`・本体 NotImplementedError・**factory 未接続**）。MFS（`/api/v0/files/*`）主＝パス鍵で KVS に乗せる／CID 直は従（フック `cid_add`/`cid_get` のみ）。httpx 流用。接続ネタ＝api_url/gateway_url/token/mfs_root/pin_on_write/timeout。本実装時に factory `"ipfs"` 分岐を足す |
 | M041 | nats not-found catch を撤去 | low | `nats.iter_all`/`exists` の `NotFoundError` catch（空/欠損の正規化）を将来 `obs.watch()` ベース再実装で取っ払う。M036 の残置（コード内 `# TODO(M041)`）|
@@ -136,6 +136,15 @@ error-swallow 監査 M036 / Safe 既定化 M011・M032 / テスト拡充）と U
 
 ## 意思決定の変遷
 
+- **`put` は共通レスポンス `FileInfo`（`{filename,size}`）を返す**（2026-06-26）: 全 backend が追加 I/O なしに生成できる
+  最小・共通の *file メタデータ* のみ。revision/etag は共通でないため core には載せない。
+- **prefix 列挙を core の `iter_all(prefix="")`/`list_all(prefix="")` 引数に畳む（capability 廃止）**（2026-06-26・ユーザー判断）:
+  旧 `SupportsPrefixListing` / `iter_prefix()` ディスパッチ / `scan_prefix()` を全廃。S3 はサーバ側 `Prefix=` で native、
+  native の無い backend（local/dict/nats/remote）は scan+filter を **契約上の既定動作**として実装。これにより
+  **fail-loud-for-prefix（要求7 / M030）は意図的に撤回**（scan+filter は「隠れた fallback」ではなく明示の既定）。
+  native REST API は従来通り prefix 非対応＝`RemoteKeyValueStore` は client 側 scan+filter（S3 gateway のみ prefix native）。
+- **backend 生レスを運ぶ封筒（request/response 型）は却下**（2026-06-26・ユーザー判断）: パラダイム不一致。
+  request/response・pub/sub は非ターゲット（正本は projectbrief「非ターゲット」）。dispatch メソッド程度は余地あり。
 - ストレージ抽象は独立ライブラリとして自己完結。利用側固有の結線は利用側 adapter に閉じ、本体は最小・汎用に保つ。
 - **S3 アドレッシングスタイルを明示パラメータ化**（既定 virtual／利用側が `"path"` opt-in）。fake では気づけず実機 E2E で露見。
 - **Python 3.14+ 前提に確定**: PEP 649（注釈遅延評価）が既定ゆえ前方参照は valid＝`from __future__ import annotations`

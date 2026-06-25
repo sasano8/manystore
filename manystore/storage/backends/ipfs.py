@@ -92,16 +92,12 @@ class IpfsKeyValueStore(KeyValueStoreBase, _IpfsBase):
     async def get_or_raise(self, key: str) -> bytes:
         _todo("get_or_raise")  # files/read（無ければ FileNotFoundError へ正規化）
 
-    async def iter_all(self, limit: int | None = None) -> AsyncIterator[FileInfo]:
-        _todo("iter_all")  # files/ls を mfs_root から再帰
+    async def iter_all(self, limit: int | None = None, prefix: str = "") -> AsyncIterator[FileInfo]:
+        _todo("iter_all")  # files/ls を <mfs_root>/<prefix> から再帰（prefix 絞り込み込み）
         yield  # 未到達（async generator 化のため）
 
-    async def iter_prefix(self, prefix: str) -> AsyncIterator[FileInfo]:
-        _todo("iter_prefix")  # files/ls を <mfs_root>/<prefix> で
-        yield  # 未到達
-
-    async def list_all(self, limit: int | None = None) -> list[FileInfo]:
-        return [info async for info in self.iter_all(limit)]
+    async def list_all(self, limit: int | None = None, prefix: str = "") -> list[FileInfo]:
+        return [info async for info in self.iter_all(limit, prefix)]
 
     async def exists(self, key: str) -> bool:
         _todo("exists")  # files/stat の有無

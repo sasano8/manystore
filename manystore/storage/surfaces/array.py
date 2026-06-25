@@ -22,7 +22,6 @@ from ...protocols import (
     _kv_copy,
     _kv_move,
 )
-from ...protocols import iter_prefix as _iter_prefix
 from .safe import validate_safe_path
 
 # ダウンロードキャッシュのデフォルト先（ホーム配下）。
@@ -79,39 +78,41 @@ class ArrayKeyValueStore(KeyValueStoreBase):
         store, subkey = self._route(key)  # 不明な mount は KeyError（欠損ではない）
         return await store.get_or_raise(subkey)
 
-    async def iter_all(self, limit: int | None = None) -> AsyncIterator[FileInfo]:
+    async def iter_all(self, limit: int | None = None, prefix: str = "") -> AsyncIterator[FileInfo]:
         # 各 backend のエントリを論理名で prefix して横断する。limit は横断の総件数で打ち切る。
+        # prefix 絞り込みは第一セグメントで mount を絞り、残り（subprefix）を mount の iter_all へ
+        # 委譲して下層 native（S3 サーバ側 Prefix=）を素通しする（mount 外は走査しない）。
         count = 0
-        for name in sorted(self._mounts, reverse=True):
-            async for info in self._mounts[name].iter_all():
+
+        async def _emit(mname: str, subprefix: str) -> AsyncIterator[FileInfo]:
+            # `<mname>/<subprefix>` の列挙を論理名で再前置して返す。
+            async for info in self._mounts[mname].iter_all(prefix=subprefix):
+                yield FileInfo(filename=f"{mname}/{info['filename']}", size=info["size"])
+
+        if not prefix:
+            # 全件: 全 mount を名前降順で横断。
+            sources = [(m, "") for m in sorted(self._mounts, reverse=True)]
+        else:
+            name, sep, subprefix = prefix.partition("/")
+            if sep:
+                # `<mount>/<subprefix>`: 単一 mount へルーティング（無ければ空）。
+                sources = [(name, subprefix)] if name in self._mounts else []
+            else:
+                # `/` 無し＝（部分）mount 名一致。`<mount>/<sub>`.startswith(prefix) ⟺
+                # <mount>.startswith(prefix) なので該当 mount を丸ごと列挙（subprefix は空）。
+                sources = [
+                    (m, "") for m in sorted(self._mounts, reverse=True) if m.startswith(prefix)
+                ]
+
+        for mname, subprefix in sources:
+            async for info in _emit(mname, subprefix):
                 if limit is not None and count >= limit:
                     return
-                yield FileInfo(filename=f"{name}/{info['filename']}", size=info["size"])
+                yield info
                 count += 1
 
-    async def iter_prefix(self, prefix: str) -> AsyncIterator[FileInfo]:
-        # capability 伝播（[SupportsPrefixListing]）。prefix の第一セグメントで mount を絞り、
-        # 残り（subprefix）を mount 内のネイティブ iter_prefix へ委譲して S3 native を素通しする。
-        name, sep, subprefix = prefix.partition("/")
-        if sep:
-            # `<mount>/<subprefix>`: 単一 mount へルーティング（無ければ空）。
-            store = self._mounts.get(name)
-            if store is None:
-                return
-            async for info in _iter_prefix(store, subprefix):
-                yield FileInfo(filename=f"{name}/{info['filename']}", size=info["size"])
-        else:
-            # `/` 無し＝（部分）mount 名一致。prefix に '/' が無いとき
-            # `<mount>/<sub>`.startswith(prefix) ⟺ <mount>.startswith(prefix) なので、
-            # 該当 mount を丸ごと列挙すればよい（subprefix は空）。
-            for mname in sorted(self._mounts, reverse=True):
-                if not mname.startswith(prefix):
-                    continue
-                async for info in self._mounts[mname].iter_all():
-                    yield FileInfo(filename=f"{mname}/{info['filename']}", size=info["size"])
-
-    async def list_all(self, limit: int | None = None) -> list[FileInfo]:
-        return [info async for info in self.iter_all(limit)]
+    async def list_all(self, limit: int | None = None, prefix: str = "") -> list[FileInfo]:
+        return [info async for info in self.iter_all(limit, prefix)]
 
     async def exists(self, key: str) -> bool:
         # 論理名そのもの（ディレクトリ扱い）はマウントされていれば存在とみなす。
@@ -171,15 +172,12 @@ class DownloadCache(KeyValueStoreBase):
     async def get_or_raise(self, key: str) -> bytes:
         return await self._store.get_or_raise(key)
 
-    async def iter_all(self, limit: int | None = None) -> AsyncIterator[FileInfo]:
-        async for info in self._store.iter_all(limit):  # 下層の async iter を limit ごと素通し
+    async def iter_all(self, limit: int | None = None, prefix: str = "") -> AsyncIterator[FileInfo]:
+        async for info in self._store.iter_all(limit, prefix):  # limit/prefix ごと下層へ素通し
             yield info
 
-    def iter_prefix(self, prefix: str) -> AsyncIterator[FileInfo]:
-        return _iter_prefix(self._store, prefix)  # 下層の capability を伝播（非対応は loud）
-
-    async def list_all(self, limit: int | None = None) -> list[FileInfo]:
-        return await self._store.list_all(limit)
+    async def list_all(self, limit: int | None = None, prefix: str = "") -> list[FileInfo]:
+        return await self._store.list_all(limit, prefix)
 
     async def exists(self, key: str) -> bool:
         return await self._store.exists(key)
