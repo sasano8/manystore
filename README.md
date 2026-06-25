@@ -83,7 +83,8 @@ async with connect_key_value_store(
 > **HTTP backend は read-only**: `get` / `exists` と `FileStore.open_reader(...)` のみ。`put` / `delete` /
 > `cp` / `mv` / `list_all` / `iter_all` / `open_writer` は `io.UnsupportedOperation` を投げる。
 
-接続を挟まず実体を直接作るなら `create_key_value_store(backend, **opts)` も使える。
+接続を挟まず Safe 包装した実体だけ欲しいなら `create_safe_key_value_store(backend, **opts)`（未接続）、
+生（**キー検証なし**）の実体を直接作るなら `create_unsafe_key_value_store(backend, **opts)` も使える。
 
 ## 接続ポリシー（ConnectPolicy）
 

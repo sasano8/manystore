@@ -76,9 +76,13 @@
 
 ## コンポーネント関係 / 重要な実装経路
 
-- **推奨入口（ライブラリの顔）= `open_async_key_value_store` / `open_async_file_store`**（M032）＝Safe 包装必須の
-  接続 CM（`async with` で connect＋`Safe*` 包装、終了で aclose）。低レベルは `create_*`（生・未接続）/
-  `connect_key_value_store`（接続のみ・Safe 無し）。`create_file_store` は FileStore 版ファクトリ。
+- **入口の命名マトリクス（M011・3×3＝kv/file/array × 安全段階）**:
+  - **`open_async_{key_value,file,array}_store`** ＝ライブラリの顔＝**Safe 包装＋接続 CM**（`async with` で connect、
+    終了で aclose）。array 版は `mounts` dict を受ける（M011-②）。内部は `create_safe_*` を呼ぶ（dedup）。
+  - **`create_safe_{key_value,file,array}_store`** ＝**Safe 包装のみ・未接続**（構築だけ。接続は呼び出し側）。
+  - **`create_unsafe_{key_value,file}_store`** ＝**生・未接続・キー検証なし**（低レベル）。array の生は `ArrayKeyValueStore` 直。
+    生口（unsafe factory＋生クラス）は**トップ公開に残す**（ユーザー確定＝格下げせず名前で unsafe 明示のみ）。
+  - 接続のみ（Safe 無し）は `connect_key_value_store`。
 - 危険入力対策は `Safe*` ラッパが `validate_safe_path` で key/filename を検証してから委譲。`SafeFileStore` は
   `SafeKeyValueStore` を継承＝KVS 面（検証付き）＋ IO（open_reader/open_writer）の完全な FileStore。
 - 複数 backend の横断は `ArrayKeyValueStore`（キー先頭セグメント＝論理名で振り分け）。`mount`/`unmount` は

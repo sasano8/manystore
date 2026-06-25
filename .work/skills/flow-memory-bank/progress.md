@@ -39,7 +39,6 @@
 
 | ID | タスク | 優先 | 備考 |
 |----|--------|------|------|
-| M011 | 既定で安全（キー検証）/方針明確化 | 中 | **②Array責務分離=完了（C1）**＝mount は登録のみ（同期）・接続は `open_async_array_store` CM／StorageService 追従。**方針確定済**＝生口はトップ公開も残す（格下げしない・名前で unsafe 明示のみ）。残=**①命名（C2）**＝`create_safe_{kv,file,array}_store` 追加＋`create_*`→`create_unsafe_*` リネーム（トップ公開維持） |
 | M012 | `list(prefix=...)` / pagination | 中 | prefix は M030 で capability 化済。継続トークンページングが未対応（M021 の continuation と関連）|
 | M013 | メタデータ / content-type | 中 | S3・NATS は native 対応だが共通 IF に無い |
 | M016 | テスト拡充（エラーパス/並行/大容量） | 中 | fake は happy path 中心 |
@@ -88,11 +87,16 @@
   今回は現状維持＝not-found→[]/False の正規化は契約上必要）。
 - **M024（2026-06-25）**: pull 型エスカレ（outbox）の文書追従完了＝MB に push 前提の残記述なし・旧スキル名なし・
   alias を `[[unit-quality]]` に統一。
-- **M011-②（2026-06-26・完了＝C1）**: 安全入口の最終形のうち **Array の責務分離**。`ArrayKeyValueStore.mount`/
-  `unmount` を**登録のみ（同期・I/O なし）**に分離（mount が connect も担う二重責務を解消）。接続は新設の顔
-  `open_async_array_store(mounts)`（`SafeKeyValueStore(ArrayKeyValueStore)` 包装＋全 mount を connect/aclose する CM・
-  kv facade）が一括で担う。`StorageService.connect` は明示 connect + 同期 mount に追従。test 書換（mount=登録のみ・
-  CM が connect/aclose）+1。残＝①命名（C2）。
+- **M011（2026-06-26・完了）**: 安全入口の最終形＝**入口の命名マトリクスを確定**（2 コミット）。
+  - **②責務分離（C1）**: `ArrayKeyValueStore.mount`/`unmount` を**登録のみ（同期・I/O なし）**に分離（mount が
+    connect も担う二重責務を解消）。接続は顔 `open_async_array_store(mounts)` の CM が一括で担う。`StorageService.connect`
+    は明示 connect + 同期 mount に追従。
+  - **①命名（C2）**: 低レベル factory を `create_key_value_store`/`create_file_store` →
+    **`create_unsafe_key_value_store`/`create_unsafe_file_store`** にリネーム（名前で unsafe＝キー検証なしを明示）。
+    **`create_safe_{key_value,file,array}_store`** 新設（Safe 包装のみ・未接続）。**生口はトップ公開に残す**
+    （ユーザー確定＝格下げせず名前で明示のみ）。caller 全追従（connect/service/config/README/tests）。test +1。
+  - 完成した 3×3 マトリクス: **unsafe**（生・未接続・キー検証なし）/ **safe**（Safe 包装・未接続）/
+    **open_async**（顔＝Safe 包装＋接続 CM）× kv/file/array。open_async は内部で create_safe_* を呼ぶ（dedup）。
 - **M010（2026-06-25・完了）**: local backend を非ブロッキング化＝`storage/backends/local.py` の同期 IO
   （open/read/write/close・rglob+stat・replace/unlink・mkdir）を `anyio.to_thread.run_sync`（`_offload`）で
   ワーカースレッドへオフロードし event loop を塞がない。`_LocalAtomicWriter` は構築（mkstemp/fdopen）も

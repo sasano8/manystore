@@ -25,12 +25,12 @@ __all__ = [
     "NatsFileStore",
     "HttpKeyValueStore",
     "HttpFileStore",
-    "create_key_value_store",
-    "create_file_store",
+    "create_unsafe_key_value_store",
+    "create_unsafe_file_store",
 ]
 
 
-def create_key_value_store(
+def create_unsafe_key_value_store(
     backend: str,
     local_dir: Path | None = None,
     s3_bucket: str = "",
@@ -44,6 +44,11 @@ def create_key_value_store(
     http_base_url: str = "",
     http_headers: dict[str, str] | None = None,
 ) -> AsyncKeyValueStore:
+    """backend 名から生の（未接続・**キー検証なし**）[KeyValueStore] を作る低レベルファクトリ。
+
+    **unsafe**＝`../escape` 等を弾かない（パストラバーサル対策は呼び出し側責務）。安全に使うなら
+    [create_safe_key_value_store]（Safe 包装）か顔の `open_async_key_value_store`（Safe＋接続）。
+    """
     if backend == "memory":
         return DictKeyValueStore()  # プロセス内 dict（揮発・接続不要）
     elif backend == "local":
@@ -67,7 +72,7 @@ def create_key_value_store(
         raise ValueError(f"unknown backend: {backend!r}")
 
 
-def create_file_store(
+def create_unsafe_file_store(
     backend: str,
     local_dir: Path | None = None,
     s3_bucket: str = "",
@@ -81,7 +86,7 @@ def create_file_store(
     http_base_url: str = "",
     http_headers: dict[str, str] | None = None,
 ) -> AsyncFileStore:
-    """[create_key_value_store] の FileStore 版（backend → 完全な [FileStore]＝KVS + IO）。
+    """[create_unsafe_key_value_store] の FileStore 版（backend → 完全な [FileStore]＝KVS + IO）。
 
     http は read-only FileStore（書き込み・一覧は `io.UnsupportedOperation`）。引数は KVS 版と同形。
     """

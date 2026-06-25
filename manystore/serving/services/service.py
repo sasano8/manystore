@@ -1,18 +1,18 @@
 """service — protocol を manystore の [KeyValueStore] へ写す中核（[StorageService]）。
 
 HTTP の **context（第一階層）は [ArrayKeyValueStore] の mount に対応**する。config の各 context を
-`create_key_value_store` で生成 → [SafeKeyValueStore]（キー検証）で包み ArrayStorage に `mount` し、
-(context, key) を `<context>/<key>` キーへ合成して 1 本の合成ストアへ写す＝**振り分けは ArrayStorage
-に委譲**（service は writable・メタ・watcher だけを上載せ）。一覧は ArrayStorage の `iter_all()`
-（各 mount を `<name>/` 前置する横断列挙）を context で切り出し prefix 絞り。各 context に
-[PollingWatcher] を 1 本張り WS 購読へ fan-out する。
+`create_unsafe_key_value_store` で生成 → [SafeKeyValueStore]（キー検証）で包み ArrayStorage に
+`mount` し、(context, key) を `<context>/<key>` キーへ合成して 1 本の合成ストアへ写す＝**振り分けは
+ArrayStorage に委譲**（service は writable・メタ・watcher だけを上載せ）。一覧は ArrayStorage の
+`iter_all()`（各 mount を `<name>/` 前置する横断列挙）を context で切り出し prefix 絞り。各 context
+に [PollingWatcher] を 1 本張り WS 購読へ fan-out する。
 
 HTTP には一切依存しない＝この層だけで単体テストできる。
 """
 
 from ...exceptions import ContextNotFound, ReadOnlyContext  # 集約先（後方互換で再エクスポート）
 from ...protocols import iter_prefix as _iter_prefix
-from ...storage.backends import create_key_value_store
+from ...storage.backends import create_unsafe_key_value_store
 from ...storage.surfaces.array import ArrayKeyValueStore
 from ...storage.surfaces.safe import SafeKeyValueStore
 from .config import AppConfig
@@ -37,7 +37,7 @@ class StorageService:
     async def connect(self) -> None:
         """全 context のストアを生成して ArrayStorage に mount し、ウォッチャを起動する。"""
         for name, cc in self._config.contexts.items():
-            raw = create_key_value_store(cc.backend, **cc.opts)  # type: ignore[arg-type]
+            raw = create_unsafe_key_value_store(cc.backend, **cc.opts)  # type: ignore[arg-type]
             store = SafeKeyValueStore(raw)  # キー検証は mount したストア側で効く
             await store.connect()  # mount は登録のみ＝接続は明示的に行う（責務分離）
             self._array.mount(name, store)  # 第一階層へ登録（同期・I/O なし）

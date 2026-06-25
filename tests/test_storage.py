@@ -34,8 +34,11 @@ from manystore import (
     UnsafePathError,
     connect_key_value_store,
     connecting,
-    create_file_store,
-    create_key_value_store,
+    create_safe_array_store,
+    create_safe_file_store,
+    create_safe_key_value_store,
+    create_unsafe_file_store,
+    create_unsafe_key_value_store,
     iter_prefix,
     open_async_array_store,
     open_async_file_store,
@@ -1118,9 +1121,9 @@ def test_http_file_store_read() -> None:
     asyncio.run(scenario())
 
 
-def test_create_key_value_store_http_wiring() -> None:
+def test_create_unsafe_key_value_store_http_wiring() -> None:
     # ファクトリ経由で backend="http" → HttpKeyValueStore が組み立つ（base_url/headers を渡す）。
-    store = create_key_value_store(
+    store = create_unsafe_key_value_store(
         "http", http_base_url=_HTTP_BASE, http_headers={"Authorization": "Bearer t"}
     )
     assert isinstance(store, HttpKeyValueStore)
@@ -1266,7 +1269,7 @@ def test_s3_iter_prefix_filters_server_side_and_iter_all_unchanged() -> None:
     asyncio.run(scenario())
 
 
-# ── 安全な入口（ライブラリの顔）＝open_async_* / create_file_store（M032） ──
+# ── 安全な入口の最終形＝open_async_* / create_safe_* / create_unsafe_*（M032 / M011-①） ──
 
 
 def test_open_async_key_value_store_is_safe_and_connected(tmp_path: Path) -> None:
@@ -1314,12 +1317,36 @@ def test_open_async_uses_memory_backend_without_connect() -> None:
     asyncio.run(scenario())
 
 
-def test_create_file_store_maps_backends(tmp_path: Path) -> None:
-    # FileStore 版ファクトリ（生・未包装）。backend→FileStore のマッピング。
-    assert isinstance(create_file_store("memory"), DictFileStore)
-    assert isinstance(create_file_store("local", local_dir=tmp_path), LocalFileStore)
-    assert isinstance(create_file_store("http", http_base_url="http://x"), HttpFileStore)
+def test_create_unsafe_file_store_maps_backends(tmp_path: Path) -> None:
+    # FileStore 版ファクトリ（生・未包装・未接続）。backend→FileStore のマッピング。
+    assert isinstance(create_unsafe_file_store("memory"), DictFileStore)
+    assert isinstance(create_unsafe_file_store("local", local_dir=tmp_path), LocalFileStore)
+    assert isinstance(create_unsafe_file_store("http", http_base_url="http://x"), HttpFileStore)
     with pytest.raises(ValueError):
-        create_file_store("nope")
+        create_unsafe_file_store("nope")
     with pytest.raises(ValueError):
-        create_file_store("local")  # local_dir 必須
+        create_unsafe_file_store("local")  # local_dir 必須
+
+
+def test_create_safe_factories_wrap_without_connecting(tmp_path: Path) -> None:
+    # create_safe_* は Safe 包装のみ（構築だけ・未接続）。接続せずともキー検証は効く。
+    kv = create_safe_key_value_store("memory")
+    assert isinstance(kv, SafeKeyValueStore)
+    fs = create_safe_file_store("local", local_dir=tmp_path)
+    assert isinstance(fs, SafeFileStore)
+    arr = create_safe_array_store({"docs": create_unsafe_key_value_store("memory")})
+    assert isinstance(arr, SafeKeyValueStore)
+
+    async def scenario() -> None:
+        # 未接続でも memory backend は使える（接続不要）＋ Safe 検証が効く。
+        await kv.connect()
+        await kv.put("a/b", b"v")
+        assert await kv.get("a/b") == b"v"
+        with pytest.raises(UnsafePathError):
+            await kv.put("../escape", b"x")
+        # array も Safe 越しに合成キーで使える。
+        await arr.connect()
+        await arr.put("docs/x", b"d")
+        assert await arr.get("docs/x") == b"d"
+
+    asyncio.run(scenario())

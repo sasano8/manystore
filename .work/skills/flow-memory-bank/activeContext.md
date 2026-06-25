@@ -5,10 +5,9 @@
 
 ## 現在のフォーカス
 
-**M011 を段階実装中（2コミット）**: ②Array責務分離=**C1 完了**（mount/unmount を登録のみに分離＋顔
-`open_async_array_store` CM・StorageService 追従）。次は **C2＝①命名**（`create_safe_{kv,file,array}_store` 追加＋
-`create_*`→`create_unsafe_*` リネーム）。**方針確定: 生口はトップ公開も残す**（格下げしない・名前で unsafe 明示のみ）。
-（前段: 2026-06-25 に M010〔local backend 非ブロッキング化〕完了＝anyio で IO をスレッドへオフロード。）
+**アクティブな作業なし**（2026-06-26 に M011〔安全入口の最終形〕完了＝2 コミット：C1 Array 責務分離＋C2 命名
+マトリクス確定。詳細は `progress.md` M011）。次サイクルで `progress.md`「残作業」から選定する。
+（前段: 2026-06-25 M010〔local backend 非ブロッキング化＝anyio オフロード〕。）
 
 ## 直近の変更
 
@@ -25,11 +24,10 @@
 
 ## 進行中の決定・考慮事項
 
-- **【一部実装】安全入口の最終形（M011）**: ②=**C1 完了**（`ArrayKeyValueStore.mount`/`unmount` を登録のみ〔同期・
-  I/O なし〕に分離・接続は顔 `open_async_array_store` CM・`StorageService` 追従）。①=**C2 未実装**＝命名＝
-  `create_safe_{kv,file,array}_store`（safe・構築のみ・未接続）追加＋低レベル `create_key_value_store`/`create_file_store`
-  を `create_unsafe_*` にリネーム。**生口（生クラス＋unsafe factory）はトップ `__all__` に残す**（ユーザー確定 2026-06-26＝
-  格下げしない・名前で unsafe 明示のみ）。`open_async_{kv,file,array}_store` の顔 3 種は出揃い済（kv/file は M032）。
+- **【完了】安全入口の最終形（M011）**: 入口の命名マトリクス（3×3）を確定＝**unsafe**（`create_unsafe_{key_value,file}_store`
+  ＝生・未接続・キー検証なし／array は `ArrayKeyValueStore` 直）/ **safe**（`create_safe_{key_value,file,array}_store`
+  ＝Safe 包装・未接続）/ **顔**（`open_async_{key_value,file,array}_store`＝Safe 包装＋接続 CM）。生口はトップ公開に残す
+  （ユーザー確定＝格下げせず名前で明示のみ）。`ArrayKeyValueStore.mount`/`unmount` は登録のみ（同期）。
 - **manystore は最小・汎用に保つ**：利用側都合で IF を拡張しない（YAGNI）。
 - **worker/supervisor**: 本 repo は dotfiles（`workers_dir: workers`）配下の worker。下り=interrupt 投函／
   上り=`outbox/` へ pull 型エスカレ（親は直接知らない）。
