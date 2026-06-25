@@ -20,7 +20,7 @@
 「書きは負荷で1つ選ぶ」は決まるが、**後でその鍵を read/delete するとき、どの member に入れたかが
 分からない**（負荷で毎回選ぶと読みが当たらない）。最小の既定は **probe-all**＝各 member を順に試す
 （配置インデックス不要・member は匿名/差し替え可を保てる）。将来は key→member の配置インデックスを
-持つ案もある（速いが状態が増える）。本実装時にどちらかへ倒す（TODO）。
+持つ案もある（速いが状態が増える）。本実装時にどちらかへ倒す（追跡は backlog M040）。
 """
 
 from collections.abc import AsyncIterator
@@ -134,7 +134,7 @@ class LoadBalancedKeyValueStore(KeyValueStoreBase):
 
     async def iter_all(self, limit: int | None = None) -> AsyncIterator[FileInfo]:
         # 全 member を横断（鍵は member 名で prefix しない）。同一鍵が複数 member にある場合の
-        # dedup は運用次第＝本実装で方針決定（TODO）。
+        # TODO(M040): dedup 方針は本実装で決定（同一鍵が複数 member にある場合）。
         raise NotImplementedError("loadbalancer scaffold: iter_all")
         yield  # 未到達（async generator 化のため）
 

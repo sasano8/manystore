@@ -139,4 +139,4 @@ class RemoteKeyValueStore(KeyValueStoreBase):
         await self._client.aclose()
 
 
-# TODO: Safepath Client もここに含んでしまうといいのかも？トランスポート層の話はどう整理しよう
+# TODO(M042): transport 層の整理（Safepath Client / RemoteKVS の所属の切り分け）

@@ -71,7 +71,7 @@ class NatsObjectKeyValueStore(KeyValueStoreBase, _NatsBase):
         try:
             entries = await obs.list()
         except NotFoundError:
-            # TODO: 将来握りつぶしなので取っ払う
+            # TODO(M041): not-found catch を obs.watch() ベース再実装で撤去
             # 空ストアは list() が NotFoundError＝空扱い。接続断・認証等の本物のエラーは
             # 握り潰さず伝播させる（fail-loud。空と障害を取り違えない）。
             entries = []
@@ -94,7 +94,7 @@ class NatsObjectKeyValueStore(KeyValueStoreBase, _NatsBase):
         try:
             info = await obs.get_info(key)  # ObjectStore に info は無い。get_info が正
         except NotFoundError:
-            # TODO: 将来握りつぶしなので取っ払う
+            # TODO(M041): not-found catch を obs.watch() ベース再実装で撤去
             # 欠損/削除済み（ObjectNotFoundError/ObjectDeletedError は NotFoundError 派生）のみ
             # False。接続断・認証等の本物のエラーは握り潰さず伝播（fail-loud）。
             return False
