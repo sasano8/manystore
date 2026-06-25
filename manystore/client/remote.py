@@ -115,6 +115,7 @@ class RemoteKeyValueStore(KeyValueStoreBase):
         # ここは全件取得し client 側で scan+filter する（prefix 非対応 backend と同じ既定動作）。
         # HTTP 越しは無制限不可で None は実上限 10_000 にクランプ。prefix 絞り込み時は server 側
         # limit で取りこぼさないよう常に 10_000 取得してから絞る。
+        # TODO(M044): 10_000 を共通の名前付き既定定数へ集約（spec/既定値の正本化）
         fetch_cap = 10_000 if prefix else (limit if limit is not None else 10_000)
         count = 0
         for e in await self._client.list_entries(self._context, limit=fetch_cap):

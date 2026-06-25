@@ -40,7 +40,7 @@
 | ID | タスク | 優先 | 備考 |
 |----|--------|------|------|
 | **M043** | **ABC 基底 ↔ Protocol 契約の lockstep 保証** | **最重要** | `KeyValueStoreBase`(ABC) は `get_or_raise` だけ abstract で、`AsyncKeyValueStore`(Protocol) の残り（put/iter_all/list_all/exists/delete/cp/mv/connect/aclose）を宣言も強制もしない＝**部分実装でもインスタンス化が通り黙って Protocol を破れる**（fail-loud でない）。「protocols.py=契約＋既定実装の唯一の源泉」と緊張。是正案＝①基底に全面 `@abstractmethod`/既定 ②conformancer で base↔Protocol parity を assert ③Protocol 単一宣言へ再構成。`FileStoreBase` も対称点検。設計 `interrupt/archive/2026-06-26-base-protocol-drift.md` |
-| M012 | `list(prefix=...)` / pagination | 中 | prefix は M030 で capability 化済。継続トークンページングが未対応（M021 の continuation と関連）|
+| M012 | `list(prefix=...)` / pagination | 中 | prefix は core `iter_all(prefix=…)` 引数化済（M030 capability は 2026-06-26 廃止）。継続トークンページングが未対応（M021 の continuation と関連）|
 | M013 | メタデータ / content-type | 中 | S3・NATS は native 対応だが共通 IF に無い |
 | M016 | テスト拡充（エラーパス/並行/大容量） | 中 | fake は happy path 中心 |
 | M014 | 操作レベル retry/timeout | 低 | 現状 connect のみ |
@@ -54,6 +54,7 @@
 | M039 | IPFS backend 本実装 | 相談 | scaffold 配置済（`backends/ipfs.py`・本体 NotImplementedError・**factory 未接続**）。MFS（`/api/v0/files/*`）主＝パス鍵で KVS に乗せる／CID 直は従（フック `cid_add`/`cid_get` のみ）。httpx 流用。接続ネタ＝api_url/gateway_url/token/mfs_root/pin_on_write/timeout。本実装時に factory `"ipfs"` 分岐を足す |
 | M041 | nats not-found catch を撤去 | low | `nats.iter_all`/`exists` の `NotFoundError` catch（空/欠損の正規化）を将来 `obs.watch()` ベース再実装で取っ払う。M036 の残置（コード内 `# TODO(M041)`）|
 | M042 | transport 層の整理 | low | `client/remote.py` の Safepath Client / RemoteKVS の所属切り分け（コード内 `# TODO(M042)`）。設計musing を backlog 化 |
+| M044 | spec/既定値の定数を集約 | low | マジックナンバー・既定値を **共通知識の名前付き定数**として 1 か所に正本化し散在を断つ。種＝HTTP list cap `10_000`（`client/remote.py`）／list 既定 `limit=1000`（client `list_entries`・service・conformancer `args.get("limit",1000)`）等。`DEFAULT_CACHE_DIR` と同流儀の既定値置き場（定数モジュール）を設け、spec・デフォルト値に関わる値は名前で参照する。inline `# TODO(M044)` で sweep 可 |
 | M040 | ロードバランサーストレージ層 本実装 | 相談 | scaffold 配置済（`surfaces/loadbalancer.py`・本体 NotImplementedError・**facade 未公開**）。**負荷メトリクスで適切な1 backend を選ぶ**動的プレースメント（シャーディング/レプリケーションではない）。ネタ＝capability `SupportsLoadStats`/`LoadStats`＋`BalancePolicy`（RoundRobin/MostFreeSpace/LeastLoaded）。Array の兄弟。**未解決＝読みルーティング**（probe-all 既定 vs 配置インデックス）。local の free は `shutil.disk_usage`、cpu/mem は別途エージェント/エンドポイント要 |
 
 > **ゴール段階**: G1=配布できる（M005〜M008 完了）→ G2=安心して使える（M009〜M011・M016）→
