@@ -1,0 +1,57 @@
+name: Pages
+
+# docs サイト（MkDocs Material）を GitHub Pages へ公開する。
+# - PR / push: ビルド検証のみ（--strict）。
+# - main への push のみ: 公式 Pages Actions で実公開。
+# 事前に Settings → Pages → Source = GitHub Actions を有効化しておくこと。
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# Pages デプロイに必要な権限（最小）。
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# 同時実行は 1 本に絞る（進行中の公開はキャンセルしない）。
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      # conformance spec を再生成してから MkDocs をビルド（常に最新の spec を公開）。
+      - name: Build docs (regenerate conformance spec + mkdocs --strict)
+        run: make docs
+
+      # main 以外（PR 等）はここまで＝ビルド検証のみ。
+      - name: Upload Pages artifact
+        if: github.ref == 'refs/heads/main'
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+  deploy:
+    # main への push のみ実公開する。
+    if: github.ref == 'refs/heads/main'
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

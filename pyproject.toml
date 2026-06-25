@@ -48,6 +48,10 @@ dev = [
     "uvicorn>=0.29.0",
     "watchdog>=4.0.0",
 ]
+# docs サイト（MkDocs Material）。`make docs` / CI の Pages ビルドでのみ使う（本体・テストと分離）。
+docs = [
+    "mkdocs-material>=9.5",
+]
 
 [build-system]
 requires = ["hatchling"]

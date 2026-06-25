@@ -12,7 +12,7 @@ SRC := manystore tests
 E2E_S3_ACCESS_KEY := manystore
 E2E_S3_SECRET_KEY := manystoresecret123
 
-.PHONY: format format-check lint test test-all check ui e2e-up e2e-down
+.PHONY: format format-check lint test test-all check ui e2e-up e2e-down conformance-docs docs docs-serve
 
 # ストレージ UI / サーバを開発設定で起動（既定 http://127.0.0.1:8000）。
 # 既定ストレージは .cache/manystore_dev（使い捨て・起動時に自動作成）。PORT=xxxx で上書き可。
@@ -50,6 +50,20 @@ test-all:
 
 # 一括検証（format 確認 + fast test）＝内ループの「検証緑」判定
 check: format-check test
+
+# conformance 結果を docs の spec 表へ出力（メソッド × 実装の Implemented/Not）。
+# 接続不要・決定的。docs/kv_spec.md / docs/file_storage_spec.md を再生成する。
+conformance-docs:
+	uv run python -m manystore.tools.conformancer
+
+# docs サイト（MkDocs Material）をビルド。先に conformance spec を再生成して常に最新化。
+# 出力は site/（CI の Pages デプロイがこれを公開）。--strict で警告を失敗にする。
+docs: conformance-docs
+	uv run --group docs mkdocs build --strict
+
+# ローカルでプレビュー（http://127.0.0.1:8000）。spec を再生成してから serve。
+docs-serve: conformance-docs
+	uv run --group docs mkdocs serve
 
 # 実 backend E2E の起動＋S3 identity 登録（これで s3-path / nats ケースが走る）
 e2e-up:

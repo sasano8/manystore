@@ -25,7 +25,11 @@
   1:1 合成（コア IF 不変・実 aiobotocore 往復で検証済）。
 - **統合エントリポイント `manystore.combined`（`python -m manystore`）**: native REST/WS（`/kv/raw`・buffered）と
   S3 ゲートウェイ（`/storage/s3`・streaming）を単一 lifespan で束ねる。
-- **CI**: GitHub Actions で `make check`。**テスト軽重分離**＝`make test`（fast・`-m "not slow"`）/`make test-all`（全部）。
+- **CI**: GitHub Actions で `make check`（`ci.yml`）。**テスト軽重分離**＝`make test`（fast・`-m "not slow"`）/`make test-all`（全部）。
+- **Docs サイト（GitHub Pages・2026-06-25）**: `pages.yml` で MkDocs Material をビルド＝`make docs`（先に `make conformance-docs`
+  で spec 再生成 → `mkdocs build --strict`）。PR はビルド検証のみ・**main push のみ公式 Actions（upload-pages-artifact/
+  deploy-pages）で実公開**。`index.md` は snippets で README を取り込む単一ソース。docs 依存は `docs` group（mkdocs-material）。
+  **要手動: Settings → Pages → Source = GitHub Actions を有効化**（初回のみ・ユーザー作業）。
   直近 fast = **113 passed, 12 deselected**。実 backend E2E（NATS / S3 path-style）検証済（`make e2e-up`）。
 
 ## 残作業（What's left）— バックログ
@@ -43,7 +47,6 @@
 | M015 | logging（操作・リトライ可視化） | 低 | 観測性なし |
 | M021残 | S3 ゲートウェイ 残 | normal | S1/S2（GET/PUT/HEAD/DELETE/ListObjectsV2 + Multipart）実装済。残＝S3 passthrough（`SupportsPresign`+redirect/proxy）/ S4 SeaweedFS 実機 backend 疎通 / ListObjectsV2 continuation token ページング。設計 `plans/m021-s3-gateway-plan.md` |
 | M022b | conformance の run_middle/heavy/full ＋ spec（file/kv 寄り）検出・特性表・リプレイ | low | P1 存在チェック＋P2 run_light 完了。`tester.spec={"leaning":None}` は placeholder。実 backend（S3/NATS）適用も |
-| M034 | conformance 結果を docs に spec 表出力＋Makefile キック | normal | 各実装のメソッド×Implemented/Not を `docs/{file_storage,kv}_spec.md` に。M022b/M031 と統合が自然 |
 | M027b残 | FileStore=KVS+IO 波及（Sync 残） | low | S3/NATS/HTTP/Local＋`SafeFileStore` 完了（Safe は M032 で `SafeKeyValueStore` 継承＝KVS 面も検証付き委譲に）。残＝`SyncFileStore` Protocol 鏡映＋`AsyncToSyncFileStore` ブリッジのみ |
 | M025残 | 名前空間再編 フェーズ2/3 | normal | フェーズ1（移設）＋addressing 再設計 完了。残＝フェーズ2 `kv/json`（JSON 検証）/ フェーズ3 `storage/manystore`（range/chunked streaming）。設計 `plans/m025-namespace-restructure-plan.md` |
 | M026 | stream インターフェース（第3の族・新コア IF） | 相談 | kv/storage の他に **stream**＝無境界チャネル（append/follow＝tail/subscribe）。FileStore で表せない＝新コア IF `StreamStore`。MVP=byte stream。最小・汎用と緊張するので **doc-first 合意必須**。詳細 `interrupt/archive/2026-06-23-stream-interface.md` |
@@ -69,7 +72,10 @@
   get_or_raise primitive 化を client/service へ波及（`KeyValueStoreBase` を ABC 化）。
 - **M028**: HTTP の context を `ArrayKeyValueStore` バックに（mount で振り分け・横断列挙を委譲）。`plans/` から削除済。
 - **M030**: prefix を `SupportsPrefixListing` capability に移設（直後 M036 で fail-loud 化＝暗黙フォールバック撤去・`scan_prefix` 明示 opt-in）。
-- **M031**: `conformance.py`→`conformancer/`（ユーザー IDE refactor）。残＝内部分割の整理（M034 と統合）。
+- **M031**: `conformance.py`→`conformancer/`（ユーザー IDE refactor）。残＝内部分割の整理。
+- **M034（2026-06-25・完了）**: conformancer に CLI 入口 `python -m manystore.tools.conformancer`（`__main__.py`）を新設。
+  メソッド存在チェック（接続不要・決定的）で各実装 × メソッドの Implemented/Not を `docs/kv_spec.md` /
+  `docs/file_storage_spec.md` へ生成。`make conformance-docs` でキック。挙動ベースの spec 検出は M022b に残置。
 - **M035**: 実装を `manystore/stores/` へ分類（base/array/safe/sync_bridge）＋`conformancer/`。完了 plan 削除。
 - **M037**: テスト軽重分離（`@pytest.mark.slow`・`make test`/`test-all`）＋未整備依存の早期 skip。fast ~0.65s。
 - **protocols.py 集約（2026-06-25）**: `stores/base.py` 削除＋既定実装を protocols.py へ全面集約（詳細は systemPatterns）。

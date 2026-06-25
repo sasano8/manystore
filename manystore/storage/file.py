@@ -5,7 +5,6 @@
 トップ `manystore` からも再エクスポートする。
 """
 
-from .connect import ConnectPolicy, connecting
 from ..protocols import (
     AsyncFileObject,
     AsyncFileStore,
@@ -25,6 +24,7 @@ from .backends import (
     S3FileStore,
     create_file_store,
 )
+from .connect import ConnectPolicy, connecting
 from .surfaces.safe import SafeFileStore, UnsafePathError, validate_safe_path
 
 __all__ = [

@@ -1,0 +1,47 @@
+site_name: manystore
+site_description: 差し替え可能なバックエンド（local / S3 / NATS / HTTP）を共通 IF の背後に隠すストレージ抽象ライブラリ。
+site_url: https://sasano8.github.io/manystore/
+repo_url: https://github.com/sasano8/manystore
+repo_name: sasano8/manystore
+docs_dir: docs
+
+theme:
+  name: material
+  language: ja
+  features:
+    - navigation.sections
+    - navigation.top
+    - content.code.copy
+    - search.suggest
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      toggle:
+        icon: material/weather-night
+        name: ダークモードへ
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      toggle:
+        icon: material/weather-sunny
+        name: ライトモードへ
+
+nav:
+  - はじめに: index.md
+  - アーキテクチャ: architecture.md
+  - Conformance spec:
+      - KeyValueStore: kv_spec.md
+      - FileStore: file_storage_spec.md
+
+markdown_extensions:
+  - admonition
+  - toc:
+      permalink: true
+  - pymdownx.highlight
+  - pymdownx.superfences
+  # index.md から repo ルートの README.md を取り込む（README を単一ソースに保つ）。
+  - pymdownx.snippets:
+      base_path: ["."]
+      check_paths: true
+
+plugins:
+  - search

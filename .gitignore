@@ -18,6 +18,9 @@ dist/
 # 開発用の使い捨てストレージ（manystore-ui の dev デフォルト先など。commit しない）
 .cache/
 
+# MkDocs のビルド成果物（`make docs`。CI が Pages へ公開する。commit しない）
+site/
+
 # OS / editor
 .DS_Store
 
