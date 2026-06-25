@@ -8,14 +8,14 @@ from pathlib import Path
 
 import pytest
 
-from manystore.backends import LocalKeyValueStore
-from manystore.implement.config import parse_config
-from manystore.implement.service import (
+from manystore.serving.services.config import parse_config
+from manystore.serving.services.service import (
     ContextNotFound,
     ReadOnlyContext,
     StorageService,
 )
-from manystore.implement.watcher import PollingWatcher
+from manystore.serving.services.watcher import PollingWatcher
+from manystore.storage.backends import LocalKeyValueStore
 
 
 def _config(tmp_path: Path) -> object:
@@ -77,6 +77,35 @@ async def test_service_crud_and_featured(tmp_path: Path) -> None:
         await service.aclose()
 
 
+async def test_contexts_are_isolated_first_segment(tmp_path: Path) -> None:
+    # context = ArrayStorage の第一階層。同じ key を別 context に入れても混ざらず、
+    # list_entries は対象 context だけを切り出す（routing は ArrayStorage 委譲）。
+    cfg = parse_config(
+        {
+            "contexts": {
+                "a": {"backend": "local", "root": str(tmp_path / "a")},
+                "b": {"backend": "local", "root": str(tmp_path / "b")},
+            }
+        }
+    )
+    service = StorageService(cfg)
+    await service.connect()
+    try:
+        await service.put("a", "k.txt", b"AA")
+        await service.put("b", "k.txt", b"BB")
+        assert await service.get("a", "k.txt") == b"AA"
+        assert await service.get("b", "k.txt") == b"BB"
+        # 各 context の一覧は自分の key だけ（他 context は混ざらない）。
+        assert [e.key for e in await service.list_entries("a")] == ["k.txt"]
+        assert [e.key for e in await service.list_entries("b")] == ["k.txt"]
+        # 一方を消しても他方は残る。
+        await service.delete("a", "k.txt")
+        assert await service.get("a", "k.txt") is None
+        assert await service.get("b", "k.txt") == b"BB"
+    finally:
+        await service.aclose()
+
+
 async def test_service_readonly_and_unknown_context(tmp_path: Path) -> None:
     service = StorageService(_config(tmp_path))
     await service.connect()
@@ -89,6 +118,7 @@ async def test_service_readonly_and_unknown_context(tmp_path: Path) -> None:
         await service.aclose()
 
 
+@pytest.mark.slow  # ポーリング検知を asyncio.sleep で待つ＝待ち支配（R13）
 async def test_polling_watcher_detects_changes(tmp_path: Path) -> None:
     store = LocalKeyValueStore(tmp_path)
     watcher = PollingWatcher(store, "work", interval=0.05)

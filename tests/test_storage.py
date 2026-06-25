@@ -15,21 +15,30 @@ from manystore import (
     ArrayKeyValueStore,
     AsyncToSyncKeyValueStore,
     ConnectPolicy,
+    DictFileStore,
+    DictKeyValueStore,
     DownloadCache,
     HttpFileStore,
     HttpKeyValueStore,
     KeyValueFileStore,
+    KeyValueFromFileStore,
     LocalFileStore,
     LocalKeyValueStore,
     NatsFileStore,
     NatsObjectKeyValueStore,
     S3FileStore,
+    S3KeyValueStore,
     SafeFileStore,
     SafeKeyValueStore,
+    SupportsPrefixListing,
     UnsafePathError,
     connect_key_value_store,
     connecting,
+    create_file_store,
     create_key_value_store,
+    iter_prefix,
+    open_async_file_store,
+    open_async_key_value_store,
     validate_safe_path,
 )
 
@@ -44,8 +53,8 @@ def test_async_to_sync_kvs_roundtrip(tmp_path: Path) -> None:
         assert store.get("missing.txt") is None
         store.put("b.txt", b"x")
         # iter は async ジェネレータを同期イテレータとして流す（名前降順）。
-        assert [i["filename"] for i in store.iter()] == ["b.txt", "a.txt"]
-        assert [i["filename"] for i in store.list(limit=1)] == ["b.txt"]
+        assert [i["filename"] for i in store.iter_all()] == ["b.txt", "a.txt"]
+        assert [i["filename"] for i in store.list_all(limit=1)] == ["b.txt"]
         store.delete("a.txt")
         assert store.exists("a.txt") is False
 
@@ -83,10 +92,10 @@ def test_local_kvs_iter_and_list(tmp_path: Path) -> None:
         for name in ("a", "b", "c"):
             await store.put(name, name.encode())
         # iter は全件を名前降順で yield する。
-        names = [info["filename"] async for info in store.iter()]
+        names = [info["filename"] async for info in store.iter_all()]
         assert names == ["c", "b", "a"]
         # list は iter の先頭 limit 件。
-        assert [i["filename"] for i in await store.list(limit=2)] == ["c", "b"]
+        assert [i["filename"] for i in await store.list_all(limit=2)] == ["c", "b"]
 
     asyncio.run(scenario())
 
@@ -205,7 +214,7 @@ def test_local_kvs_iter_is_recursive(tmp_path: Path) -> None:
         await store.put("top.txt", b"1")
         await store.put("a/b/c.bin", b"2")
         # iter はサブディレクトリ配下のキーも相対 posix パスで列挙する。
-        names = [info["filename"] async for info in store.iter()]
+        names = [info["filename"] async for info in store.iter_all()]
         assert names == ["top.txt", "a/b/c.bin"]  # 名前降順
 
     asyncio.run(scenario())
@@ -224,6 +233,102 @@ def test_key_value_file_store_open_over_kvs(tmp_path: Path) -> None:
         # 無いキーの読み取りは FileNotFoundError。
         with pytest.raises(FileNotFoundError):
             await fs.open_reader("missing")
+
+    asyncio.run(scenario())
+
+
+def test_kvs_get_default_and_get_or_raise(tmp_path: Path) -> None:
+    # get は欠損時にデフォルト値（既定 None）を返し、get_or_raise は FileNotFoundError を上げる。
+    store = LocalKeyValueStore(tmp_path)
+
+    async def scenario() -> None:
+        # 欠損キー
+        assert await store.get("missing") is None  # 既定デフォルト
+        assert await store.get("missing", b"fallback") == b"fallback"  # 明示デフォルト
+        with pytest.raises(FileNotFoundError):
+            await store.get_or_raise("missing")
+        # 存在キーは default を無視して実値を返す（get / get_or_raise とも）。
+        await store.put("k", b"v")
+        assert await store.get("k", b"fallback") == b"v"
+        assert await store.get_or_raise("k") == b"v"
+
+    asyncio.run(scenario())
+
+
+def test_local_file_store_is_full_kvs(tmp_path: Path) -> None:
+    # FileStore = KeyValueStore + IO。LocalFileStore は IO を持ちつつ KVS としても完全に働く。
+    fs = LocalFileStore(tmp_path)
+
+    async def scenario() -> None:
+        # KVS 面: put / get(default) / get_or_raise / iter
+        await fs.put("a/b.bin", b"hello")
+        assert await fs.get("a/b.bin") == b"hello"
+        assert await fs.get("missing") is None
+        assert await fs.get("missing", b"def") == b"def"
+        with pytest.raises(FileNotFoundError):
+            await fs.get_or_raise("missing")
+        assert [i["filename"] async for i in fs.iter_all()] == ["a/b.bin"]
+        # IO 面: open_reader でも同じ真実が読める
+        async with await fs.open_reader("a/b.bin") as r:
+            assert await r.read() == b"hello"
+
+    asyncio.run(scenario())
+
+
+def test_key_value_file_store_is_full_file_store(tmp_path: Path) -> None:
+    # KVS→FileStore は IO の埋め合わせ＝KVS 面は委譲しつつ open_reader/open_writer を合成。
+    fs = KeyValueFileStore(LocalKeyValueStore(tmp_path))
+
+    async def scenario() -> None:
+        # IO 面（合成）
+        async with await fs.open_writer("k.bin") as w:
+            await w.write(b"xyz")
+        async with await fs.open_reader("k.bin") as r:
+            assert await r.read() == b"xyz"
+        # KVS 面（下層へ委譲）も使える＝完全な FileStore
+        assert await fs.get_or_raise("k.bin") == b"xyz"
+        assert await fs.get("missing", b"d") == b"d"
+        assert [i["filename"] async for i in fs.iter_all()] == ["k.bin"]
+        # 欠損キーの open_reader は FileNotFoundError（get_or_raise 経由）
+        with pytest.raises(FileNotFoundError):
+            await fs.open_reader("missing")
+
+    asyncio.run(scenario())
+
+
+def test_key_value_from_file_store_derives_kvs(tmp_path: Path) -> None:
+    # FileStore を KVS として被せる逆向きアダプタ（IO を落とすだけ・残りは下層へ委譲）。
+    kv = KeyValueFromFileStore(LocalFileStore(tmp_path))
+
+    async def scenario() -> None:
+        await kv.put("a/b.bin", b"hello")  # 親ディレクトリは下層 writer が作る
+        assert await kv.get("a/b.bin") == b"hello"
+        assert await kv.get("missing") is None  # 欠損キーは None（KVS 規約）
+        assert await kv.exists("a/b.bin") is True
+        names = [info["filename"] async for info in kv.iter_all()]
+        assert names == ["a/b.bin"]
+        await kv.cp("a/b.bin", "c.bin")
+        assert await kv.get("c.bin") == b"hello"
+        await kv.mv("c.bin", "d.bin")
+        assert await kv.exists("c.bin") is False
+        assert await kv.get("d.bin") == b"hello"
+        await kv.delete("a/b.bin")
+        assert await kv.exists("a/b.bin") is False
+
+    asyncio.run(scenario())
+
+
+def test_local_kvs_is_thin_view_over_file_store(tmp_path: Path) -> None:
+    # LocalKeyValueStore は LocalFileStore を被せた薄い KVS ビュー（実装は FileStore 側に集約）。
+    store = LocalKeyValueStore(tmp_path)
+    assert isinstance(store, KeyValueFromFileStore)
+
+    async def scenario() -> None:
+        # KVS 経由の put は、同じ dir の FileStore から open_reader でも読める（同一の真実）。
+        await store.put("shared.bin", b"xyz")
+        fs = LocalFileStore(tmp_path)
+        async with await fs.open_reader("shared.bin") as f:
+            assert await f.read() == b"xyz"
 
     asyncio.run(scenario())
 
@@ -269,14 +374,33 @@ class _FakeBody:
     def close(self) -> None:
         self._buf.close()
 
+    async def __aenter__(self) -> _FakeBody:
+        return self
+
+    async def __aexit__(self, *exc: object) -> None:
+        self._buf.close()
+
 
 class _FakeS3:
     """S3FileStore を駆動する最小のインメモリ fake（async client 兼 context manager）。"""
+
+    class exceptions:  # noqa: N801  aiobotocore の client.exceptions.NoSuchKey 形に合わせる
+        class NoSuchKey(Exception): ...
 
     def __init__(self) -> None:
         self.objects: dict[str, bytes] = {}
         self._uploads: dict[str, dict] = {}
         self._uid = 0
+        self.head_error_code: str | None = None  # set して head_object のエラー Code を差し替える
+
+    async def head_object(self, Bucket: str, Key: str) -> dict:
+        from botocore.exceptions import ClientError
+
+        if self.head_error_code is not None:  # fail-loud 検証用（404 以外のエラー）
+            raise ClientError({"Error": {"Code": self.head_error_code}}, "HeadObject")
+        if Key not in self.objects:
+            raise ClientError({"Error": {"Code": "404"}}, "HeadObject")  # 実 client と同形
+        return {"ContentLength": len(self.objects[Key])}
 
     async def __aenter__(self) -> _FakeS3:
         return self
@@ -305,7 +429,31 @@ class _FakeS3:
         return {}
 
     async def get_object(self, Bucket, Key) -> dict:
+        if Key not in self.objects:
+            raise self.exceptions.NoSuchKey  # 欠損は NoSuchKey（実 client と同形）
         return {"Body": _FakeBody(self.objects[Key])}
+
+    def get_paginator(self, name: str) -> _FakeS3Paginator:
+        assert name == "list_objects_v2"
+        return _FakeS3Paginator(self)
+
+
+class _FakeS3Paginator:
+    """`list_objects_v2` のページャ fake。`Prefix=` をサーバ側で効かせる（実 S3 と同形）。"""
+
+    def __init__(self, fake: _FakeS3) -> None:
+        self._fake = fake
+
+    async def _pages(self, Bucket: str, Prefix: str = ""):
+        contents = [
+            {"Key": k, "Size": len(v)}
+            for k, v in self._fake.objects.items()
+            if k.startswith(Prefix)  # サーバ側 prefix 絞り
+        ]
+        yield {"Contents": contents}
+
+    def paginate(self, Bucket: str, Prefix: str = ""):
+        return self._pages(Bucket, Prefix)
 
 
 def test_s3_file_store_streams_multipart_write_and_read() -> None:
@@ -331,6 +479,43 @@ def test_s3_file_store_streams_multipart_write_and_read() -> None:
         async with await store.open_writer("empty") as f:
             pass
         assert fake.objects["empty"] == b""
+
+    asyncio.run(scenario())
+
+
+def test_s3_file_store_is_full_kvs() -> None:
+    # S3FileStore = S3KeyValueStore + streaming IO。KVS 面（whole get/put）も持つ完全 FileStore。
+    fake = _FakeS3()
+    store = S3FileStore("bucket")
+    store._session = lambda: fake
+
+    async def scenario() -> None:
+        await store.put("kv", b"data")  # 継承 put＝put_object（whole）
+        assert fake.objects["kv"] == b"data"
+        assert await store.get("kv") == b"data"  # 継承 get（whole get_object）
+        assert await store.get_or_raise("kv") == b"data"
+        assert await store.get("missing") is None  # 欠損は default
+        assert await store.get("missing", b"d") == b"d"
+        with pytest.raises(FileNotFoundError):
+            await store.get_or_raise("missing")
+        assert await store.exists("kv") is True  # head_object 200
+        assert await store.exists("missing") is False  # head_object 404
+
+    asyncio.run(scenario())
+
+
+def test_s3_exists_propagates_non_404() -> None:
+    # fail-loud: 404/NoSuchKey/NotFound 以外（認証・5xx・接続断）は握り潰さず伝播する。
+    from botocore.exceptions import ClientError
+
+    fake = _FakeS3()
+    fake.head_error_code = "500"
+    store = S3KeyValueStore("bucket")
+    store._session = lambda: fake
+
+    async def scenario() -> None:
+        with pytest.raises(ClientError):
+            await store.exists("k")
 
     asyncio.run(scenario())
 
@@ -361,19 +546,28 @@ class _FakeNatsObs:
 
     async def get(self, name: str, writeinto=None, show_deleted=False) -> _FakeObjResult:
         if name not in self.objects:
-            raise KeyError(name)  # ObjectNotFound 相当
+            from nats.js.errors import ObjectNotFoundError
+
+            raise ObjectNotFoundError  # 実 nats-py と同形（欠損）
         return _FakeObjResult(self.objects[name])
 
     async def get_info(self, name: str, show_deleted=False) -> _FakeObjInfo:
         if name not in self.objects:
-            raise KeyError(name)
+            from nats.js.errors import ObjectNotFoundError
+
+            raise ObjectNotFoundError
         return _FakeObjInfo(name, len(self.objects[name]))
 
     async def delete(self, name: str) -> None:
         self.objects.pop(name, None)
 
     async def list(self, ignore_deletes=False) -> list[_FakeObjInfo]:
-        return [_FakeObjInfo(n, len(v)) for n, v in self.objects.items()]
+        infos = [_FakeObjInfo(n, len(v)) for n, v in self.objects.items()]
+        if not infos:
+            from nats.js.errors import NotFoundError
+
+            raise NotFoundError  # 実 nats-py は空ストアで NotFoundError を上げる
+        return infos
 
 
 def _patch_obs(store, fake: _FakeNatsObs) -> None:
@@ -409,6 +603,26 @@ def test_nats_file_store_buffered_read_write() -> None:
     asyncio.run(scenario())
 
 
+def test_nats_file_store_is_full_kvs() -> None:
+    # NatsFileStore = NatsObjectKeyValueStore + buffer 合成 IO。KVS 面も使える完全な FileStore。
+    store = NatsFileStore("nats://x", "bucket")
+    fake = _FakeNatsObs()
+    _patch_obs(store, fake)
+
+    async def scenario() -> None:
+        await store.put("kv", b"data")  # 継承 put（whole）
+        assert fake.objects["kv"] == b"data"
+        assert await store.get("kv") == b"data"  # 継承 get（whole）
+        assert await store.get_or_raise("kv") == b"data"
+        assert await store.get("missing") is None
+        with pytest.raises(FileNotFoundError):
+            await store.get_or_raise("missing")
+        assert await store.exists("kv") is True
+        assert [i["filename"] async for i in store.iter_all()] == ["kv"]
+
+    asyncio.run(scenario())
+
+
 def test_nats_kvs_exists_uses_get_info() -> None:
     # exists は get_info を使う（ObjectStore に info は無い）。
     store = NatsObjectKeyValueStore("nats://x", "bucket")
@@ -419,6 +633,35 @@ def test_nats_kvs_exists_uses_get_info() -> None:
         assert await store.exists("k") is False
         await store.put("k", b"v")
         assert await store.exists("k") is True
+
+    asyncio.run(scenario())
+
+
+def test_nats_iter_all_empty_is_not_error() -> None:
+    # 空ストアは list() が NotFoundError を上げるが iter_all は [] 扱い（エラーにしない）。
+    store = NatsObjectKeyValueStore("nats://x", "bucket")
+    _patch_obs(store, _FakeNatsObs())
+
+    async def scenario() -> None:
+        assert [i async for i in store.iter_all()] == []
+
+    asyncio.run(scenario())
+
+
+def test_nats_iter_all_propagates_real_error() -> None:
+    # fail-loud: 空（NotFoundError）以外の障害（接続断など）は握り潰さず伝播する。
+    store = NatsObjectKeyValueStore("nats://x", "bucket")
+    fake = _FakeNatsObs()
+
+    async def boom(ignore_deletes: bool = False) -> list:
+        raise RuntimeError("connection lost")
+
+    fake.list = boom
+    _patch_obs(store, fake)
+
+    async def scenario() -> None:
+        with pytest.raises(RuntimeError):
+            [i async for i in store.iter_all()]
 
     asyncio.run(scenario())
 
@@ -679,7 +922,7 @@ def test_array_kvs_mount_and_route(tmp_path: Path) -> None:
         assert await arr.exists("nope") is False
         assert arr.mounts() == ["docs", "imgs"]
         # iter は論理名を prefix して全 backend を横断する。
-        names = sorted([i["filename"] async for i in arr.iter()])
+        names = sorted([i["filename"] async for i in arr.iter_all()])
         assert names == ["docs/a.txt", "imgs/p/q.bin"]
         # 未知 mount / 形式不正はエラー。
         with pytest.raises(KeyError):
@@ -788,6 +1031,34 @@ def test_http_kvs_get_and_exists() -> None:
     asyncio.run(scenario())
 
 
+def test_http_file_store_is_full_read_only_kvs() -> None:
+    # HttpFileStore = HttpKeyValueStore + read IO。KVS 面（read-only）も持つ完全な FileStore。
+    objects = {"a.txt": b"hello"}
+    store = HttpFileStore(base_url=_HTTP_BASE)
+    store._client = lambda: _FakeHttpClient(objects, _HTTP_BASE)
+
+    async def scenario() -> None:
+        # read IO（whole get の buffer 合成）
+        async with await store.open_reader("a.txt") as f:
+            assert await f.read() == b"hello"
+        with pytest.raises(FileNotFoundError):
+            await store.open_reader("missing")
+        # KVS 面（継承）も使える
+        assert await store.get("a.txt") == b"hello"
+        assert await store.get("missing", b"d") == b"d"
+        assert await store.exists("a.txt") is True
+        # write 系は read-only ＝ io.UnsupportedOperation（型上は存在するが実行時に拒否）
+        for call in (
+            store.put("x", b"v"),
+            store.delete("x"),
+            store.open_writer("x"),
+        ):
+            with pytest.raises(io.UnsupportedOperation):
+                await call
+
+    asyncio.run(scenario())
+
+
 def test_http_kvs_is_read_only() -> None:
     store = HttpKeyValueStore(base_url=_HTTP_BASE)
 
@@ -801,9 +1072,9 @@ def test_http_kvs_is_read_only() -> None:
         with pytest.raises(io.UnsupportedOperation):
             await store.mv("a", "b")
         with pytest.raises(io.UnsupportedOperation):
-            await store.list()
+            await store.list_all()
         with pytest.raises(io.UnsupportedOperation):
-            async for _ in store.iter():
+            async for _ in store.iter_all():
                 pass
 
     asyncio.run(scenario())
@@ -833,3 +1104,200 @@ def test_create_key_value_store_http_wiring() -> None:
     assert isinstance(store, HttpKeyValueStore)
     assert store._base_url == _HTTP_BASE
     assert store._headers == {"Authorization": "Bearer t"}
+
+
+# ── M030: prefix を optional capability に移設（SupportsPrefixListing + iter_prefix ヘルパ） ──
+
+
+class _PrefixRecorder:
+    """ネイティブ `iter_prefix` を持つ最小ストア。呼ばれた prefix / iter_all 使用を記録する。"""
+
+    def __init__(self, keys: dict[str, int]) -> None:
+        self._keys = dict(keys)  # filename -> size
+        self.prefix_calls: list[str] = []
+        self.iter_all_used = False
+
+    async def connect(self) -> None: ...
+
+    async def aclose(self) -> None: ...
+
+    async def iter_prefix(self, prefix: str):
+        self.prefix_calls.append(prefix)
+        for k, size in sorted(self._keys.items(), reverse=True):  # 既存 iter_all と同じ降順
+            if k.startswith(prefix):
+                yield {"filename": k, "size": size}
+
+    async def iter_all(self):
+        self.iter_all_used = True
+        for k, size in sorted(self._keys.items(), reverse=True):
+            yield {"filename": k, "size": size}
+
+
+def test_dict_store_supports_prefix_via_explicit_scan() -> None:
+    # サーバ側 prefix を持たない backend（Dict）は scan_prefix で **明示的に** capability を支える
+    # （暗黙フォールバックではなく、自身が SupportsPrefixListing として宣言する）。
+    store = DictKeyValueStore()
+    assert isinstance(store, SupportsPrefixListing)
+
+    async def scenario() -> None:
+        await store.put("a/1", b"x")
+        await store.put("a/2", b"yy")
+        await store.put("b/1", b"zzz")
+        got = sorted([i["filename"] async for i in iter_prefix(store, "a/")])
+        assert got == ["a/1", "a/2"]  # b/1 は除外
+        empty = sorted([i["filename"] async for i in iter_prefix(store, "")])
+        assert empty == ["a/1", "a/2", "b/1"]  # 空 prefix = 全件
+
+    asyncio.run(scenario())
+
+
+def test_iter_prefix_dispatch_fails_loud_without_capability() -> None:
+    # capability（iter_prefix）を持たない store は **暗黙フォールバックせず即 NotImplementedError**
+    # ＝「prefix 非対応」という事実を隠さない（fail-loud）。
+    class _NoPrefixStore:
+        async def iter_all(self):
+            yield {"filename": "a", "size": 1}
+
+    store = _NoPrefixStore()
+    assert not isinstance(store, SupportsPrefixListing)
+    with pytest.raises(NotImplementedError):
+        iter_prefix(store, "a")  # 呼び出し時点で即座に失敗（イテレーション前）
+
+
+def test_iter_prefix_helper_uses_native_capability() -> None:
+    # ネイティブを持つ store はヘルパがそれに委譲し、iter_all 総なめに落ちない。
+    rec = _PrefixRecorder({"a/1": 1, "a/2": 2, "b/1": 3})
+    assert isinstance(rec, SupportsPrefixListing)
+
+    async def scenario() -> None:
+        got = [i["filename"] async for i in iter_prefix(rec, "a/")]
+        assert got == ["a/2", "a/1"]  # ネイティブ（降順）
+        assert rec.prefix_calls == ["a/"]  # サーバ側 prefix が渡る
+        assert rec.iter_all_used is False  # 総なめしていない
+
+    asyncio.run(scenario())
+
+
+def test_safe_store_iter_prefix_validates_then_delegates_native() -> None:
+    rec = _PrefixRecorder({"ok/1": 1, "ok/2": 2, "no/1": 3})
+    safe = SafeKeyValueStore(rec)
+
+    async def scenario() -> None:
+        got = [i["filename"] async for i in safe.iter_prefix("ok/")]
+        assert got == ["ok/2", "ok/1"]
+        assert rec.prefix_calls == ["ok/"]  # 検証後にネイティブへ委譲
+        assert rec.iter_all_used is False
+        # 不正な prefix は委譲前に弾く（traversal）。
+        with pytest.raises(UnsafePathError):
+            async for _ in safe.iter_prefix("../etc"):
+                pass
+        # 空 prefix は「全件」＝検証を飛ばす（validate_safe_path は空を弾くため）。
+        allk = [i["filename"] async for i in safe.iter_prefix("")]
+        assert allk == ["ok/2", "ok/1", "no/1"]
+
+    asyncio.run(scenario())
+
+
+def test_array_store_iter_prefix_routes_to_single_mount() -> None:
+    m1 = _PrefixRecorder({"x/1": 1, "y/2": 2})
+    m2 = _PrefixRecorder({"x/9": 9})
+    arr = ArrayKeyValueStore()
+
+    async def scenario() -> None:
+        await arr.mount("m1", m1)
+        await arr.mount("m2", m2)
+        # `<mount>/<subprefix>` は単一 mount へ振り分け subprefix を委譲（他 mount は触らない）。
+        got = [i["filename"] async for i in arr.iter_prefix("m1/x/")]
+        assert got == ["m1/x/1"]  # m1 の x/* のみ・mount 名で再前置
+        assert m1.prefix_calls == ["x/"]
+        assert m2.prefix_calls == []  # m2 は走査されない
+        assert m2.iter_all_used is False
+        # `/` 無しの prefix は（部分）mount 名一致＝該当 mount を丸ごと列挙する。
+        whole = sorted([i["filename"] async for i in arr.iter_prefix("m1")])
+        assert whole == ["m1/x/1", "m1/y/2"]
+        # 無い mount は空。
+        assert [i async for i in arr.iter_prefix("zzz/a")] == []
+
+    asyncio.run(scenario())
+
+
+def test_s3_iter_prefix_filters_server_side_and_iter_all_unchanged() -> None:
+    fake = _FakeS3()
+    store = S3KeyValueStore("bucket")
+    store._session = lambda: fake  # 接続を fake に差し替え
+
+    async def scenario() -> None:
+        await store.put("a/1", b"x")
+        await store.put("a/2", b"yy")
+        await store.put("b/1", b"zzz")
+        assert isinstance(store, SupportsPrefixListing)
+        # ネイティブ prefix 絞り（サーバ側 list_objects_v2(Prefix=…)）・降順は不変。
+        got = [i["filename"] async for i in store.iter_prefix("a/")]
+        assert got == ["a/2", "a/1"]
+        # iter_all は iter_prefix("") と等価（全件・降順）。
+        allk = [i["filename"] async for i in store.iter_all()]
+        assert allk == ["b/1", "a/2", "a/1"]
+        # 汎用ヘルパ越しでもネイティブを通る。
+        via = [i["filename"] async for i in iter_prefix(store, "a/")]
+        assert via == ["a/2", "a/1"]
+
+    asyncio.run(scenario())
+
+
+# ── 安全な入口（ライブラリの顔）＝open_async_* / create_file_store（M032） ──
+
+
+def test_open_async_key_value_store_is_safe_and_connected(tmp_path: Path) -> None:
+    # 顔: async with で Safe 包装＋接続済みの KVS を得る（生 backend を直接触らせない）。
+    async def scenario() -> None:
+        async with open_async_key_value_store("local", local_dir=tmp_path) as store:
+            assert isinstance(store, SafeKeyValueStore)  # Safe 包装は必須
+            await store.put("a/b.txt", b"hi")
+            assert await store.get("a/b.txt") == b"hi"
+            with pytest.raises(UnsafePathError):
+                await store.put("../escape", b"x")  # パストラバーサルは弾く
+
+    asyncio.run(scenario())
+
+
+def test_open_async_file_store_is_safe_full_filestore(tmp_path: Path) -> None:
+    # 顔: Safe 包装＋接続済みの完全な FileStore（= KVS + IO）。
+    async def scenario() -> None:
+        async with open_async_file_store("local", local_dir=tmp_path) as fs:
+            assert isinstance(fs, SafeFileStore)
+            # IO 面（filename 検証付き）
+            async with await fs.open_writer("k/v.bin") as w:
+                await w.write(b"data")
+            async with await fs.open_reader("k/v.bin") as r:
+                assert await r.read() == b"data"
+            # KVS 面も使える（FileStore = KVS + IO）＋キー検証
+            assert await fs.get("k/v.bin") == b"data"
+            assert await fs.exists("k/v.bin") is True
+            with pytest.raises(UnsafePathError):
+                await fs.open_reader("../escape")
+            with pytest.raises(UnsafePathError):
+                await fs.delete("../escape")  # KVS 面も検証付き
+
+    asyncio.run(scenario())
+
+
+def test_open_async_uses_memory_backend_without_connect() -> None:
+    # memory は接続不要・揮発。顔から開いても Safe 包装される。
+    async def scenario() -> None:
+        async with open_async_key_value_store("memory") as store:
+            assert isinstance(store, SafeKeyValueStore)
+            await store.put("k", b"v")
+            assert await store.get("k") == b"v"
+
+    asyncio.run(scenario())
+
+
+def test_create_file_store_maps_backends(tmp_path: Path) -> None:
+    # FileStore 版ファクトリ（生・未包装）。backend→FileStore のマッピング。
+    assert isinstance(create_file_store("memory"), DictFileStore)
+    assert isinstance(create_file_store("local", local_dir=tmp_path), LocalFileStore)
+    assert isinstance(create_file_store("http", http_base_url="http://x"), HttpFileStore)
+    with pytest.raises(ValueError):
+        create_file_store("nope")
+    with pytest.raises(ValueError):
+        create_file_store("local")  # local_dir 必須

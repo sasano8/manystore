@@ -1,5 +1,5 @@
 # manystore storage UI のサンプル設定。
-# 起動: uv run python -m manystore.server --config examples/manystore-ui.toml
+# 起動: uv run python -m manystore.serving.server --config examples/manystore-ui.toml
 # （`pip install "manystore[server]"` で server extra を入れておく）
 
 # UI が既定で開く context（任意）。
@@ -25,7 +25,7 @@ root = ".work"
 # UI 本体は interrupt を特別扱いしない。config が「重点パス」を pin/quick_write するだけ。
 [[views.featured]]
 context = "work"
-path = "skills/memory-bank/interrupt"
+path = "skills/flow-memory-bank/interrupt"
 label = "Interrupt"
 pin = true          # サイドバー上部に固定
 quick_write = true  # その場で新規テキストを作成（タイムスタンプ名の雛形を用意）

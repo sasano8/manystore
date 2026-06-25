@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>manystore storage UI</title>
+    <link rel="stylesheet" href="/style.css" />
+  </head>
+  <body>
+    <header>
+      <strong>manystore</strong> storage UI
+      <span id="status" class="status"></span>
+    </header>
+    <div id="layout">
+      <aside id="sidebar">
+        <section id="featured-section">
+          <h2>Featured</h2>
+          <ul id="featured"></ul>
+        </section>
+        <section>
+          <h2>Contexts</h2>
+          <ul id="contexts"></ul>
+        </section>
+      </aside>
+      <main id="main">
+        <div id="toolbar">
+          <button id="copy-btn" title="現在のパスをコピー">📋</button>
+          <!-- パンくず（クリックで階層移動）。空きスペースをクリックすると生パス入力に変わる。 -->
+          <nav id="breadcrumb" title="クリックして生パスを編集 / 貼り付け"></nav>
+          <input id="path-input" hidden placeholder="生パス（例: notes/a.txt）/ 末尾 / でフォルダ" />
+          <button id="new-btn">新規</button>
+          <button id="save-btn">保存 (PUT)</button>
+          <button id="delete-btn">削除</button>
+          <button id="reload-btn">再読込</button>
+        </div>
+        <div id="body">
+          <ul id="keys"></ul>
+          <textarea id="viewer" placeholder="キーを選ぶと内容を表示します"></textarea>
+        </div>
+      </main>
+    </div>
+    <script src="/app.js"></script>
+  </body>
+</html>

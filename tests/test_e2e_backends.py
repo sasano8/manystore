@@ -61,6 +61,12 @@ def _s3_up() -> bool:
     return _reachable(S3_HOST, S3_PORT)
 
 
+def _s3_virtual_up() -> bool:
+    # virtual-host は `<bucket>.<host>` を解決できる DNS 環境でのみ成立。ローカルでは解決できず
+    # 本接続が TimeoutError まで待つ＝R13 アンチパターン。明示 opt-in（env）無しは即 skip。
+    return bool(os.environ.get("MANYSTORE_S3_VIRTUAL")) and _s3_up()
+
+
 def _nats_up() -> bool:
     return _reachable(NATS_HOST, NATS_PORT)
 
@@ -78,7 +84,7 @@ async def _crud_roundtrip(store) -> None:
     assert await store.get(key) == payload
     assert await store.exists(key) is True
 
-    names = [info["filename"] for info in await store.list(limit=100)]
+    names = [info["filename"] for info in await store.list_all(limit=100)]
     assert key in names
 
     dst = key + ".cp"
@@ -155,7 +161,7 @@ class _Case:
 CASES = [
     _Case("local", _open_local, _always, skip_on_error=False),
     _Case("nats", _open_nats, _nats_up, skip_on_error=True),
-    _Case("s3-virtual", _open_s3("virtual"), _s3_up, skip_on_error=True),
+    _Case("s3-virtual", _open_s3("virtual"), _s3_virtual_up, skip_on_error=True),
     _Case("s3-path", _open_s3("path"), _s3_up, skip_on_error=True),
 ]
 
@@ -165,7 +171,12 @@ async def _run(opener: Callable[[], object]) -> None:
         await _crud_roundtrip(store)
 
 
-@pytest.mark.parametrize("case", CASES, ids=[c.id for c in CASES])
+@pytest.mark.parametrize(
+    "case",
+    # 実 backend 待ちを伴うケース（nats/s3）は slow＝内ループ除外。local は待ち無しの
+    # 常時バグ検出ケースなので fast のまま残す（R13）。
+    [pytest.param(c, id=c.id, marks=[pytest.mark.slow] if c.skip_on_error else []) for c in CASES],
+)
 def test_backend_crud(case: _Case) -> None:
     """注入するストアだけ変えて、全 backend で同じ CRUD を回す。"""
     if not case.reachable():

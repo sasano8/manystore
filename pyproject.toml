@@ -3,13 +3,31 @@ name = "manystore"
 version = "0.0.1"
 description = "ストレージ抽象（local / nats / s3 バックエンド）。差し替え可能な backend を共通 IF の背後に隠す独立ライブラリ。"
 requires-python = ">=3.14"
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "sasano8", email = "y-sasahara@ys-method.com" }]
+keywords = ["storage", "object-storage", "s3", "nats", "key-value", "filestore", "async", "backend"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: Database",
+    "Topic :: System :: Filesystems",
+]
 # 実行依存（重い backend は各 backend のメソッド内で遅延 import する）。
 dependencies = [
-    "redis>=5.0.0",
     "nats-py>=2.0.0",
     "aiobotocore>=2.0.0",
     "httpx>=0.27.0",
 ]
+
+[project.urls]
+Homepage = "https://github.com/sasano8/manystore"
+Repository = "https://github.com/sasano8/manystore"
+Issues = "https://github.com/sasano8/manystore/issues"
 
 # UI/サーバ層は任意。`pip install manystore[server]` のときだけ重い依存が入る。
 # server/ 内では fastapi/uvicorn を遅延 import するので、未インストールでも本体は動く。
@@ -29,6 +47,10 @@ dev = [
     "fastapi>=0.110.0",
     "uvicorn>=0.29.0",
     "watchdog>=4.0.0",
+]
+# docs サイト（MkDocs Material）。`make docs` / CI の Pages ビルドでのみ使う（本体・テストと分離）。
+docs = [
+    "mkdocs-material>=9.5",
 ]
 
 [build-system]
@@ -50,3 +72,6 @@ testpaths = ["tests"]
 addopts = "-ra"
 # `async def test_*` を自動で非同期テストとして実行（マーカ不要）。既存の asyncio.run スタイルとも共存。
 asyncio_mode = "auto"
+# 軽重分離（R13）: 待ち支配（実 backend 起動・ネットワーク・sleep/ポーリング）のテストは `slow`。
+# 内ループ `make test` は `-m "not slow"` で除外、`make test-all` で全部走る。
+markers = ["slow: 実バックエンド/ネットワーク/ポーリング待ちを伴う重いテスト"]

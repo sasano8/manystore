@@ -6,7 +6,7 @@
 ## 特徴
 
 - **2 つのストア抽象**（名前空間で分離: `manystore.kv` / `manystore.file`。トップからも再エクスポート）
-  - `KeyValueStore`（`manystore.kv`）— `put` / `get` / `list` / `exists` / `delete` / `cp` / `mv`（バイト列をキーで出し入れ）
+  - `KeyValueStore`（`manystore.kv`）— `put` / `get` / `get_or_raise` / `list_all` / `exists` / `delete` / `cp` / `mv`（バイト列をキーで出し入れ）
   - `FileStore`（`manystore.file`）— `open_reader` / `open_writer` で `FileObject`（ストリーム・**バイナリ専用**）を取得
 - **backend を差し替えるだけ** — `Local` / `S3` / `NATS Object Store` / `HTTP`（read-only）。ラッパは 1 枚に留め、下で backend を入れ替える。
 - **async が一次実装**、sync ブリッジ（`AsyncToSyncKeyValueStore`）も提供。
@@ -35,7 +35,7 @@ async def main():
         await store.put("greeting.txt", b"hello")
         data = await store.get("greeting.txt")        # b"hello"
         print(await store.exists("greeting.txt"))     # True
-        print(await store.list(limit=10))             # [{"filename": "greeting.txt", "size": 5}]
+        print(await store.list_all(limit=10))         # [{"filename": "greeting.txt", "size": 5}]（全キー平坦）
         await store.cp("greeting.txt", "copy.txt")
         await store.delete("greeting.txt")
 
@@ -81,7 +81,7 @@ async with connect_key_value_store(
 ```
 
 > **HTTP backend は read-only**: `get` / `exists` と `FileStore.open_reader(...)` のみ。`put` / `delete` /
-> `cp` / `mv` / `list` / `iter` / `open_writer` は `io.UnsupportedOperation` を投げる。
+> `cp` / `mv` / `list_all` / `iter_all` / `open_writer` は `io.UnsupportedOperation` を投げる。
 
 接続を挟まず実体を直接作るなら `create_key_value_store(backend, **opts)` も使える。
 
@@ -122,12 +122,12 @@ await safe.put("../escape", b"...")   # UnsafePathError
 
 ```bash
 # 開発用ワンコマンド起動（既定ストレージ .cache/manystore_dev は使い捨て・自動作成）
-make ui                    # = uv run python -m manystore.server --config examples/manystore-ui.dev.toml
+make ui                    # = uv run python -m manystore.serving.server --config examples/manystore-ui.dev.toml
 make ui PORT=9000          # ポート変更
 
 # 自分の設定で起動する場合（配布利用時）
 pip install "manystore[server]"
-python -m manystore.server --config examples/manystore-ui.toml   # 既定 http://127.0.0.1:8000
+python -m manystore.serving.server --config examples/manystore-ui.toml   # 既定 http://127.0.0.1:8000
 ```
 
 ブラウザで `http://127.0.0.1:8000` を開く。`make ui` は開発用設定（`examples/manystore-ui.dev.toml`）で
@@ -144,7 +144,7 @@ root = ".work"
 
 [[views.featured]]         # UI が標準で重点表示するパス（pin / その場で新規作成）
 context = "work"
-path = "skills/memory-bank/interrupt"
+path = "skills/flow-memory-bank/interrupt"
 label = "Interrupt"
 pin = true
 quick_write = true
@@ -154,7 +154,7 @@ UI 本体は特定用途（interrupt 等）を知らず、config が「重点パ
 **汎用 UI のまま**任意のパスを手早く扱える。protocol（REST/WS）は `KeyValueStore` と 1:1 で対応し、
 `manystore.client.RemoteKeyValueStore` で 1 context をサーバ越しの `KeyValueStore` として扱える。
 
-- 構成: `manystore.implement`（backend 非依存の中核）/ `manystore.server`（FastAPI）/ `manystore.client`（SDK）。
+- 構成: `manystore.serving.services`（backend 非依存の中核）/ `manystore.serving.server`（FastAPI）/ `manystore.client`（SDK）。
 - 既定 bind は `127.0.0.1`。外部公開は `--host 0.0.0.0` を明示（フル CRUD を晒すため既定は自ホスト）。
 - 監視は MVP では polling（全 backend 対応）。inotify ベースは後続の最適化。
 
@@ -180,3 +180,7 @@ make check       # format 確認 + test（CI と同じ）
 - テストは **pytest**（S3 / NATS は in-memory fake で検証）。
 - CI は GitHub Actions（`.github/workflows/ci.yml`）で push / PR ごとに `make check`。
 - 実 backend（minio / 実 NATS）疎通は `docker-compose.yml` を起動して検証する。
+
+## ライセンス
+
+[MIT](LICENSE) © sasano8

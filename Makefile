@@ -3,6 +3,7 @@
 
 # ruff のピン留めバージョン（更新時はここだけ変える）
 RUFF_VERSION := 0.15.18
+PYLINT_VERSION := latest
 
 # lint/format/test の対象
 SRC := manystore tests
@@ -11,14 +12,14 @@ SRC := manystore tests
 E2E_S3_ACCESS_KEY := manystore
 E2E_S3_SECRET_KEY := manystoresecret123
 
-.PHONY: format format-check lint test check ui e2e-up e2e-down
+.PHONY: format format-check lint test test-all check ui e2e-up e2e-down conformance-docs docs docs-serve
 
 # ストレージ UI / サーバを開発設定で起動（既定 http://127.0.0.1:8000）。
 # 既定ストレージは .cache/manystore_dev（使い捨て・起動時に自動作成）。PORT=xxxx で上書き可。
 UI_CONFIG := examples/manystore-ui.dev.toml
 PORT := 8000
 ui:
-	uv run python -m manystore.server --config $(UI_CONFIG) --port $(PORT)
+	uv run python -m manystore.serving.server --config $(UI_CONFIG) --port $(PORT)
 
 # コード整形（自動修正）
 format:
@@ -33,13 +34,36 @@ format-check:
 # lint のみ
 lint:
 	uvx ruff@$(RUFF_VERSION) check $(SRC)
+	# pyright basedpyright
+	# jscpd
 
-# テスト
+pylint:
+	uvx pylint@$(PYLINT_VERSION) manystore --enable=duplicate-code
+
+# テスト（内ループ既定＝fast のみ。slow=実 backend/ネットワーク/ポーリング待ちを除外＝R13）
 test:
+	uv run pytest -m "not slow"
+
+# 全テスト（CI / 明示時。slow も含めて回す）
+test-all:
 	uv run pytest
 
-# 一括検証（format 確認 + test）
+# 一括検証（format 確認 + fast test）＝内ループの「検証緑」判定
 check: format-check test
+
+# conformance 結果を docs の spec 表へ出力（メソッド × 実装の Implemented/Not）。
+# 接続不要・決定的。docs/kv_spec.md / docs/file_storage_spec.md を再生成する。
+conformance-docs:
+	uv run python -m manystore.tools.conformancer
+
+# docs サイト（MkDocs Material）をビルド。先に conformance spec を再生成して常に最新化。
+# 出力は site/（CI の Pages デプロイがこれを公開）。--strict で警告を失敗にする。
+docs: conformance-docs
+	uv run --group docs mkdocs build --strict
+
+# ローカルでプレビュー（http://127.0.0.1:8000）。spec を再生成してから serve。
+docs-serve: conformance-docs
+	uv run --group docs mkdocs serve
 
 # 実 backend E2E の起動＋S3 identity 登録（これで s3-path / nats ケースが走る）
 e2e-up:
