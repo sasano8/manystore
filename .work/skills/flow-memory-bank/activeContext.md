@@ -5,14 +5,18 @@
 
 ## 現在のフォーカス
 
-**アクティブな作業なし**（2026-06-26 に M038〔crypto StreamCipher の足場〕完了＝`manystore/crypto.py` 新設。
-詳細は `progress.md` M038）。次サイクルで `progress.md`「残作業」から選定する。
-（前段: 2026-06-26 M011〔安全入口の命名マトリクス確定〕／2026-06-25 M010〔local 非ブロッキング化〕。）
+**アクティブな作業なし**（2026-06-26 に scaffold 2 件＝IPFS backend〔M039〕／ロードバランサー層〔M040〕の
+空定義＋ネタを配置。本体は未実装・facade/factory 未公開。詳細は `progress.md` 残作業 M039/M040）。
+次サイクルで `progress.md`「残作業」から選定する。
+（前段: 2026-06-26 M038〔crypto StreamCipher 足場〕／M011〔安全入口の命名マトリクス〕。）
 
 ## 直近の変更
 
 > 完了マイルストーンの詳細は `progress.md` に集約。ここには溜めない（重複は memory clean で畳む）。
 
+- interrupt `2026-06-26-ipfs-and-loadbalancer.md` を取り込み＝IPFS backend／ロードバランサー層の **scaffold 要望**。
+  意見すり合わせ（IPFS=MFS 主／LB=負荷メトリクスで選ぶ動的プレースメント・Array の兄弟）の上、空定義＋ネタを配置。
+  factory/facade には未接続（未完成のため・ユーザー指示）。→ archive 退避済。残作業 M039/M040 として継続。
 - interrupt `2026-06-26-stream-cipher.md` を取り込み＝`manystore.crypto` 新設要望。最小実装＋インライン self-test の
   みでテスト/ストレージ実装はせず、IO 繋ぎこみ IF の明確化に絞る方針で archive へ退避済。M038 を実装・完了。
 - interrupt `2026-06-25-m010-async-file-lib.md` を取り込み＝既存 backlog M010 の方式論点を精緻化。`aiofile`（真 async）
