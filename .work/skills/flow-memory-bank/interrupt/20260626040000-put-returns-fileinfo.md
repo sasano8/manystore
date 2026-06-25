@@ -15,6 +15,12 @@ KeyValueStore.put の戻りを `None` から **共通レスポンス `FileInfo`*
 - revision/etag は共通ではない＝今回は載せない（必要なら後日 `SupportsVersionedPut`
   capability として切り出す。fail-loud / 最小-core 方針を維持）。
 
+## 後続判断（2026-06-26）
+- 「backend 生レスを含む request/response 封筒も返したい」案が出たが**却下**。
+  理由: file/value 抽象に transport の response を持ち込むのはパラダイム不一致（ユーザー判断）。
+  → `put -> FileInfo` は維持。封筒（StoreResponse / put_response capability）は追加しない。
+  詳細は progress.md「意思決定の変遷」参照。
+
 ## lockstep 波及（M043 parity 上、全部揃える必要あり）
 - AsyncKeyValueStore.put ↔ SyncKeyValueStore.put（Protocol async/sync）
 - FileStoreBase.put（IO 導出の既定実装）
