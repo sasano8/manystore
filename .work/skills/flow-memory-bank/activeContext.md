@@ -5,31 +5,19 @@
 
 ## 現在のフォーカス
 
-**アクティブな作業なし**（2026-06-25 の protocols.py 集約＝コミット済で一段落）。次サイクルで
-`progress.md`「残作業」から選定する（候補は下記「次のステップ」）。
+**アクティブな作業なし**（2026-06-25 に M034〔conformance spec を docs 出力〕＋ GitHub Pages CI 完了＝コミット
+`ec70306`。続けて memory clean を実施＝interrupt/archive 全 GC・完了 plan m019 削除・グローバル memo の旧スキル名修正）。
+次サイクルで `progress.md`「残作業」から選定する（候補は下記「次のステップ」）。
 
 ## 直近の変更
 
-- **protocols.py 集約 完了（2026-06-25・コミット `ece844b`）**: `stores/base.py` を削除し、既定実装
-  （`FileStoreBase`/`KeyValueStoreBase`・アダプタ `KeyValueFileStore`/`KeyValueFromFileStore`・共有ヘルパ）を
-  protocols.py へ全面集約。全 import を `..protocols` へ向け替え、`KeyValueFileStore` を `file.py` 公開 API に追加。
-  `make test` 失敗の原因は test_storage が Protocol `AsyncKeyValueStore` を adapter として instantiate していた
-  こと＝`KeyValueFileStore` に修正。詳細は systemPatterns「コア」へ昇格済。
-- **memory clean 実施（2026-06-25）**: progress の完了行を畳み込み・解決済み「既知の問題」を GC・plan ファイルを
-  `plans/` へ集約（m028 は完了につき削除）・完了 interrupt を archive。
-- **バックログ4件を解決（2026-06-25）**: M036（error-swallow を fail-loud 化＝nats/s3 の exists・iter_all。test +3）・
-  M033（limit 統一は波及済と確認＝コード変更なし）・M017（3.14+ で確定＝3.10+ 拡張は見送り）・M024（pull 型の文書追従）。
-- **M032 完了（2026-06-25）**: 安全な入口 `open_async_key_value_store` / `open_async_file_store`（Safe 包装必須の接続 CM）を
-  トップ公開。`create_file_store` 新設・`SafeFileStore` を `SafeKeyValueStore` 継承に作り直し（M027b の Safe 残も解消）。test +4。
-- **ディレクトリ再編 完了（2026-06-25・ユーザー IDE）**: 3 バケットに整理＝`storage/`（backends・surfaces〔旧 stores〕・
-  facade kv/file）/ `serving/`（services〔旧 implement〕・server・gateway）/ `tools/conformancer/`。`protocols.py`・
-  `connect.py`・`exceptions.py`・`client/`・`combined.py` はトップ。**ドキュメント追従**＝README・docs/architecture・
-  各 docstring・MB の旧パス参照を是正（`manystore.tools.conformancer` 等）。s3map に紛れた garbage 文字列も除去。
+> 完了マイルストーンの詳細は `progress.md` に集約。ここには溜めない（重複は memory clean で畳む）。直近は上記
+> 「現在のフォーカス」を参照。
 
 ## 次のステップ
 
 - 実装サイクル候補（`progress.md` 残作業から）: **M011（安全入口の最終形）**＝下記「進行中の決定」の命名/格下げ/
-  Array enter_context を実装／フェーズ2 `kv/json`／フェーズ3 `storage/manystore`／M034（conformance spec 表）／M010。
+  Array enter_context を実装／フェーズ2 `kv/json`／フェーズ3 `storage/manystore`／M010。
 
 ## 進行中の決定・考慮事項
 
