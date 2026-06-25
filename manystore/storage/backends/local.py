@@ -4,6 +4,11 @@
 
 実装の真実は [LocalFileStore] に集約する（filesystem-native なので KVS の名前空間操作も
 ここで担える）。[LocalKeyValueStore] は [KeyValueFromFileStore] を介した薄い KVS ビュー。
+
+**非ブロッキング（M010）**: ディスク IO（open/read/write/close・rglob/stat・replace/unlink 等）は
+全て同期 syscall なので、`anyio.to_thread.run_sync` でワーカースレッドへオフロードし event loop を
+塞がない。スレッドプール系＝真の async disk IO（O_DIRECT/libaio）ではないが、移植性・最小依存を
+優先する（buffered IO では native AIO もスレッドへフォールバックするため実効差は小さい）。
 """
 
 import contextlib
@@ -11,8 +16,11 @@ import io
 import os
 import tempfile
 from collections.abc import AsyncIterator
+from functools import partial
 from pathlib import Path
 from typing import BinaryIO
+
+import anyio.to_thread
 
 from ...protocols import (
     AsyncFileObject,
@@ -23,63 +31,85 @@ from ...protocols import (
     scan_prefix,
 )
 
+# 同期関数をワーカースレッドへ逃がす（event loop を塞がない）。
+# 位置引数のみ＝kwargs は partial で畳む。
+_offload = anyio.to_thread.run_sync
+
 
 class LocalFileObject:
-    """ローカルファイルハンドルを [FileObject] として被せる（IO 自体は同期）。"""
+    """ローカルファイルハンドルを [FileObject] として被せる（同期 IO をスレッドへオフロード）。"""
 
     def __init__(self, fh: BinaryIO) -> None:
         self._fh = fh
 
     async def read(self, size: int = -1) -> bytes:
-        return self._fh.read(size)
+        return await _offload(self._fh.read, size)
 
     async def write(self, data: bytes) -> int:
-        return self._fh.write(data)
+        return await _offload(self._fh.write, data)
 
     async def close(self) -> None:
-        self._fh.close()
+        await _offload(self._fh.close)
 
     async def __aenter__(self) -> LocalFileObject:
         return self
 
     async def __aexit__(self, *exc: object) -> None:
-        self._fh.close()
+        await self.close()
 
 
 class _LocalAtomicWriter:
     """一時ファイルへ書き、close（正常終了）でのみ `os.replace` で確定する書き込み [FileObject]。
 
     全部書けてから差し替えるので all-or-nothing（途中失敗・例外では確定せず一時ファイルを破棄）。
+    同期 IO（temp 作成・write・replace/unlink）は全てスレッドへオフロードする。生成は __init__
+    ではなく async ファクトリ [open] 経由（mkstemp/fdopen も syscall ゆえ event loop を塞がない）。
     """
 
-    def __init__(self, path: Path) -> None:
+    def __init__(self, path: Path, tmp: str, fh: BinaryIO) -> None:
         self._path = path
-        path.parent.mkdir(parents=True, exist_ok=True)
-        fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=f"{path.name}.", suffix=".tmp")
         self._tmp = tmp
-        self._fh = os.fdopen(fd, "wb")
+        self._fh = fh
         self._done = False
+
+    @classmethod
+    async def open(cls, path: Path) -> _LocalAtomicWriter:
+        def _setup() -> tuple[str, BinaryIO]:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=f"{path.name}.", suffix=".tmp")
+            return tmp, os.fdopen(fd, "wb")
+
+        tmp, fh = await _offload(_setup)
+        return cls(path, tmp, fh)
 
     async def read(self, size: int = -1) -> bytes:
         raise io.UnsupportedOperation("not readable")
 
     async def write(self, data: bytes) -> int:
-        return self._fh.write(data)
+        return await _offload(self._fh.write, data)
 
     async def close(self) -> None:
         if self._done:
             return
         self._done = True
-        self._fh.close()
-        os.replace(self._tmp, self._path)  # ここで初めて確定（原子的差し替え）
+
+        def _commit() -> None:
+            self._fh.close()
+            os.replace(self._tmp, self._path)  # ここで初めて確定（原子的差し替え）
+
+        await _offload(_commit)
 
     async def _abort(self) -> None:
         if self._done:
             return
         self._done = True
-        self._fh.close()
-        with contextlib.suppress(OSError):
-            os.unlink(self._tmp)
+
+        def _cleanup() -> None:
+            self._fh.close()
+            with contextlib.suppress(OSError):
+                os.unlink(self._tmp)
+
+        await _offload(_cleanup)
 
     async def __aenter__(self) -> _LocalAtomicWriter:
         return self
@@ -111,24 +141,32 @@ class LocalFileStore(FileStoreBase):
     # ── ストリーム入出力（primitive）。put/get_or_raise/get は [FileStoreBase] が導出 ──
 
     async def open_reader(self, filename: str) -> AsyncFileObject:
-        return LocalFileObject((self._dir / filename).open("rb"))
+        fh = await _offload((self._dir / filename).open, "rb")
+        return LocalFileObject(fh)
 
     async def open_writer(self, filename: str) -> AsyncFileObject:
         # 親ディレクトリ作成＋temp+rename で all-or-nothing（ネストキーもそのまま置ける）。
-        return _LocalAtomicWriter(self._dir / filename)
+        return await _LocalAtomicWriter.open(self._dir / filename)
 
     # ── 名前空間操作（filesystem-native） ──
 
     async def iter_all(self, limit: int | None = None) -> AsyncIterator[FileInfo]:
         # 再帰列挙（rglob）。キーは self._dir からの相対 posix パスにし、'/' を含む
         # ネストキーも列挙する（s3/nats のフラットキー列挙と規約を揃える）。
-        files = sorted(
-            (f for f in self._dir.rglob("*") if f.is_file()),
-            key=lambda p: p.relative_to(self._dir).as_posix(),
-            reverse=True,
-        )
-        for f in files[:limit]:  # limit=None は全件（スライスがそのまま全要素）
-            yield FileInfo(filename=f.relative_to(self._dir).as_posix(), size=f.stat().st_size)
+        # rglob/stat は同期 syscall なので、走査と FileInfo 構築を丸ごとスレッドへ逃がす。
+        def _scan() -> list[FileInfo]:
+            files = sorted(
+                (f for f in self._dir.rglob("*") if f.is_file()),
+                key=lambda p: p.relative_to(self._dir).as_posix(),
+                reverse=True,
+            )
+            return [  # limit=None は全件（スライスがそのまま全要素）
+                FileInfo(filename=f.relative_to(self._dir).as_posix(), size=f.stat().st_size)
+                for f in files[:limit]
+            ]
+
+        for info in await _offload(_scan):
+            yield info
 
     def iter_prefix(self, prefix: str) -> AsyncIterator[FileInfo]:
         # filesystem にサーバ側 prefix は無い＝scan で明示的に支える（暗黙 fallback ではない）。
@@ -138,13 +176,16 @@ class LocalFileStore(FileStoreBase):
         return [info async for info in self.iter_all(limit)]
 
     async def exists(self, filename: str) -> bool:
-        return (self._dir / filename).is_file()
+        return await _offload((self._dir / filename).is_file)
 
     async def delete(self, filename: str) -> None:
         # ファイルだけ消す（空になった親ディレクトリは残す）。無いキーは無視。
-        path = self._dir / filename
-        if path.is_file():
-            path.unlink()
+        def _del() -> None:
+            path = self._dir / filename
+            if path.is_file():
+                path.unlink()
+
+        await _offload(_del)
 
     async def vacuum(self) -> None:
         """空ディレクトリを再帰的に削除する（root 自身は残す）。delete とは別の保守操作。
@@ -152,28 +193,35 @@ class LocalFileStore(FileStoreBase):
         ローカルファイルシステム特有の掃除（s3/nats はフラットで空ディレクトリ概念が無い）。
         bottom-up に走査するので、ネストした空ディレクトリもまとめて畳む。
         """
-        for dirpath, _dirnames, _filenames in os.walk(self._dir, topdown=False):
-            p = Path(dirpath)
-            if p != self._dir and not any(p.iterdir()):
-                with contextlib.suppress(OSError):
-                    p.rmdir()
+
+        def _vacuum() -> None:
+            for dirpath, _dirnames, _filenames in os.walk(self._dir, topdown=False):
+                p = Path(dirpath)
+                if p != self._dir and not any(p.iterdir()):
+                    with contextlib.suppress(OSError):
+                        p.rmdir()
+
+        await _offload(_vacuum)
 
     async def cp(self, src: str, dst: str) -> None:
         await _kv_copy(self, src, dst)  # get→put（put は原子的・親ディレクトリ作成）
 
     async def mv(self, src: str, dst: str) -> None:
-        src_path = self._dir / src
-        if not src_path.is_file():
-            raise FileNotFoundError(src)
-        dst_path = self._dir / dst
-        dst_path.parent.mkdir(parents=True, exist_ok=True)
-        os.replace(src_path, dst_path)  # 同一 FS 内の原子的 rename
+        def _mv() -> None:
+            src_path = self._dir / src
+            if not src_path.is_file():
+                raise FileNotFoundError(src)
+            dst_path = self._dir / dst
+            dst_path.parent.mkdir(parents=True, exist_ok=True)
+            os.replace(src_path, dst_path)  # 同一 FS 内の原子的 rename
+
+        await _offload(_mv)
 
     # ── ライフサイクル ──
 
     async def connect(self) -> None:
         # ローカルは接続不要だが、ライフサイクルのステップを合わせるため dir を確実に用意する。
-        self._dir.mkdir(parents=True, exist_ok=True)
+        await _offload(partial(self._dir.mkdir, parents=True, exist_ok=True))
 
     async def aclose(self) -> None:
         return None

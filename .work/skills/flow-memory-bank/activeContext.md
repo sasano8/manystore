@@ -5,19 +5,22 @@
 
 ## 現在のフォーカス
 
-**アクティブな作業なし**（2026-06-25 に M034〔conformance spec を docs 出力〕＋ GitHub Pages CI 完了＝コミット
-`ec70306`。続けて memory clean を実施＝interrupt/archive 全 GC・完了 plan m019 削除・グローバル memo の旧スキル名修正）。
-次サイクルで `progress.md`「残作業」から選定する（候補は下記「次のステップ」）。
+**アクティブな作業なし**（2026-06-25 に M010〔local backend 非ブロッキング化〕完了。前セッションが funnel を
+すり抜けて残した interrupt〔M010 の async file lib 方式〕を取り込み、ユーザー判断で **anyio**〔新規依存ゼロ〕に
+確定して実装＝詳細は `progress.md` M010）。次サイクルで `progress.md`「残作業」から選定する（候補は下記「次のステップ」）。
 
 ## 直近の変更
 
-> 完了マイルストーンの詳細は `progress.md` に集約。ここには溜めない（重複は memory clean で畳む）。直近は上記
-> 「現在のフォーカス」を参照。
+> 完了マイルストーンの詳細は `progress.md` に集約。ここには溜めない（重複は memory clean で畳む）。
+
+- interrupt `2026-06-25-m010-async-file-lib.md` を取り込み＝既存 backlog M010 の方式論点を精緻化。`aiofile`（真 async）
+  より `anyio`（スレッドプール系・在中）を採用（理由: buffered では native AIO もスレッド fallback・移植性/最小優先）。
+  → archive へ退避済。M010 を実装・完了。
 
 ## 次のステップ
 
 - 実装サイクル候補（`progress.md` 残作業から）: **M011（安全入口の最終形）**＝下記「進行中の決定」の命名/格下げ/
-  Array enter_context を実装／フェーズ2 `kv/json`／フェーズ3 `storage/manystore`／M010。
+  Array enter_context を実装／フェーズ2 `kv/json`／フェーズ3 `storage/manystore`。
 
 ## 進行中の決定・考慮事項
 

@@ -22,6 +22,9 @@ dependencies = [
     "nats-py>=2.0.0",
     "aiobotocore>=2.0.0",
     "httpx>=0.27.0",
+    # local backend の同期 IO をスレッドへオフロードして event loop を塞がない（M010）。
+    # スレッドプール系（真の async disk IO ではない＝移植性・最小を優先）。httpx 経由で在中だが直接使うので明示。
+    "anyio>=4.0.0",
 ]
 
 [project.urls]

@@ -30,7 +30,8 @@
   で spec 再生成 → `mkdocs build --strict`）。PR はビルド検証のみ・**main push のみ公式 Actions（upload-pages-artifact/
   deploy-pages）で実公開**。`index.md` は snippets で README を取り込む単一ソース。docs 依存は `docs` group（mkdocs-material）。
   **要手動: Settings → Pages → Source = GitHub Actions を有効化**（初回のみ・ユーザー作業）。
-  直近 fast = **113 passed, 12 deselected**。実 backend E2E（NATS / S3 path-style）検証済（`make e2e-up`）。
+  直近 fast = **120 passed, 12 deselected**。実 backend E2E（NATS / S3 path-style）検証済（`make e2e-up`）。
+- **local backend は非ブロッキング**（M010）: 全 IO syscall を anyio でスレッドへオフロード＝event loop を塞がない。
 
 ## 残作業（What's left）— バックログ
 
@@ -38,7 +39,6 @@
 
 | ID | タスク | 優先 | 備考 |
 |----|--------|------|------|
-| M010 | local backend の非ブロッキング化 | 中 | `read_bytes`/`write` を `asyncio.to_thread` でオフロード（現状 event loop を塞ぐ）|
 | M011 | 既定で安全（キー検証）/方針明確化 | 中 | 生 backend はキー検証なし＝`../escape` 可。安全が `Safe*` opt-in の foot-gun。**安全な入口は M032 で提供済**＝顔は `open_async_*`、生は `create_*`。残＝既定で安全にするか（生口を残すか）の方針確定 |
 | M012 | `list(prefix=...)` / pagination | 中 | prefix は M030 で capability 化済。継続トークンページングが未対応（M021 の continuation と関連）|
 | M013 | メタデータ / content-type | 中 | S3・NATS は native 対応だが共通 IF に無い |
@@ -88,6 +88,13 @@
   今回は現状維持＝not-found→[]/False の正規化は契約上必要）。
 - **M024（2026-06-25）**: pull 型エスカレ（outbox）の文書追従完了＝MB に push 前提の残記述なし・旧スキル名なし・
   alias を `[[unit-quality]]` に統一。
+- **M010（2026-06-25・完了）**: local backend を非ブロッキング化＝`storage/backends/local.py` の同期 IO
+  （open/read/write/close・rglob+stat・replace/unlink・mkdir）を `anyio.to_thread.run_sync`（`_offload`）で
+  ワーカースレッドへオフロードし event loop を塞がない。`_LocalAtomicWriter` は構築（mkstemp/fdopen）も
+  syscall ゆえ async ファクトリ `_LocalAtomicWriter.open()` 経由に変更（atomic temp+replace は不変）。
+  方式は **anyio**（スレッドプール系・新規依存ゼロ＝httpx 経由で在中だが明示依存に格上げ `anyio>=4.0.0`）。
+  真の async disk IO（aiofile/libaio）は不採用＝移植性・最小・YAGNI 優先（buffered では native AIO も
+  スレッドへフォールバックし実効差小）。`__init__` の resolve/mkdir は構築時一回限り＝ホットパス外で据置。
 - **M032（2026-06-25・完了）**: 安全な入口（ライブラリの顔）を新設＝`open_async_key_value_store` /
   `open_async_file_store`（トップ公開）。**Safe 包装必須の接続 CM**（`async with` で connect＋`Safe*` 包装、
   終了で aclose。`policy`/`verify` も受ける）。併せて `create_file_store`（FileStore 版ファクトリ）新設と
