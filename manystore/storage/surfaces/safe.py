@@ -45,8 +45,8 @@ class SafeKeyValueStore(KeyValueStoreBase):
     def __init__(self, store: AsyncKeyValueStore) -> None:
         self._store = store
 
-    async def put(self, key: str, value: bytes) -> None:
-        await self._store.put(validate_safe_path(key), value)
+    async def put(self, key: str, value: bytes) -> FileInfo:
+        return await self._store.put(validate_safe_path(key), value)
 
     async def get_or_raise(self, key: str) -> bytes:
         return await self._store.get_or_raise(validate_safe_path(key))

@@ -53,7 +53,9 @@ class AsyncFileObject(Protocol):
 
 
 class AsyncKeyValueStore(Protocol):
-    async def put(self, key: str, value: bytes) -> None: ...
+    # put は書いた値の [FileInfo]（`{filename: key, size: len(value)}`）を返す＝**全 backend が
+    # 追加 I/O なしに生成できる共通レスポンス**。revision/etag は共通でない（capability 行き）。
+    async def put(self, key: str, value: bytes) -> FileInfo: ...
     async def get_or_raise(self, key: str) -> bytes: ...
     async def get(self, key: str, default: bytes | None = None) -> bytes | None: ...
     async def iter_all(self, limit: int | None = None) -> AsyncIterable[FileInfo]: ...
@@ -111,7 +113,7 @@ class SyncFileObject(Protocol):
 class SyncKeyValueStore(Protocol):
     """[KeyValueStore] の同期版（put/get がメイン）。teardown は async `aclose` ↔ sync `close`。"""
 
-    def put(self, key: str, value: bytes) -> None: ...
+    def put(self, key: str, value: bytes) -> FileInfo: ...  # [AsyncKeyValueStore.put] の同期版
     def get_or_raise(self, key: str) -> bytes: ...
     def get(self, key: str, default: bytes | None = None) -> bytes | None: ...
     def iter_all(self, limit: int | None = None) -> Iterator[FileInfo]: ...
@@ -177,10 +179,11 @@ class FileStoreBase(abc.ABC):
         async with await self.open_reader(key) as f:
             return await f.read()
 
-    async def put(self, key: str, value: bytes) -> None:
+    async def put(self, key: str, value: bytes) -> FileInfo:
         # open_writer（ストリーム primitive）で全体書き＝値境界でバッファ。
         async with await self.open_writer(key) as f:
             await f.write(value)
+        return {"filename": key, "size": len(value)}
 
 
 class KeyValueStoreBase(abc.ABC):
@@ -355,8 +358,8 @@ class KeyValueFileStore(KeyValueStoreBase):
 
     # ── KVS 面は下層へ委譲（FileStore = KVS + IO の KVS 部分） ──
 
-    async def put(self, key: str, value: bytes) -> None:
-        await self._store.put(key, value)
+    async def put(self, key: str, value: bytes) -> FileInfo:
+        return await self._store.put(key, value)
 
     async def get_or_raise(self, key: str) -> bytes:
         return await self._store.get_or_raise(key)
@@ -405,8 +408,8 @@ class KeyValueFromFileStore(KeyValueStoreBase):
     def __init__(self, store: AsyncFileStore) -> None:
         self._store = store
 
-    async def put(self, key: str, value: bytes) -> None:
-        await self._store.put(key, value)
+    async def put(self, key: str, value: bytes) -> FileInfo:
+        return await self._store.put(key, value)
 
     async def get_or_raise(self, key: str) -> bytes:
         return await self._store.get_or_raise(key)

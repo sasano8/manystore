@@ -124,7 +124,7 @@ class LoadBalancedKeyValueStore(KeyValueStoreBase):
         """policy で書き込み先 member を1つ選ぶ。"""
         raise NotImplementedError("loadbalancer scaffold: _select")
 
-    async def put(self, key: str, value: bytes) -> None:
+    async def put(self, key: str, value: bytes) -> FileInfo:
         # 負荷で1 member を選んで書く（選んだ先は鍵に残さない＝読みは probe-all）。
         raise NotImplementedError("loadbalancer scaffold: put")
 

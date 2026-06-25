@@ -86,7 +86,7 @@ class IpfsKeyValueStore(KeyValueStoreBase, _IpfsBase):
     本体は未実装（`NotImplementedError`）。上の docstring の MFS エンドポイント対応に沿って詰める。
     """
 
-    async def put(self, key: str, value: bytes) -> None:
+    async def put(self, key: str, value: bytes) -> FileInfo:
         _todo("put")  # files/write（create/parents/truncate）＋任意 pin
 
     async def get_or_raise(self, key: str) -> bytes:

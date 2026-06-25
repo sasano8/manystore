@@ -26,8 +26,8 @@ class AsyncToSyncKeyValueStore:
     def _run(self, coro):
         return self._loop.run_until_complete(coro)
 
-    def put(self, key: str, value: bytes) -> None:
-        self._run(self._store.put(key, value))
+    def put(self, key: str, value: bytes) -> FileInfo:
+        return self._run(self._store.put(key, value))
 
     def get_or_raise(self, key: str) -> bytes:
         return self._run(self._store.get_or_raise(key))

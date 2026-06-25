@@ -53,9 +53,10 @@ class _S3Base:
 
 
 class S3KeyValueStore(KeyValueStoreBase, _S3Base):
-    async def put(self, key: str, value: bytes) -> None:
+    async def put(self, key: str, value: bytes) -> FileInfo:
         async with self._session() as client:
             await client.put_object(Bucket=self._bucket, Key=key, Body=value)
+        return {"filename": key, "size": len(value)}
 
     async def get_or_raise(self, key: str) -> bytes:
         async with self._session() as client:

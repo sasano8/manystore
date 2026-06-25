@@ -52,9 +52,10 @@ class _NatsBase:
 
 
 class NatsObjectKeyValueStore(KeyValueStoreBase, _NatsBase):
-    async def put(self, key: str, value: bytes) -> None:
+    async def put(self, key: str, value: bytes) -> FileInfo:
         obs = await self._get_obs()
         await obs.put(key, value)
+        return {"filename": key, "size": len(value)}
 
     async def get_or_raise(self, key: str) -> bytes:
         obs = await self._get_obs()

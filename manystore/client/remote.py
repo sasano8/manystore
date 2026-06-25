@@ -103,8 +103,9 @@ class RemoteKeyValueStore(KeyValueStoreBase):
         self._client = ManystoreClient(base_url, headers=headers, transport=transport)
         self._context = context
 
-    async def put(self, key: str, value: bytes) -> None:
+    async def put(self, key: str, value: bytes) -> FileInfo:
         await self._client.put(self._context, key, value)
+        return {"filename": key, "size": len(value)}
 
     async def get_or_raise(self, key: str) -> bytes:
         return await self._client.get_or_raise(self._context, key)

@@ -30,8 +30,9 @@ class DictKeyValueStore(KeyValueStoreBase):
     def __init__(self, data: dict[str, bytes] | None = None) -> None:
         self._data: dict[str, bytes] = data if data is not None else {}
 
-    async def put(self, key: str, value: bytes) -> None:
+    async def put(self, key: str, value: bytes) -> FileInfo:
         self._data[key] = bytes(value)
+        return {"filename": key, "size": len(value)}
 
     async def get_or_raise(self, key: str) -> bytes:
         try:

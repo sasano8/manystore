@@ -192,6 +192,29 @@ def test_local_kvs_put_is_atomic(tmp_path: Path) -> None:
     asyncio.run(scenario())
 
 
+def test_put_returns_common_fileinfo(tmp_path: Path) -> None:
+    # put は全 backend 共通レスポンス FileInfo({filename, size}) を返す（protocols.py の契約）。
+    async def scenario() -> None:
+        # native KVS（dict）と FileStoreBase 導出（local）の両系統で同じ形を返す。
+        assert await DictKeyValueStore().put("a.bin", b"hello") == {
+            "filename": "a.bin",
+            "size": 5,
+        }
+        assert await LocalKeyValueStore(tmp_path).put("k", b"xyz") == {
+            "filename": "k",
+            "size": 3,
+        }
+        # array ルータは外向きキー（mount/subkey）で prefix し直して返す（subkey ではない）。
+        arr = ArrayKeyValueStore()
+        await arr.mount("docs", DictKeyValueStore())
+        assert await arr.put("docs/a.txt", b"AB") == {
+            "filename": "docs/a.txt",
+            "size": 2,
+        }
+
+    asyncio.run(scenario())
+
+
 def test_local_file_store_write_is_atomic_on_error(tmp_path: Path) -> None:
     store = LocalFileStore(tmp_path)
 
