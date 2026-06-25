@@ -5,9 +5,10 @@
 
 ## 現在のフォーカス
 
-**アクティブな作業なし**（2026-06-25 に M010〔local backend 非ブロッキング化〕完了。前セッションが funnel を
-すり抜けて残した interrupt〔M010 の async file lib 方式〕を取り込み、ユーザー判断で **anyio**〔新規依存ゼロ〕に
-確定して実装＝詳細は `progress.md` M010）。次サイクルで `progress.md`「残作業」から選定する（候補は下記「次のステップ」）。
+**M011 を段階実装中（2コミット）**: ②Array責務分離=**C1 完了**（mount/unmount を登録のみに分離＋顔
+`open_async_array_store` CM・StorageService 追従）。次は **C2＝①命名**（`create_safe_{kv,file,array}_store` 追加＋
+`create_*`→`create_unsafe_*` リネーム）。**方針確定: 生口はトップ公開も残す**（格下げしない・名前で unsafe 明示のみ）。
+（前段: 2026-06-25 に M010〔local backend 非ブロッキング化〕完了＝anyio で IO をスレッドへオフロード。）
 
 ## 直近の変更
 
@@ -24,11 +25,11 @@
 
 ## 進行中の決定・考慮事項
 
-- **【決定・未実装】安全入口の最終形（M011・顔だけ残し生は格下げ）**: ①命名＝`open_async_{kv,file,array}_store`（顔・
-  safe・接続CM）＋ `create_safe_{kv,file,array}_store`（safe・構築のみ）。`create_unsafe_*`・生クラスはトップ `__all__`
-  から外し `storage.backends` へ格下げ。②`ArrayKeyValueStore` は mount を登録のみ（同期・I/O なし）に分離し、接続は
-  `open_async_array_store` の enter_context CM へ（現状 mount が connect も担う二重責務を解消）。`StorageService` は追従。
-  ※外向き API 変更なので着手時に粒度を再確認。
+- **【一部実装】安全入口の最終形（M011）**: ②=**C1 完了**（`ArrayKeyValueStore.mount`/`unmount` を登録のみ〔同期・
+  I/O なし〕に分離・接続は顔 `open_async_array_store` CM・`StorageService` 追従）。①=**C2 未実装**＝命名＝
+  `create_safe_{kv,file,array}_store`（safe・構築のみ・未接続）追加＋低レベル `create_key_value_store`/`create_file_store`
+  を `create_unsafe_*` にリネーム。**生口（生クラス＋unsafe factory）はトップ `__all__` に残す**（ユーザー確定 2026-06-26＝
+  格下げしない・名前で unsafe 明示のみ）。`open_async_{kv,file,array}_store` の顔 3 種は出揃い済（kv/file は M032）。
 - **manystore は最小・汎用に保つ**：利用側都合で IF を拡張しない（YAGNI）。
 - **worker/supervisor**: 本 repo は dotfiles（`workers_dir: workers`）配下の worker。下り=interrupt 投函／
   上り=`outbox/` へ pull 型エスカレ（親は直接知らない）。

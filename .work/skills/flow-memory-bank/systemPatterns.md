@@ -81,4 +81,7 @@
   `connect_key_value_store`（接続のみ・Safe 無し）。`create_file_store` は FileStore 版ファクトリ。
 - 危険入力対策は `Safe*` ラッパが `validate_safe_path` で key/filename を検証してから委譲。`SafeFileStore` は
   `SafeKeyValueStore` を継承＝KVS 面（検証付き）＋ IO（open_reader/open_writer）の完全な FileStore。
-- 複数 backend の横断は `ArrayKeyValueStore`（キー先頭セグメント＝論理名で振り分け）。
+- 複数 backend の横断は `ArrayKeyValueStore`（キー先頭セグメント＝論理名で振り分け）。`mount`/`unmount` は
+  **登録のみ（同期・I/O なし）**で connect/aclose しない（M011-②）。接続ライフサイクルは顔
+  `open_async_array_store(mounts)`（`SafeKeyValueStore(ArrayKeyValueStore)` 包装＝全 mount を connect/aclose する CM）が
+  一括で担う＝mount の登録と接続の二重責務を分離。`StorageService` は明示 connect + 同期 mount。

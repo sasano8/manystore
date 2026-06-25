@@ -37,6 +37,7 @@ from manystore import (
     create_file_store,
     create_key_value_store,
     iter_prefix,
+    open_async_array_store,
     open_async_file_store,
     open_async_key_value_store,
     validate_safe_path,
@@ -910,8 +911,8 @@ def test_array_kvs_mount_and_route(tmp_path: Path) -> None:
     arr = ArrayKeyValueStore()
 
     async def scenario() -> None:
-        await arr.mount("docs", LocalKeyValueStore(tmp_path / "docs"))
-        await arr.mount("imgs", LocalKeyValueStore(tmp_path / "imgs"))
+        arr.mount("docs", LocalKeyValueStore(tmp_path / "docs"))  # 登録のみ（同期・I/O なし）
+        arr.mount("imgs", LocalKeyValueStore(tmp_path / "imgs"))
         await arr.put("docs/a.txt", b"A")
         await arr.put("imgs/p/q.bin", b"B")  # サブディレクトリ込み
         assert await arr.get("docs/a.txt") == b"A"
@@ -940,8 +941,8 @@ def test_array_kvs_cp_mv_across_mounts(tmp_path: Path) -> None:
     arr = ArrayKeyValueStore()
 
     async def scenario() -> None:
-        await arr.mount("a", LocalKeyValueStore(tmp_path / "a"))
-        await arr.mount("b", LocalKeyValueStore(tmp_path / "b"))
+        arr.mount("a", LocalKeyValueStore(tmp_path / "a"))
+        arr.mount("b", LocalKeyValueStore(tmp_path / "b"))
         await arr.put("a/x", b"data")
         await arr.cp("a/x", "b/y")  # mount 跨ぎ copy
         assert await arr.get("b/y") == b"data"
@@ -953,23 +954,44 @@ def test_array_kvs_cp_mv_across_mounts(tmp_path: Path) -> None:
     asyncio.run(scenario())
 
 
-def test_array_mount_connects_backend() -> None:
-    class _ConnectRecorder:
-        def __init__(self) -> None:
-            self.connected = False
+class _LifecycleRecorder:
+    """connect/aclose の呼び出しを記録する最小スタブ（mount の責務分離を検証する用）。"""
 
-        async def connect(self) -> None:
-            self.connected = True
+    def __init__(self) -> None:
+        self.connected = False
+        self.closed = False
 
-        async def aclose(self) -> None:
-            return None
+    async def connect(self) -> None:
+        self.connected = True
 
+    async def aclose(self) -> None:
+        self.closed = True
+
+
+def test_array_mount_is_registration_only() -> None:
+    # mount は登録のみ＝I/O なし（connect しない）。接続は合成ストアの connect() が一括で担う。
     arr = ArrayKeyValueStore()
-    rec = _ConnectRecorder()
+    rec = _LifecycleRecorder()
 
     async def scenario() -> None:
-        await arr.mount("x", rec)  # mount 時に backend を connect する
+        arr.mount("x", rec)  # 同期・登録のみ
+        assert rec.connected is False  # mount は connect しない（二重責務を持たない）
+        assert arr.mounts() == ["x"]
+        await arr.connect()  # 接続は合成ストア側でまとめて行う
         assert rec.connected is True
+
+    asyncio.run(scenario())
+
+
+def test_open_async_array_store_connects_and_closes_mounts() -> None:
+    # 顔の入口は mount 群を登録して CM 突入で connect・終了で aclose する（ライフサイクル一括）。
+    rec = _LifecycleRecorder()
+
+    async def scenario() -> None:
+        async with open_async_array_store({"x": rec}) as _arr:
+            assert rec.connected is True  # 突入時に connect 済み（全 mount を一括接続）
+            assert rec.closed is False
+        assert rec.closed is True  # 退出時に aclose
 
     asyncio.run(scenario())
 
@@ -1204,8 +1226,8 @@ def test_array_store_iter_prefix_routes_to_single_mount() -> None:
     arr = ArrayKeyValueStore()
 
     async def scenario() -> None:
-        await arr.mount("m1", m1)
-        await arr.mount("m2", m2)
+        arr.mount("m1", m1)
+        arr.mount("m2", m2)
         # `<mount>/<subprefix>` は単一 mount へ振り分け subprefix を委譲（他 mount は触らない）。
         got = [i["filename"] async for i in arr.iter_prefix("m1/x/")]
         assert got == ["m1/x/1"]  # m1 の x/* のみ・mount 名で再前置

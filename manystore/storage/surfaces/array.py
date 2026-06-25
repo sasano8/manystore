@@ -1,8 +1,10 @@
 """array storage — 複数の KeyValueStore を論理名（マウント先）配下に束ねる合成ストア。
 
-`await mount(name, store)` で論理名に backend を割り当て（マウント時に backend を connect）、キー
-`"<name>/<subkey>"` の先頭セグメントで振り分ける。論理名はディレクトリのように振る舞い、全 backend
-を「論理名配下に存在しているかのように」横断できる（[KeyValueStore] を満たす）。
+`mount(name, store)` で論理名に backend を割り当て（**登録のみ・同期・I/O なし**）、キー
+`"<name>/<subkey>"` の先頭セグメントで振り分ける。接続は別途＝合成ストアの `connect()`（全 mount を
+connect）か、顔の入口 [open_async_array_store]（mount 群を connect する CM）が一括で担う（mount は
+登録と接続の二重責務を持たない）。論理名はディレクトリのように振る舞い、全 backend を「論理名配下に
+存在しているかのように」横断できる（[KeyValueStore] を満たす）。
 
 [DownloadCache] は ArrayStorage（等の KeyValueStore）を包み、`download` でローカルキャッシュへ取得
 するラッパ層（キャッシュは常にローカル FS。リモート backend をローカルへ落として使う想定）。
@@ -32,23 +34,22 @@ class ArrayKeyValueStore(KeyValueStoreBase):
     def __init__(self) -> None:
         self._mounts: dict[str, AsyncKeyValueStore] = {}
 
-    async def mount(self, name: str, store: AsyncKeyValueStore) -> None:
-        """論理名 `name` に backend を割り当て、その backend を connect する。
+    def mount(self, name: str, store: AsyncKeyValueStore) -> None:
+        """論理名 `name` に backend を割り当てる（**登録のみ・同期・I/O なし**）。
 
-        name は単一セグメント（'/' を含まない）。マウント時に `store.connect()` を呼ぶので、
-        到達不能なら例外（リトライ/timeout が要るなら connecting() で包んだ store を渡す）。
+        name は単一セグメント（'/' を含まない）。connect はしない＝接続は合成ストアの `connect()`
+        か顔の [open_async_array_store] が一括で担う（mount は登録と接続の二重責務を持たない）。
         """
         if not name or "/" in name:
             raise ValueError(f"mount name must be a single segment: {name!r}")
-        await store.connect()
         self._mounts[name] = store
 
-    async def unmount(self, name: str) -> AsyncKeyValueStore | None:
-        """論理名を外し、その backend を aclose して返す（無ければ None）。"""
-        store = self._mounts.pop(name, None)
-        if store is not None:
-            await store.aclose()
-        return store
+    def unmount(self, name: str) -> AsyncKeyValueStore | None:
+        """論理名を外して登録解除し、外した backend を返す（無ければ None。**aclose はしない**）。
+
+        mount と対称に登録のみを外す（I/O なし）。外した backend の `aclose` は呼び出し側の責務。
+        """
+        return self._mounts.pop(name, None)
 
     def mounts(self) -> list[str]:
         """マウント済みの論理名を名前順で返す。"""

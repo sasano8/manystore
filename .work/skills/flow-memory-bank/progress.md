@@ -39,7 +39,7 @@
 
 | ID | タスク | 優先 | 備考 |
 |----|--------|------|------|
-| M011 | 既定で安全（キー検証）/方針明確化 | 中 | 生 backend はキー検証なし＝`../escape` 可。安全が `Safe*` opt-in の foot-gun。**安全な入口は M032 で提供済**＝顔は `open_async_*`、生は `create_*`。残＝既定で安全にするか（生口を残すか）の方針確定 |
+| M011 | 既定で安全（キー検証）/方針明確化 | 中 | **②Array責務分離=完了（C1）**＝mount は登録のみ（同期）・接続は `open_async_array_store` CM／StorageService 追従。**方針確定済**＝生口はトップ公開も残す（格下げしない・名前で unsafe 明示のみ）。残=**①命名（C2）**＝`create_safe_{kv,file,array}_store` 追加＋`create_*`→`create_unsafe_*` リネーム（トップ公開維持） |
 | M012 | `list(prefix=...)` / pagination | 中 | prefix は M030 で capability 化済。継続トークンページングが未対応（M021 の continuation と関連）|
 | M013 | メタデータ / content-type | 中 | S3・NATS は native 対応だが共通 IF に無い |
 | M016 | テスト拡充（エラーパス/並行/大容量） | 中 | fake は happy path 中心 |
@@ -88,6 +88,11 @@
   今回は現状維持＝not-found→[]/False の正規化は契約上必要）。
 - **M024（2026-06-25）**: pull 型エスカレ（outbox）の文書追従完了＝MB に push 前提の残記述なし・旧スキル名なし・
   alias を `[[unit-quality]]` に統一。
+- **M011-②（2026-06-26・完了＝C1）**: 安全入口の最終形のうち **Array の責務分離**。`ArrayKeyValueStore.mount`/
+  `unmount` を**登録のみ（同期・I/O なし）**に分離（mount が connect も担う二重責務を解消）。接続は新設の顔
+  `open_async_array_store(mounts)`（`SafeKeyValueStore(ArrayKeyValueStore)` 包装＋全 mount を connect/aclose する CM・
+  kv facade）が一括で担う。`StorageService.connect` は明示 connect + 同期 mount に追従。test 書換（mount=登録のみ・
+  CM が connect/aclose）+1。残＝①命名（C2）。
 - **M010（2026-06-25・完了）**: local backend を非ブロッキング化＝`storage/backends/local.py` の同期 IO
   （open/read/write/close・rglob+stat・replace/unlink・mkdir）を `anyio.to_thread.run_sync`（`_offload`）で
   ワーカースレッドへオフロードし event loop を塞がない。`_LocalAtomicWriter` は構築（mkstemp/fdopen）も
