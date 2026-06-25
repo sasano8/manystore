@@ -56,6 +56,13 @@
 
 ### 完了マイルストーン（要点のみ・経緯は git 履歴）
 
+- **M038（2026-06-26・完了）**: `manystore/crypto.py` 新設＝ストリーム暗号と FileStore IO への繋ぎこみ IF を明確化。
+  primitive **`StreamCipher`**（`transform(offset, data)`＝オフセット指定・チャンク境界非依存の対称変換）＋参照実装
+  `XorStreamCipher`（繰り返し鍵 XOR・**安全でない** placeholder）。`AsyncFileObject` を包む **`CipherReader`/`CipherWriter`**
+  （read で復号 / write で暗号化・自身も `AsyncFileObject` を満たす＝`open_reader`/`open_writer` の戻り値にそのまま被せる）。
+  **ストア実装なし・tests 未配置**（インライン `_selftest`＝`python -m manystore.crypto` で round-trip/境界非依存を確認。
+  後で tests へ移す前提）。ユーザー要望＝IF の明確化に限定。
+
 - **M001〜M004**: 旧 `shoudou_storage` 残骸掃除 / 実 backend E2E（NATS・S3 path）/ CI＋lint 統一 / README。
 - **M005〜M008**（配布前提 G1）: 未使用依存 `redis` 削除 / LICENSE=MIT / PyPI メタ整備。**M007 py.typed は不採用**
   （型チェッカが公開 API を厳格化し運用コスト増＝ユーザー判断）。

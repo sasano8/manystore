@@ -5,14 +5,16 @@
 
 ## 現在のフォーカス
 
-**アクティブな作業なし**（2026-06-26 に M011〔安全入口の最終形〕完了＝2 コミット：C1 Array 責務分離＋C2 命名
-マトリクス確定。詳細は `progress.md` M011）。次サイクルで `progress.md`「残作業」から選定する。
-（前段: 2026-06-25 M010〔local backend 非ブロッキング化＝anyio オフロード〕。）
+**アクティブな作業なし**（2026-06-26 に M038〔crypto StreamCipher の足場〕完了＝`manystore/crypto.py` 新設。
+詳細は `progress.md` M038）。次サイクルで `progress.md`「残作業」から選定する。
+（前段: 2026-06-26 M011〔安全入口の命名マトリクス確定〕／2026-06-25 M010〔local 非ブロッキング化〕。）
 
 ## 直近の変更
 
 > 完了マイルストーンの詳細は `progress.md` に集約。ここには溜めない（重複は memory clean で畳む）。
 
+- interrupt `2026-06-26-stream-cipher.md` を取り込み＝`manystore.crypto` 新設要望。最小実装＋インライン self-test の
+  みでテスト/ストレージ実装はせず、IO 繋ぎこみ IF の明確化に絞る方針で archive へ退避済。M038 を実装・完了。
 - interrupt `2026-06-25-m010-async-file-lib.md` を取り込み＝既存 backlog M010 の方式論点を精緻化。`aiofile`（真 async）
   より `anyio`（スレッドプール系・在中）を採用（理由: buffered では native AIO もスレッド fallback・移植性/最小優先）。
   → archive へ退避済。M010 を実装・完了。
