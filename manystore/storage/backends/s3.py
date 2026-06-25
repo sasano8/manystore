@@ -53,9 +53,10 @@ class _S3Base:
 
 
 class S3KeyValueStore(KeyValueStoreBase, _S3Base):
-    async def put(self, key: str, value: bytes) -> None:
+    async def put(self, key: str, value: bytes) -> FileInfo:
         async with self._session() as client:
             await client.put_object(Bucket=self._bucket, Key=key, Body=value)
+        return {"filename": key, "size": len(value)}
 
     async def get_or_raise(self, key: str) -> bytes:
         async with self._session() as client:
@@ -66,29 +67,20 @@ class S3KeyValueStore(KeyValueStoreBase, _S3Base):
             async with resp["Body"] as stream:
                 return await stream.read()
 
-    async def iter_prefix(self, prefix: str) -> AsyncIterator[FileInfo]:
-        # ネイティブ prefix 絞り（capability [SupportsPrefixListing]）。サーバ側で
-        # `Prefix=` を効かせるので、ラッパ越しでも総なめに落ちない（M030）。
+    async def iter_all(self, limit: int | None = None, prefix: str = "") -> AsyncIterator[FileInfo]:
+        # ネイティブ prefix 絞り＝サーバ側 `list_objects_v2(Prefix=…)`（空 prefix で全件）。
+        # 総なめに落とさず S3 側で絞る。limit は絞り込み後の先頭 N 件。
         async with self._session() as client:
             paginator = client.get_paginator("list_objects_v2")
             objects: list[dict] = []
             async for page in paginator.paginate(Bucket=self._bucket, Prefix=prefix):
                 objects.extend(page.get("Contents", []))
         objects.sort(key=lambda o: o["Key"], reverse=True)
-        for o in objects:
+        for o in objects[:limit]:  # prefix はサーバ側で済＝先頭 N 件スライス（limit=None は全件）
             yield FileInfo(filename=o["Key"], size=o["Size"])
 
-    async def iter_all(self, limit: int | None = None) -> AsyncIterator[FileInfo]:
-        # 全件＝空 prefix（順序・挙動は不変）。limit は client 側で先頭 N 件に絞る。
-        count = 0
-        async for info in self.iter_prefix(""):
-            if limit is not None and count >= limit:
-                return
-            yield info
-            count += 1
-
-    async def list_all(self, limit: int | None = None) -> list[FileInfo]:
-        return [info async for info in self.iter_all(limit)]
+    async def list_all(self, limit: int | None = None, prefix: str = "") -> list[FileInfo]:
+        return [info async for info in self.iter_all(limit, prefix)]
 
     async def exists(self, key: str) -> bool:
         from botocore.exceptions import ClientError

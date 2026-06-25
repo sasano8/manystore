@@ -9,6 +9,19 @@
 **スコープ:** ストレージ抽象とその backend 実装・接続・安全パス・合成ストアまで。これを超える利用側
 固有の要求は manystore 本体に取り込まず、利用側の adapter で吸収する（下記コア要件参照）。
 
+**メインは「ファイルストレージ（file/value 抽象）」**。put/get でファイル＝値を出し入れするのが本質で、
+戻り値も *file ドメインのメタデータ*（`FileInfo` 等）に留める。
+
+## 非ターゲット（パラダイム）
+
+- **request/response 型は対象外**: backend の生レス（s3 dict / nats revision / httpx.Response）を封筒に
+  包んで返す `StoreResponse`/`put_response` 系は**却下**（2026-06-26）。file/value 抽象に transport の
+  response を持ち込むのはパラダイム不一致。生レスの中身は共通化不能ゆえ表に出さない。
+- **pub/sub 型も対象外**: 購読・イベント配信は manystore のモデルではない。
+- ただし file/value の枠内に収まる列挙・絞り込み（例: `iter_all(prefix=…)`）は core に足してよい。
+  prefix は当初 optional capability だったが、2026-06-26 に **core 引数へ畳んで capability を廃止**した
+  （progress.md「意思決定の変遷」参照）。
+
 ## コア要件
 
 - 共通 IF（`KeyValueStore` / `FileStore`）で local / nats / s3 を差し替え可能にする。

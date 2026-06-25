@@ -15,7 +15,6 @@ from ...protocols import (
     FileInfo,
     KeyValueStoreBase,
 )
-from ...protocols import iter_prefix as _iter_prefix
 
 __all__ = ["UnsafePathError", "validate_safe_path", "SafeKeyValueStore", "SafeFileStore"]
 
@@ -45,25 +44,24 @@ class SafeKeyValueStore(KeyValueStoreBase):
     def __init__(self, store: AsyncKeyValueStore) -> None:
         self._store = store
 
-    async def put(self, key: str, value: bytes) -> None:
-        await self._store.put(validate_safe_path(key), value)
+    async def put(self, key: str, value: bytes) -> FileInfo:
+        return await self._store.put(validate_safe_path(key), value)
 
     async def get_or_raise(self, key: str) -> bytes:
         return await self._store.get_or_raise(validate_safe_path(key))
 
-    async def iter_all(self, limit: int | None = None) -> AsyncIterator[FileInfo]:
-        async for info in self._store.iter_all(limit):  # 下層の async iter を limit ごと素通し
-            yield info
-
-    def iter_prefix(self, prefix: str) -> AsyncIterator[FileInfo]:
-        # prefix を validate して内側へ委譲（capability 伝播）。空 prefix は「全件」を意味する
-        # ので検証を飛ばす（validate_safe_path は空を弾くため）。ネイティブ有無はヘルパが判定。
+    async def iter_all(self, limit: int | None = None, prefix: str = "") -> AsyncIterator[FileInfo]:
+        # prefix を validate してから下層へ素通し。空 prefix は「全件」＝検証を飛ばす
+        # （validate_safe_path は空を弾くため）。
         if prefix:
             validate_safe_path(prefix)
-        return _iter_prefix(self._store, prefix)
+        async for info in self._store.iter_all(limit, prefix):
+            yield info
 
-    async def list_all(self, limit: int | None = None) -> list[FileInfo]:
-        return await self._store.list_all(limit)
+    async def list_all(self, limit: int | None = None, prefix: str = "") -> list[FileInfo]:
+        if prefix:
+            validate_safe_path(prefix)
+        return await self._store.list_all(limit, prefix)
 
     async def exists(self, key: str) -> bool:
         return await self._store.exists(validate_safe_path(key))

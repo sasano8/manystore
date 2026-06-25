@@ -15,7 +15,10 @@ from pathlib import Path
 
 @dataclass(frozen=True)
 class ContextConfig:
-    """1 つの context マウント。`opts` は `create_key_value_store` に渡す backend 固有の引数。"""
+    """1 つの context マウント。
+
+    `opts` は backend 固有引数（`create_unsafe_key_value_store` へ渡す）。
+    """
 
     name: str
     backend: str
@@ -43,7 +46,7 @@ class AppConfig:
     default_context: str = ""
 
 
-# backend 名 → `create_key_value_store` のキーワード接頭辞のうち、よく使うものを
+# backend 名 → `create_unsafe_key_value_store` のキーワード接頭辞のうち、よく使うものを
 # トップレベルキーから補完する（例: local context の `root` を `local_dir` に写す）。
 def _normalize_opts(backend: str, raw: dict[str, object]) -> dict[str, object]:
     opts = dict(raw)

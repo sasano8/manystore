@@ -9,15 +9,15 @@
    primitive）。**backend は native primitive 側の基底を継承する**（NATS/dict/HTTP/S3=
    KeyValueStoreBase・Local=FileStoreBase）。
 3. **汎用アダプタ＋共有ヘルパ** … 2 方向のアダプタ（KVS→FileStore の [KeyValueFileStore] /
-   FileStore→KVS の [KeyValueFromFileStore]）、prefix capability ディスパッチ
-   （[iter_prefix]/[scan_prefix]）、共有 IO オブジェクトと cp/mv・原子的書き込みの再利用ヘルパ。
+   FileStore→KVS の [KeyValueFromFileStore]）、共有 IO・cp/mv・原子的書き込みのヘルパ。
+   prefix 列挙は **別 capability ではなく `iter_all(prefix=…)`/`list_all(prefix=…)` 引数**に畳む
+   （S3 はサーバ側 `Prefix=` で native・他は scan+filter が既定動作＝契約として明示）。
 
 対応関係（async ↔ sync）:
 - [KeyValueStore] ↔ [SyncKeyValueStore]（put/get がメインの値ストア。teardown は
   `aclose` ↔ `close`）。
 - [FileStore] ↔ [SyncFileStore]（**= KeyValueStore + open_reader/open_writer**。包含を継承で表す）。
 - [FileObject] ↔ [SyncFileObject]（ストリーム。`__aenter__/__aexit__` ↔ `__enter__/__exit__`）。
-- [SupportsPrefixListing] ↔ [SupportsSyncPrefixListing]（optional capability）。
 
 **FileStore = KeyValueStore + IO**（Protocol は包含を継承で表す）。「どちらを native primitive
 として実装するか」は backend 次第＝**基底実装クラスの選択**（file 寄り=`FileStoreBase`／kv 寄り=
@@ -31,7 +31,7 @@ import os
 import tempfile
 from collections.abc import AsyncIterable, AsyncIterator, Iterator
 from pathlib import Path
-from typing import Protocol, TypedDict, runtime_checkable
+from typing import Protocol, TypedDict
 
 
 class FileInfo(TypedDict):
@@ -53,13 +53,20 @@ class AsyncFileObject(Protocol):
 
 
 class AsyncKeyValueStore(Protocol):
-    async def put(self, key: str, value: bytes) -> None: ...
+    # put は書いた値の [FileInfo]（`{filename: key, size: len(value)}`）を返す＝**全 backend が
+    # 追加 I/O なしに生成できる共通レスポンス**。revision/etag は共通でない（capability 行き）。
+    async def put(self, key: str, value: bytes) -> FileInfo: ...
     async def get_or_raise(self, key: str) -> bytes: ...
     async def get(self, key: str, default: bytes | None = None) -> bytes | None: ...
-    async def iter_all(self, limit: int | None = None) -> AsyncIterable[FileInfo]: ...
-    # list_all は **全キーを平坦に**列挙する（'/' を含むネストキーも再帰的に＝1 階層だけではない）。
-    # `limit` は件数上限（`None` で全件）。階層の 1 段だけを返す概念は持たない（KVS はフラット）。
-    async def list_all(self, limit: int | None = None) -> list[FileInfo]: ...
+    # iter_all/list_all は **全キーを平坦に**列挙する（'/' を含むネストキーも再帰的に＝1 階層だけ
+    # ではない）。`limit` は件数上限（`None`=全件）。`prefix` は前方一致フィルタ（既定 `""`=全件）:
+    # S3 はサーバ側 `Prefix=` で native に絞り、native の無い backend は scan+filter
+    # （全件走査して startswith）で支える＝**契約上の既定動作**（暗黙フォールバックではない）。
+    # 階層の 1 段だけを返す概念は持たない（KVS はフラット）。
+    async def iter_all(
+        self, limit: int | None = None, prefix: str = ""
+    ) -> AsyncIterable[FileInfo]: ...
+    async def list_all(self, limit: int | None = None, prefix: str = "") -> list[FileInfo]: ...
     async def exists(self, key: str) -> bool: ...
     async def delete(self, key: str) -> None: ...
     async def cp(self, src: str, dst: str) -> None: ...
@@ -83,18 +90,6 @@ class AsyncFileStore(AsyncKeyValueStore, Protocol):
     async def open_writer(self, filename: str) -> AsyncFileObject: ...
 
 
-@runtime_checkable
-class SupportsPrefixListing(Protocol):
-    """`prefix` 前方一致の列挙をネイティブに持つストアの **optional capability**。
-
-    core IF（[KeyValueStore]）には載せない（最小・汎用＝原則1）。サーバ側で prefix を絞れる
-    backend は native 実装、無い backend は [scan_prefix] で明示的に opt-in。ディスパッチ
-    [iter_prefix] は capability 非対応なら暗黙フォールバックせず loud に失敗する。
-    """
-
-    def iter_prefix(self, prefix: str) -> AsyncIterable[FileInfo]: ...
-
-
 # ── sync（async の同期版・突合用に 1:1 で並べる） ──
 
 
@@ -111,11 +106,11 @@ class SyncFileObject(Protocol):
 class SyncKeyValueStore(Protocol):
     """[KeyValueStore] の同期版（put/get がメイン）。teardown は async `aclose` ↔ sync `close`。"""
 
-    def put(self, key: str, value: bytes) -> None: ...
+    def put(self, key: str, value: bytes) -> FileInfo: ...  # [AsyncKeyValueStore.put] の同期版
     def get_or_raise(self, key: str) -> bytes: ...
     def get(self, key: str, default: bytes | None = None) -> bytes | None: ...
-    def iter_all(self, limit: int | None = None) -> Iterator[FileInfo]: ...
-    def list_all(self, limit: int | None = None) -> list[FileInfo]: ...
+    def iter_all(self, limit: int | None = None, prefix: str = "") -> Iterator[FileInfo]: ...
+    def list_all(self, limit: int | None = None, prefix: str = "") -> list[FileInfo]: ...
     def exists(self, key: str) -> bool: ...
     def delete(self, key: str) -> None: ...
     def cp(self, src: str, dst: str) -> None: ...
@@ -129,13 +124,6 @@ class SyncFileStore(SyncKeyValueStore, Protocol):
 
     def open_reader(self, filename: str) -> SyncFileObject: ...
     def open_writer(self, filename: str) -> SyncFileObject: ...
-
-
-@runtime_checkable
-class SupportsSyncPrefixListing(Protocol):
-    """[SupportsPrefixListing] の同期版（optional capability）。"""
-
-    def iter_prefix(self, prefix: str) -> Iterator[FileInfo]: ...
 
 
 # ════════════════════════════════════════════════════════════════════════════
@@ -177,10 +165,11 @@ class FileStoreBase(abc.ABC):
         async with await self.open_reader(key) as f:
             return await f.read()
 
-    async def put(self, key: str, value: bytes) -> None:
+    async def put(self, key: str, value: bytes) -> FileInfo:
         # open_writer（ストリーム primitive）で全体書き＝値境界でバッファ。
         async with await self.open_writer(key) as f:
             await f.write(value)
+        return {"filename": key, "size": len(value)}
 
 
 class KeyValueStoreBase(abc.ABC):
@@ -208,40 +197,8 @@ class KeyValueStoreBase(abc.ABC):
 
 
 # ════════════════════════════════════════════════════════════════════════════
-# 共有ヘルパ ── prefix capability ディスパッチ・cp/mv・原子的書き込み
+# 共有ヘルパ ── cp/mv・原子的書き込み
 # ════════════════════════════════════════════════════════════════════════════
-
-
-def iter_prefix(store: AsyncKeyValueStore, prefix: str) -> AsyncIterator[FileInfo]:
-    """`store` の `prefix` 前方一致エントリを列挙する **capability ディスパッチ**。
-
-    `store` が [SupportsPrefixListing]（`iter_prefix`）を持てばそれへ委譲する(S3=サーバ側
-    `list_objects_v2(Prefix=…)` で絞る／サーバ側 prefix を持たない backend は [scan_prefix] で
-    **明示的に opt-in** した scan 実装)。capability を持たなければ **暗黙フォールバックせず
-    `NotImplementedError` で即座に失敗する**（暗黙の総なめは「prefix 非対応」という事実を隠して
-    問題を埋もれさせるため＝fail-loud 方針）。ラッパ（[SafeKeyValueStore] / [ArrayKeyValueStore]）は
-    このディスパッチ経由で内側へ委譲し、非対応はそのまま伝播させる。
-    """
-    if not isinstance(store, SupportsPrefixListing):
-        raise NotImplementedError(
-            f"{type(store).__name__} は prefix 列挙 capability（iter_prefix）を持たない。"
-            " backend/ラッパに iter_prefix を実装する（サーバ側 prefix が無いなら scan_prefix で"
-            " 明示的に opt-in）こと。暗黙の iter_all 総なめ fallback はしない（fail-loud）。"
-        )
-    return store.iter_prefix(prefix)
-
-
-async def scan_prefix(store: AsyncKeyValueStore, prefix: str) -> AsyncIterator[FileInfo]:
-    """`iter_all()` を総なめして `prefix` で絞る **明示的な scan 実装**ヘルパ。
-
-    サーバ側 prefix を持たない backend（local / dict / nats 等）が自身の `iter_prefix` 内で
-    **自ら opt-in** して使う（`def iter_prefix(self, prefix): return scan_prefix(self, prefix)`）。
-    [iter_prefix] ディスパッチが行う暗黙フォールバックではなく、**各 backend が「prefix を scan で
-    支える」と宣言する**点が要（fail-loud＝非対応は黙って scan に落とさず、対応は明示する）。
-    """
-    async for info in store.iter_all():
-        if info["filename"].startswith(prefix):
-            yield info
 
 
 def _atomic_write_bytes(path: Path, data: bytes) -> None:
@@ -355,21 +312,18 @@ class KeyValueFileStore(KeyValueStoreBase):
 
     # ── KVS 面は下層へ委譲（FileStore = KVS + IO の KVS 部分） ──
 
-    async def put(self, key: str, value: bytes) -> None:
-        await self._store.put(key, value)
+    async def put(self, key: str, value: bytes) -> FileInfo:
+        return await self._store.put(key, value)
 
     async def get_or_raise(self, key: str) -> bytes:
         return await self._store.get_or_raise(key)
 
-    async def iter_all(self, limit: int | None = None) -> AsyncIterator[FileInfo]:
-        async for info in self._store.iter_all(limit):  # 下層の async iter を limit ごと素通し
+    async def iter_all(self, limit: int | None = None, prefix: str = "") -> AsyncIterator[FileInfo]:
+        async for info in self._store.iter_all(limit, prefix):  # limit/prefix ごと下層へ素通し
             yield info
 
-    def iter_prefix(self, prefix: str) -> AsyncIterator[FileInfo]:
-        return iter_prefix(self._store, prefix)  # 下層の capability をそのまま伝播（非対応は loud）
-
-    async def list_all(self, limit: int | None = None) -> list[FileInfo]:
-        return await self._store.list_all(limit)
+    async def list_all(self, limit: int | None = None, prefix: str = "") -> list[FileInfo]:
+        return await self._store.list_all(limit, prefix)
 
     async def exists(self, key: str) -> bool:
         return await self._store.exists(key)
@@ -405,23 +359,20 @@ class KeyValueFromFileStore(KeyValueStoreBase):
     def __init__(self, store: AsyncFileStore) -> None:
         self._store = store
 
-    async def put(self, key: str, value: bytes) -> None:
-        await self._store.put(key, value)
+    async def put(self, key: str, value: bytes) -> FileInfo:
+        return await self._store.put(key, value)
 
     async def get_or_raise(self, key: str) -> bytes:
         return await self._store.get_or_raise(key)
 
-    async def iter_all(self, limit: int | None = None) -> AsyncIterator[FileInfo]:
-        async for info in self._store.iter_all(limit):  # 下層 FileStore の async iter を素通し
+    async def iter_all(self, limit: int | None = None, prefix: str = "") -> AsyncIterator[FileInfo]:
+        async for info in self._store.iter_all(
+            limit, prefix
+        ):  # 下層 FileStore へ limit/prefix 素通し
             yield info
 
-    def iter_prefix(self, prefix: str) -> AsyncIterator[FileInfo]:
-        return iter_prefix(
-            self._store, prefix
-        )  # 下層 FileStore の capability を伝播（非対応は loud）
-
-    async def list_all(self, limit: int | None = None) -> list[FileInfo]:
-        return await self._store.list_all(limit)
+    async def list_all(self, limit: int | None = None, prefix: str = "") -> list[FileInfo]:
+        return await self._store.list_all(limit, prefix)
 
     async def exists(self, key: str) -> bool:
         return await self._store.exists(key)

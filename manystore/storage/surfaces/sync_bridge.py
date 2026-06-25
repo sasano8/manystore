@@ -26,8 +26,8 @@ class AsyncToSyncKeyValueStore:
     def _run(self, coro):
         return self._loop.run_until_complete(coro)
 
-    def put(self, key: str, value: bytes) -> None:
-        self._run(self._store.put(key, value))
+    def put(self, key: str, value: bytes) -> FileInfo:
+        return self._run(self._store.put(key, value))
 
     def get_or_raise(self, key: str) -> bytes:
         return self._run(self._store.get_or_raise(key))
@@ -35,18 +35,18 @@ class AsyncToSyncKeyValueStore:
     def get(self, key: str, default: bytes | None = None) -> bytes | None:
         return self._run(self._store.get(key, default))
 
-    def iter_all(self, limit: int | None = None) -> Iterator[FileInfo]:
+    def iter_all(self, limit: int | None = None, prefix: str = "") -> Iterator[FileInfo]:
         # async イテレータを 1 回のループ実行で全件取得してから同期的に流す。
         # __anext__ を毎回駆動する方式は async ジェネレータの finalize が厄介なため、
         # comprehension で取り切る（async ジェネレータはこの実行内で確実に閉じられる）。
         async def _collect() -> list[FileInfo]:
-            return [info async for info in self._store.iter_all(limit)]
+            return [info async for info in self._store.iter_all(limit, prefix)]
 
         yield from self._run(_collect())
 
-    def list_all(self, limit: int | None = None) -> list[FileInfo]:
+    def list_all(self, limit: int | None = None, prefix: str = "") -> list[FileInfo]:
         # list は async 側の実装を 1 回のループ実行で取り切る（item 毎の駆動を避ける）。
-        return self._run(self._store.list_all(limit))
+        return self._run(self._store.list_all(limit, prefix))
 
     def exists(self, key: str) -> bool:
         return self._run(self._store.exists(key))

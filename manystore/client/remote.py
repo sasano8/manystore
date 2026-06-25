@@ -103,22 +103,31 @@ class RemoteKeyValueStore(KeyValueStoreBase):
         self._client = ManystoreClient(base_url, headers=headers, transport=transport)
         self._context = context
 
-    async def put(self, key: str, value: bytes) -> None:
+    async def put(self, key: str, value: bytes) -> FileInfo:
         await self._client.put(self._context, key, value)
+        return {"filename": key, "size": len(value)}
 
     async def get_or_raise(self, key: str) -> bytes:
         return await self._client.get_or_raise(self._context, key)
 
-    async def iter_all(self, limit: int | None = None) -> AsyncIterator[FileInfo]:
-        # HTTP 越しは真の無制限ができないので None は実上限 10_000 にクランプ（従来挙動）。
-        cap = limit if limit is not None else 10_000
-        for e in await self._client.list_entries(self._context, limit=cap):
+    async def iter_all(self, limit: int | None = None, prefix: str = "") -> AsyncIterator[FileInfo]:
+        # native REST API は prefix を持たない（サーバ側 prefix は S3 gateway のみ）。
+        # ここは全件取得し client 側で scan+filter する（prefix 非対応 backend と同じ既定動作）。
+        # HTTP 越しは無制限不可で None は実上限 10_000 にクランプ。prefix 絞り込み時は server 側
+        # limit で取りこぼさないよう常に 10_000 取得してから絞る。
+        # TODO(M044): 10_000 を共通の名前付き既定定数へ集約（spec/既定値の正本化）
+        fetch_cap = 10_000 if prefix else (limit if limit is not None else 10_000)
+        count = 0
+        for e in await self._client.list_entries(self._context, limit=fetch_cap):
+            if prefix and not e.key.startswith(prefix):
+                continue
+            if limit is not None and count >= limit:
+                return
             yield FileInfo(filename=e.key, size=e.size)
+            count += 1
 
-    async def list_all(self, limit: int | None = None) -> list[FileInfo]:
-        cap = limit if limit is not None else 10_000
-        entries = await self._client.list_entries(self._context, limit=cap)
-        return [FileInfo(filename=e.key, size=e.size) for e in entries]
+    async def list_all(self, limit: int | None = None, prefix: str = "") -> list[FileInfo]:
+        return [info async for info in self.iter_all(limit, prefix)]
 
     async def exists(self, key: str) -> bool:
         return await self._client.exists(self._context, key)
@@ -139,4 +148,4 @@ class RemoteKeyValueStore(KeyValueStoreBase):
         await self._client.aclose()
 
 
-# TODO: Safepath Client もここに含んでしまうといいのかも？トランスポート層の話はどう整理しよう
+# TODO(M042): transport 層の整理（Safepath Client / RemoteKVS の所属の切り分け）

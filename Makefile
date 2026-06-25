@@ -12,7 +12,7 @@ SRC := manystore tests
 E2E_S3_ACCESS_KEY := manystore
 E2E_S3_SECRET_KEY := manystoresecret123
 
-.PHONY: format format-check lint test test-all check ui e2e-up e2e-down conformance-docs docs docs-serve
+.PHONY: format format-check lint test test-all check grep-todo ui e2e-up e2e-down conformance-docs docs docs-serve
 
 # ストレージ UI / サーバを開発設定で起動（既定 http://127.0.0.1:8000）。
 # 既定ストレージは .cache/manystore_dev（使い捨て・起動時に自動作成）。PORT=xxxx で上書き可。
@@ -50,6 +50,11 @@ test-all:
 
 # 一括検証（format 確認 + fast test）＝内ループの「検証緑」判定
 check: format-check test
+
+# 作業マーカー（TODO/FIXME/HACK）を file:line で拾う（R16）。書式は `# TODO(<backlog-id>): what`。
+# 非ヒットでも CI を割らないよう exit 0。
+grep-todo:
+	@grep -rnE 'TODO|FIXME|HACK' $(SRC) --include='*.py' || true
 
 # conformance 結果を docs の spec 表へ出力（メソッド × 実装の Implemented/Not）。
 # 接続不要・決定的。docs/kv_spec.md / docs/file_storage_spec.md を再生成する。

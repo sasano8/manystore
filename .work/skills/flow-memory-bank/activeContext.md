@@ -5,39 +5,46 @@
 
 ## 現在のフォーカス
 
-**アクティブな作業なし**（2026-06-25 の protocols.py 集約＝コミット済で一段落）。次サイクルで
-`progress.md`「残作業」から選定する（候補は下記「次のステップ」）。
+**アクティブな作業なし**（2026-06-26 に scaffold 2 件＝IPFS backend〔M039〕／ロードバランサー層〔M040〕の
+空定義＋ネタを配置。本体は未実装・facade/factory 未公開。詳細は `progress.md` 残作業 M039/M040）。
+次サイクルで `progress.md`「残作業」から選定する。
+（前段: 2026-06-26 M038〔crypto StreamCipher 足場〕／M011〔安全入口の命名マトリクス〕。）
 
 ## 直近の変更
 
-- **protocols.py 集約 完了（2026-06-25・コミット `ece844b`）**: `stores/base.py` を削除し、既定実装
-  （`FileStoreBase`/`KeyValueStoreBase`・アダプタ `KeyValueFileStore`/`KeyValueFromFileStore`・共有ヘルパ）を
-  protocols.py へ全面集約。全 import を `..protocols` へ向け替え、`KeyValueFileStore` を `file.py` 公開 API に追加。
-  `make test` 失敗の原因は test_storage が Protocol `AsyncKeyValueStore` を adapter として instantiate していた
-  こと＝`KeyValueFileStore` に修正。詳細は systemPatterns「コア」へ昇格済。
-- **memory clean 実施（2026-06-25）**: progress の完了行を畳み込み・解決済み「既知の問題」を GC・plan ファイルを
-  `plans/` へ集約（m028 は完了につき削除）・完了 interrupt を archive。
-- **バックログ4件を解決（2026-06-25）**: M036（error-swallow を fail-loud 化＝nats/s3 の exists・iter_all。test +3）・
-  M033（limit 統一は波及済と確認＝コード変更なし）・M017（3.14+ で確定＝3.10+ 拡張は見送り）・M024（pull 型の文書追従）。
-- **M032 完了（2026-06-25）**: 安全な入口 `open_async_key_value_store` / `open_async_file_store`（Safe 包装必須の接続 CM）を
-  トップ公開。`create_file_store` 新設・`SafeFileStore` を `SafeKeyValueStore` 継承に作り直し（M027b の Safe 残も解消）。test +4。
-- **ディレクトリ再編 完了（2026-06-25・ユーザー IDE）**: 3 バケットに整理＝`storage/`（backends・surfaces〔旧 stores〕・
-  facade kv/file）/ `serving/`（services〔旧 implement〕・server・gateway）/ `tools/conformancer/`。`protocols.py`・
-  `connect.py`・`exceptions.py`・`client/`・`combined.py` はトップ。**ドキュメント追従**＝README・docs/architecture・
-  各 docstring・MB の旧パス参照を是正（`manystore.tools.conformancer` 等）。s3map に紛れた garbage 文字列も除去。
+> 完了マイルストーンの詳細は `progress.md` に集約。ここには溜めない（重複は memory clean で畳む）。
+
+- 【最重要】protocols.py 契約準拠を**横展開の必須ゲート**にすべき、というメタ判断を supervisor へ上りエスカレ
+  （`outbox/2026-06-26-protocols-conformance-is-load-bearing.md`）。証拠は M043。横断ルール化の是非・置き場・
+  ブロッカー扱いの確定を supervisor に仰ぐ（実装は M043 として worker 側に在る）。
+- 【最重要】ユーザー指摘＝`KeyValueStoreBase`(ABC) が `AsyncKeyValueStore`(Protocol) と完全一致しない（get_or_raise
+  だけ abstract・残り 9 メソッド未強制＝部分実装が黙って通る・fail-loud でない）。interrupt 経由で **M043** として
+  バックログ最上段に積んだ（最重要）。archive 退避済。実装は別サイクル。
+- TODO 規約＋`make grep-todo` 要望：配置を unit-quality（定義）／supervisor・flow（参照）に合意。**親正本の skill は
+  worker から編集不可**（ガード発火＝役割モデル）→ `outbox/2026-06-26-todo-convention-and-grep-todo.md` に上りエスカレ。
+  repo ローカルは実施：Makefile に `make grep-todo` 追加＋既存マーカー4件を `# TODO(<id>)` 書式へ整合（M040/M041/M042 を backlog 化）。
+- interrupt `2026-06-26-ipfs-and-loadbalancer.md` を取り込み＝IPFS backend／ロードバランサー層の **scaffold 要望**。
+  意見すり合わせ（IPFS=MFS 主／LB=負荷メトリクスで選ぶ動的プレースメント・Array の兄弟）の上、空定義＋ネタを配置。
+  factory/facade には未接続（未完成のため・ユーザー指示）。→ archive 退避済。残作業 M039/M040 として継続。
+- interrupt `2026-06-26-stream-cipher.md` を取り込み＝`manystore.crypto` 新設要望。最小実装＋インライン self-test の
+  みでテスト/ストレージ実装はせず、IO 繋ぎこみ IF の明確化に絞る方針で archive へ退避済。M038 を実装・完了。
+- interrupt `2026-06-25-m010-async-file-lib.md` を取り込み＝既存 backlog M010 の方式論点を精緻化。`aiofile`（真 async）
+  より `anyio`（スレッドプール系・在中）を採用（理由: buffered では native AIO もスレッド fallback・移植性/最小優先）。
+  → archive へ退避済。M010 を実装・完了。
 
 ## 次のステップ
 
+- **最優先候補＝M043（ABC 基底 ↔ Protocol 契約の lockstep 保証・最重要）**。着手時は是正案①〜③から選定。
 - 実装サイクル候補（`progress.md` 残作業から）: **M011（安全入口の最終形）**＝下記「進行中の決定」の命名/格下げ/
-  Array enter_context を実装／フェーズ2 `kv/json`／フェーズ3 `storage/manystore`／M034（conformance spec 表）／M010。
+  Array enter_context を実装／フェーズ2 `kv/json`／フェーズ3 `storage/manystore`。
 
 ## 進行中の決定・考慮事項
 
-- **【決定・未実装】安全入口の最終形（M011・顔だけ残し生は格下げ）**: ①命名＝`open_async_{kv,file,array}_store`（顔・
-  safe・接続CM）＋ `create_safe_{kv,file,array}_store`（safe・構築のみ）。`create_unsafe_*`・生クラスはトップ `__all__`
-  から外し `storage.backends` へ格下げ。②`ArrayKeyValueStore` は mount を登録のみ（同期・I/O なし）に分離し、接続は
-  `open_async_array_store` の enter_context CM へ（現状 mount が connect も担う二重責務を解消）。`StorageService` は追従。
-  ※外向き API 変更なので着手時に粒度を再確認。
+- **【完了】安全入口の最終形（M011）**: 入口の命名マトリクス（3×3）を確定＝**unsafe**（`create_unsafe_{key_value,file}_store`
+  ＝生・未接続・キー検証なし／array は `ArrayKeyValueStore` 直）/ **safe**（`create_safe_{key_value,file,array}_store`
+  ＝Safe 包装・未接続）/ **顔**（`open_async_{key_value,file,array}_store`＝Safe 包装＋接続 CM）。生口はトップ公開に残す
+  （ユーザー確定＝格下げせず名前で明示のみ）。`ArrayKeyValueStore.mount`/`unmount` は登録のみ（**IF は
+  非同期化済＝将来 M028b の動的マウントで `asyncio.Lock` を後付けできる余地。本体は現状 I/O なし**）。
 - **manystore は最小・汎用に保つ**：利用側都合で IF を拡張しない（YAGNI）。
 - **worker/supervisor**: 本 repo は dotfiles（`workers_dir: workers`）配下の worker。下り=interrupt 投函／
   上り=`outbox/` へ pull 型エスカレ（親は直接知らない）。
