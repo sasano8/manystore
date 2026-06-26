@@ -109,6 +109,18 @@
    無ければ NATS の writable conditional は **その時点で実装可能な範囲＋足りない分は loud に
    `NotImplementedError`**（黙って last-writer-wins に落とさない＝要求7）。
 
+## 実装状況（2026-06-27）
+
+- **スコープ確定**（ユーザー承認）: `put_if_absent`(create CAS)＋`put_if_match`(update CAS) を **core 必須挙動**。
+  version=opaque str（S3 etag/NATS revision/local mtime_ns+size）、読み口 `head`、不一致は `ConflictError`。
+- **例外集約済**（M048）: `exceptions.py` に `UnsupportedOperation`(405)/`ConflictError`(409)。read-only は
+  conditional 系も `UnsupportedOperation` を上げる（put と同じ＝capability 不要）。
+- **並行安全性チェッカ scaffold 済**: `conformancer.assert_put_if_absent_concurrency_safe`（同時 N 本→成功
+  ちょうど 1・残り `ConflictError`）。**自己テスト 2 本が active**（safe→pass / TOCTOU→AssertionError＝
+  「衝突でテストを落とせる」ことを確認済）。**実 backend テストは `@pytest.mark.skip`**（M046 本実装で解禁）。
+- **残＝本実装**: 各 backend の `put_if_absent`/`put_if_match`/`head` 実装（local=os.link/flock・S3=条件ヘッダ）、
+  `_StoreBase` への abstract 追加（M043 parity 揃え）、ラッパ委譲、skip 解除。
+
 ## テスト戦略（conformancer が並行安全性を強制＝製品コンセプトの核）
 
 - **並行 property テスト（必須挙動の担保）**: `put` を持つ全ストアに対し、

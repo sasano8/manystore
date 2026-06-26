@@ -22,6 +22,7 @@ from manystore import (
     S3KeyValueStore,
 )
 from manystore.client import RemoteKeyValueStore
+from manystore.exceptions import ConflictError
 from manystore.protocols import FileStoreBase, KeyValueStoreBase
 from manystore.storage.file import AsyncFileStore
 from manystore.storage.kv import AsyncKeyValueStore
@@ -31,6 +32,7 @@ from manystore.tools.conformancer import (
     assert_conformancer_protocol_current,
     assert_file_store,
     assert_key_value_store,
+    assert_put_if_absent_concurrency_safe,
     base_protocol_parity_errors,
     conformancer_protocol_drift,
     missing_members,
@@ -262,3 +264,62 @@ def test_parity_detects_missing_and_signature_drift() -> None:
 
     drift = base_protocol_parity_errors(_SigDrift, AsyncKeyValueStore)
     assert any("exists" in e and "シグネチャ" in e for e in drift)
+
+
+# ── 並行安全性（M046: put を持つストアの必須挙動を conformance で機械検証） ──
+#
+# 以下 2 つは **チェッカ自体の健全性**（衝突を検出してテストを落とせるか）を確認する自己テスト＝
+# 「衝突でテストに失敗させれること」を担保する。実 backend の検査は M046（put_if_absent）実装後に
+# 有効化（下の skip 参照）。チェッカは asyncio 単一スレッドでも、check と set の間に await(=yield)が
+# 入る非原子実装（TOCTOU）なら成功 >1 になり露見する。
+
+
+class _ConditionalDict:
+    """並行安全性チェッカの自己テスト用ストア。`safe=False` は exists→(yield)→put の TOCTOU。"""
+
+    def __init__(self, *, safe: bool) -> None:
+        self._d: dict[str, bytes] = {}
+        self._safe = safe
+
+    async def delete(self, key: str) -> None:
+        self._d.pop(key, None)
+
+    async def put_if_absent(self, key: str, value: bytes):
+        if self._safe:
+            # 原子的: check と set の間に await を挟まない＝単一スレッドでは割り込まれない。
+            if key in self._d:
+                raise ConflictError(key)
+            self._d[key] = value
+        else:
+            # 非安全(TOCTOU): 存在確認のあと yield し、その隙に他コルーチンが作成しうる。
+            exists = key in self._d
+            await asyncio.sleep(0)
+            if exists:
+                raise ConflictError(key)
+            self._d[key] = value
+        return {"filename": key, "size": len(value)}
+
+
+def test_concurrency_checker_passes_for_safe_store() -> None:
+    # 原子的な put_if_absent は「成功ちょうど 1」＝チェッカを通る。
+    asyncio.run(assert_put_if_absent_concurrency_safe(_ConditionalDict(safe=True), concurrency=50))
+
+
+def test_concurrency_checker_fails_on_collision() -> None:
+    # 非安全(TOCTOU)な実装は同時多重で成功 >1 ＝チェッカが AssertionError で落とす
+    # （= 衝突でテストを失敗させられることの確認）。
+    with pytest.raises(AssertionError, match="並行安全性違反"):
+        asyncio.run(
+            assert_put_if_absent_concurrency_safe(_ConditionalDict(safe=False), concurrency=50)
+        )
+
+
+@pytest.mark.skip(reason="M046 conditional put（put_if_absent/put_if_match）未実装＝実装後に有効化")
+def test_local_put_if_absent_concurrent_exactly_one_wins(tmp_path) -> None:
+    # 実 backend の必須挙動: 並行 put_if_absent → 成功ちょうど 1。M046 実装後に skip を外す。
+    asyncio.run(assert_put_if_absent_concurrency_safe(LocalKeyValueStore(tmp_path)))
+
+
+@pytest.mark.skip(reason="M046 conditional put（put_if_absent/put_if_match）未実装＝実装後に有効化")
+def test_dict_put_if_absent_concurrent_exactly_one_wins() -> None:
+    asyncio.run(assert_put_if_absent_concurrency_safe(DictKeyValueStore()))

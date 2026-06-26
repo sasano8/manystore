@@ -31,6 +31,7 @@
         save_report(report, "my_file_store.conformance.json") # 全保存
 """
 
+import asyncio
 import base64
 import contextlib
 import inspect
@@ -40,6 +41,7 @@ import uuid
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
+from ...exceptions import ConflictError
 from ...protocols import AsyncFileObject, AsyncFileStore, AsyncKeyValueStore
 
 
@@ -182,6 +184,36 @@ def assert_conformancer_protocol_current() -> None:
         raise AssertionError(
             "conformancer が古いプロトコルを前提にしている（protocols.py が正）:\n  "
             + "\n  ".join(errors)
+        )
+
+
+async def assert_put_if_absent_concurrency_safe(store: object, *, concurrency: int = 50) -> None:
+    """`put_if_absent` の **並行安全性**（put を持つストアの必須挙動）を検査する。
+
+    同一キーへ `concurrency` 本の `put_if_absent` を同時実行し、**成功はちょうど 1・残りは
+    `ConflictError`** を表明する（lost-update を黙って通したら違反＝`AssertionError`）。「最小機能
+    だが提供する挙動の最小保証（並行安全性）は担保」という製品コンセプトを **conformance（標準）で
+    機械検証**する核。read-only は `put_if_absent` が `UnsupportedOperation` を上げる＝呼ばない。
+
+    並行バグは確率的なので `concurrency` を上げて検出力を稼ぐ（決定的検出は不可＝best-effort）。
+    非原子な実装（exists→put の TOCTOU 等）は同時多重で高確率に「成功 >1」となり露見する。
+    """
+    key = f"_conformance/cc/{uuid.uuid4().hex}"
+    with contextlib.suppress(Exception):
+        await store.delete(key)  # クリーン初期状態（既存があると全件 conflict になる）
+
+    async def _attempt() -> bool:
+        try:
+            await store.put_if_absent(key, b"x")
+            return True  # この実行が作成に成功
+        except ConflictError:
+            return False  # 既に作られていた（想定内の衝突）
+
+    wins = sum(await asyncio.gather(*[_attempt() for _ in range(concurrency)]))
+    if wins != 1:
+        raise AssertionError(
+            f"put_if_absent 並行安全性違反: {concurrency} 本同時で成功 {wins} 件"
+            f"（期待＝ちょうど 1・残りは ConflictError）"
         )
 
 
