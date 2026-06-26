@@ -73,6 +73,28 @@ class NoSuchUpload(ManystoreError):
     title = "No Such Upload"
 
 
+class UnsupportedOperation(io.UnsupportedOperation, ManystoreError):
+    """ストア/ストリームが対応しない操作（read-only backend への書き込み・reader への write 等）。
+
+    stdlib の `io.UnsupportedOperation` を**先頭に残す**＝既存の `except io.UnsupportedOperation` や
+    ファイルオブジェクトの慣習（reader に write したら拒否）を満たしつつ HTTP status を持たせる。
+    backend/FileObject は生 `io.UnsupportedOperation` でなく**これ**を raise（例外は集約）。
+    """
+
+    status = 405
+    title = "Method Not Allowed"
+
+
+class ConflictError(ManystoreError):
+    """並行更新の衝突（conditional put の条件不一致＝lost-update を fail-loud に拒否）。
+
+    `put_if_absent`（既存あり）/ `put_if_match`（version 不一致）が満たせないとき上げる（M046）。
+    """
+
+    status = 409
+    title = "Conflict"
+
+
 # stdlib 例外 → (status, title) の既定写像。manystore 外の例外も problem にできる。
 # サブクラス関係で取りこぼさないよう**具体的なものを先**に並べる（io.UnsupportedOperation は
 # ValueError のサブクラスなので ValueError より前に置く）。

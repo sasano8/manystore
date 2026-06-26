@@ -19,9 +19,9 @@
             await enc.write(plaintext)        # 暗号文として書かれる
 """
 
-import io
 from typing import Protocol, runtime_checkable
 
+from manystore.exceptions import UnsupportedOperation
 from manystore.protocols import AsyncFileObject
 
 
@@ -76,7 +76,7 @@ class CipherReader:
         return out
 
     async def write(self, data: bytes) -> int:
-        raise io.UnsupportedOperation("read-only stream")
+        raise UnsupportedOperation("read-only stream")
 
     async def close(self) -> None:
         await self._inner.close()
@@ -102,7 +102,7 @@ class CipherWriter:
         self._offset = 0
 
     async def read(self, size: int = -1) -> bytes:
-        raise io.UnsupportedOperation("write-only stream")
+        raise UnsupportedOperation("write-only stream")
 
     async def write(self, data: bytes) -> int:
         enc = self._cipher.transform(self._offset, data)

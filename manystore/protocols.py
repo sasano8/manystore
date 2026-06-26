@@ -33,6 +33,8 @@ from collections.abc import AsyncIterable, AsyncIterator, Iterator
 from pathlib import Path
 from typing import Protocol, TypedDict
 
+from .exceptions import UnsupportedOperation
+
 
 class FileInfo(TypedDict):
     filename: str
@@ -299,7 +301,7 @@ class _KvReadFileObject:
         return self._buf.read(size)
 
     async def write(self, data: bytes) -> int:
-        raise io.UnsupportedOperation("not writable")
+        raise UnsupportedOperation("not writable")
 
     async def close(self) -> None:
         self._buf.close()
@@ -321,7 +323,7 @@ class _KvWriteFileObject:
         self._closed = False
 
     async def read(self, size: int = -1) -> bytes:
-        raise io.UnsupportedOperation("not readable")
+        raise UnsupportedOperation("not readable")
 
     async def write(self, data: bytes) -> int:
         return self._buf.write(data)

@@ -3,9 +3,9 @@
 aiobotocore はメソッド内で遅延 import する（依存を __init__ 直下に持ち込まない）。
 """
 
-import io
 from collections.abc import AsyncIterator
 
+from ...exceptions import UnsupportedOperation
 from ...protocols import AsyncFileObject, FileInfo, KeyValueStoreBase
 
 
@@ -130,7 +130,7 @@ class _S3StreamReader:
         return await self._body.read() if size < 0 else await self._body.read(size)
 
     async def write(self, data: bytes) -> int:
-        raise io.UnsupportedOperation("not writable")
+        raise UnsupportedOperation("not writable")
 
     async def close(self) -> None:
         self._body.close()
@@ -162,7 +162,7 @@ class _S3MultipartWriter:
         self._closed = False
 
     async def read(self, size: int = -1) -> bytes:
-        raise io.UnsupportedOperation("not readable")
+        raise UnsupportedOperation("not readable")
 
     async def _start(self) -> None:
         self._client_cm = self._base._session()

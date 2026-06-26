@@ -12,7 +12,6 @@
 """
 
 import contextlib
-import io
 import os
 import tempfile
 from collections.abc import AsyncIterator
@@ -22,6 +21,7 @@ from typing import BinaryIO
 
 import anyio.to_thread
 
+from ...exceptions import UnsupportedOperation
 from ...protocols import (
     AsyncFileObject,
     FileInfo,
@@ -82,7 +82,7 @@ class _LocalAtomicWriter:
         return cls(path, tmp, fh)
 
     async def read(self, size: int = -1) -> bytes:
-        raise io.UnsupportedOperation("not readable")
+        raise UnsupportedOperation("not readable")
 
     async def write(self, data: bytes) -> int:
         return await _offload(self._fh.write, data)

@@ -21,9 +21,9 @@ Kubo は HTTP API なので **httpx を流用**（http backend と同じ遅延 i
 リモートのピン留めサービス（Pinata 等）は `token`（`Authorization` ヘッダ）で叩く。
 """
 
-import io
 from collections.abc import AsyncIterator
 
+from ...exceptions import UnsupportedOperation
 from ...protocols import AsyncFileObject, FileInfo, KeyValueStoreBase, _KvReadFileObject
 
 # 既定の Kubo HTTP API（ローカルデーモン）と Gateway。
@@ -132,4 +132,4 @@ class IpfsFileStore(IpfsKeyValueStore):
         return _KvReadFileObject(await self.get_or_raise(filename))  # 欠損は FileNotFoundError
 
     async def open_writer(self, filename: str) -> AsyncFileObject:
-        raise io.UnsupportedOperation("ipfs backend scaffold: open_writer not implemented yet")
+        raise UnsupportedOperation("ipfs backend scaffold: open_writer not implemented yet")

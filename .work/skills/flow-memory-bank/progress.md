@@ -63,6 +63,11 @@
 
 ### 完了マイルストーン（要点のみ・経緯は git 履歴）
 
+- **M048（2026-06-27・完了）**: 例外を `exceptions.py` に集約＝**`UnsupportedOperation(io.UnsupportedOperation,
+  ManystoreError)`**（status=405・stdlib を先頭に残し `except io.UnsupportedOperation`/FileObject 慣習を維持しつつ
+  HTTP status を持たせる）＋ **`ConflictError(ManystoreError)`**（status=409・M046 用）を新設。生 `io.UnsupportedOperation`
+  raise を全廃して manystore 版へ（protocols/local/http/s3/ipfs/crypto・計 10 箇所）＝「例外は exceptions に
+  HTTP status 付きで集約」をユーザー方針として確立。tests は `io.UnsupportedOperation` subclass ゆえ無改修で緑（126）。
 - **M047（2026-06-27・完了）**: CI/Makefile/mkdocs を supervisor 新標準へ追従（下り dispatch・急がない）。
   ①`pages.yml`＝deploy と Upload Pages artifact の guard を `github.event_name == 'push' && github.ref ==
   'refs/heads/main'` へ（PR run の環境保護落ちを恒久回避）＋`setup-uv@v6`（[[func-mkdocs]] 雛形が正本）。
