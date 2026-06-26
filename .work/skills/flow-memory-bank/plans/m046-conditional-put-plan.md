@@ -27,15 +27,19 @@
 
 ## 設計の核（5 つの判断）
 
-### 判断1: core ではなく **capability**（opt-in Protocol）にする 〔推奨〕
-- conditional put は **全 backend が支えられない**（http は read-only・実装差が大）。core Protocol に
-  載せると M043 lockstep で全 backend に強制＝最小-core 違反。
-- `@runtime_checkable` な **`SupportsConditionalPut` capability Protocol** として定義し、対応 backend だけ
-  実装。非対応は「メソッドが無い」＝呼ぶ側が `isinstance(store, SupportsConditionalPut)` で分岐、または
-  ラッパが **fail-loud に `NotImplementedError`**（暗黙フォールバック無し＝要求7）。
-- prefix を capability から **core 引数に畳んだ**経緯（M030→廃止）と矛盾しない: prefix は「全 backend が
-  scan+filter で必ず支えられる」ので core 化できた。conditional put は **支えられない backend がある**ので
-  capability が正しい（線引き＝「全 backend が満たせるか」）。
+### 判断1: capability ではなく **core 契約**（put を持つなら必須の最小挙動） 〔ユーザー確定 2026-06-27〕
+- 並行安全な書き込みは **opt-in の能力ではなく、`put` を持つストアの必須挙動**。本製品は「最小機能」だが、
+  **提供する挙動の最小保証（並行安全性）は担保**し、それを **conformancer（テストツール）が検証**する
+  ＝「最小だが挙動は担保＋そのためのテストツール」という製品コンセプトそのもの。
+- 線引きは **read-only か writable か の 1 点だけ**。read-only backend（http）は **`put` 自体を持たない**
+  （既存の write op `put`/`delete`/`cp`/`mv` は `io.UnsupportedOperation` を raise）＝conditional 系も
+  **同じく raise するだけ**で自明に除外される。**特別な capability Protocol も `isinstance` 分岐も要らない**。
+- よってメソッドは **core 表面（`_StoreBase` の abstract）**に置く。M043 fail-loud で全 backend が実装を
+  強制され、writable は native に並行安全実装・read-only は raise。「put はできるが conditional はできない」
+  という**中間層を作らない**（ユーザー指摘）。当初の `@runtime_checkable` capability 案は**撤回**。
+- prefix を capability→core 引数に畳んだ経緯（M030 廃止）とも整合: いずれも「中間の opt-in 層を作らず
+  core 契約に寄せる」方向。prefix は全 backend が scan+filter で満たせ、conditional は read-only が put ごと
+  持たないので writable のみ満たす——どちらも capability 不要。
 
 ### 判断2: MVP は **create-only（`put_if_absent`）から** 〔推奨・最小〕
 - 最も安価で**全 backend で原子的に実現可能**な OCC＝「無ければ作る・有れば conflict」。version トークン
@@ -71,11 +75,13 @@
 - M045（error-as-value の `put2`）とは**別系統**。conditional put は既存の raise ベース fail-loud に乗せる
   （put が raise する流儀と一致）。M045 を採るかは独立に判断。
 
-### 判断5: async↔sync・ラッパ伝播
-- capability も **async/sync 両 Protocol** を対で定義（`SupportsConditionalPut` / `SupportsConditionalPutSync`）。
-- `SafeKeyValueStore`/`ArrayKeyValueStore`/`sync_bridge`/`RemoteKeyValueStore` は **下層が capability を
-  満たすときだけ委譲**（`isinstance` 判定）し、満たさないなら `NotImplementedError`（fail-loud）。
-- conformancer に capability の存在チェック＋（Phase 2 なら）CAS 挙動テストを足す。
+### 判断5: async↔sync・ラッパ伝播・conformancer 強制
+- core 契約なので **async/sync 両 Protocol（`AsyncKeyValueStore`/`SyncKeyValueStore`）に対で追加**し、
+  `_StoreBase` で abstract 宣言＝M043 parity（基底↔Protocol・conformancer drift）を全部揃える。
+- ラッパ（`Safe`/`Array`/`sync_bridge`/`Remote`）は **put と同様にそのまま委譲**（isinstance 分岐は不要＝
+  下層が writable なら実装あり・read-only なら下層が raise を伝播）。
+- **conformancer が並行安全性を強制**（製品コンセプトの核）= 「put を持つ全ストア」に対し並行 conditional
+  put の property テスト（下記テスト戦略）。read-only は put が `UnsupportedOperation` を上げる時点で対象外。
 
 ## フェーズ分割
 
@@ -85,32 +91,41 @@
 | P2 | `head`(version 読み口) ＋ `put_if_match`（CAS）＝S3 etag / dict 世代 / local mtime+size+flock | local は flock 必須・S3/NATS はサーバ側 | 中 |
 | P3 | NATS の create/CAS 対応（要調査の結果しだい）／serving 層（native REST・S3 GW If-Match）への配線 | — | 中 |
 
-> P1 だけでも「キー確保・冪等 create・lost-update の一部（新規衝突）」を fail-loud に解決できる。
-> ユーザーの原体験（並行 put で先勝ち）に **更新 CAS まで要るなら P2 まで**。
+> ユーザーの原体験は**既存値の並行上書き**＝更新 lost-update なので、**MVP は P1+P2**（create と update の
+> 両 CAS）が筋。P1 単独は「キー確保・冪等 create」のみで既存上書きは守れない。P3 は後追い。
 
 ## 未確定（ユーザー判断を仰ぐ点）
 
-1. **スコープ＝どこまで今やるか**: P1（create-only）だけ MVP で出すか、P2（更新 CAS）まで一気にやるか。
-   推奨は **P1 を MVP**→効用を見て P2。ユーザーの主訴が「既存値の並行更新」なら P2 まで必要。
-2. **version の読み口**: `head(key) -> (FileInfo, version)` か `VersionedFileInfo`（FileInfo 拡張型）か。
-   FileInfo 本体は不変に保ちたい（決定済）ので **別メソッド `head` 推奨**。
-3. **エラーの粒度**: `ConflictError(409)` 1 種か、create=409 / If-Match=412 を分けるか。
-4. **API 形**: capability メソッド（`put_if_absent`/`put_if_match`）か、`put(..., if_match=/if_absent=)` の
-   キーワード拡張か。capability メソッド推奨（core put の契約を汚さない・isinstance で能力検出可）。
+1. **スコープ＝必須挙動の範囲**: ユーザーの原体験は「**既存ファイルが並行 put で先勝ち上書き**される」＝
+   *更新* の lost-update。これを満たすには **P2（`put_if_match` 更新 CAS）が必要**（create-only の
+   `put_if_absent` だけでは既存上書きを守れない）。→ **P1+P2 を MVP に含める**のが筋（推奨）。
+   `put_if_absent` は安価な create 専用として併設。**この 1 点だけ確定すれば実装に入れる**。
+2. **version の読み口**: `head(key) -> (FileInfo, version)`（別メソッド・推奨＝FileInfo 不変を保つ）か、
+   `VersionedFileInfo`（FileInfo 拡張）か。
+3. **エラーの粒度**: `ConflictError(409)` 1 種か、create 衝突=409 / If-Match 不一致=412 を分けるか。
+4. **API 形**: 専用メソッド（`put_if_absent`/`put_if_match` を core 契約に）か、`put(..., if_match=)` の
+   キーワード拡張か。**専用メソッド推奨**（無条件 `put` の単純な契約を汚さない・read-only は put 同様 raise）。
 5. **NATS**: object store が create-only / revision CAS をどこまで native に持つか（要コード調査）。
-   無ければ NATS は capability 非対応（fail-loud）で割り切る。
+   無ければ NATS の writable conditional は **その時点で実装可能な範囲＋足りない分は loud に
+   `NotImplementedError`**（黙って last-writer-wins に落とさない＝要求7）。
 
-## テスト戦略
+## テスト戦略（conformancer が並行安全性を強制＝製品コンセプトの核）
 
-- P1: 同一キー 2 連続 `put_if_absent`＝2 回目が `ConflictError`（local/dict/S3 fake）。並行性は
-  `asyncio.gather` で 2 本走らせ「成功 1・Conflict 1」を確認（local は `os.link` の atomic 性に依存）。
-- P2: read→他者書き込み→`put_if_match(old_version)` が `ConflictError`（CAS 不一致）。一致時は成功して
-  version が進む。local は flock で直列化されることを確認。
-- capability 非対応 backend（http）でラッパ経由が **fail-loud**（`NotImplementedError`）。
-- conformancer: capability メソッド存在チェック＋（P2）CAS 観点を `FileStoreTester` の延長に。
+- **並行 property テスト（必須挙動の担保）**: `put` を持つ全ストアに対し、
+  - `asyncio.gather` で同一キーへ **N 本の `put_if_absent`** → **成功はちょうど 1・残りは `ConflictError`**。
+  - 同一 base version から **N 本の `put_if_match`** → **成功ちょうど 1・残り `ConflictError`**（lost-update を
+    黙って通さない）。一致時のみ version が進む。
+  - これを conformancer の新観点（`FileStoreTester` の並行系 run、または専用 `assert_concurrent_safe`）に。
+    非原子実装（exists→put の TOCTOU）は高確率で落ちるよう**反復・多重度を上げて**検出力を稼ぐ
+    （※並行バグは確率的＝決定的検出は不可。best-effort である旨を明記）。
+- 単体: 2 連続 `put_if_absent` の 2 回目が `ConflictError`（local/dict/S3 fake）。read→他者書込→
+  `put_if_match(old_version)` が `ConflictError`。local は `os.link`（create）/ flock（update）で直列化を確認。
+- read-only（http）: conditional 系も `put` 同様 `UnsupportedOperation`/`NotImplementedError`（fail-loud 伝播）。
 
 ## スコープ境界（最小・汎用を壊さない）
 
-- core Protocol（`AsyncKeyValueStore`/`FileStore`）は**不変**。conditional put は **別 capability Protocol**。
-- `FileInfo` は不変（version を混ぜない）。version は capability の `head`/戻り値でのみ露出。
+- conditional put は **core 契約**（`AsyncKeyValueStore`/`SyncKeyValueStore` に追加・`_StoreBase` で abstract）。
+  ただし **`put`/`get`/`iter` 等 既存メソッドの挙動は不変**（無条件 `put` は last-writer-wins のまま）。
+- `FileInfo` は不変（version を混ぜない）。version は `head`/conditional の戻り値でのみ露出。
 - request/response 封筒・pub/sub は非ターゲットのまま（conditional put はストレージ操作＝in-scope）。
+- 「最小機能だが、提供する挙動の最小保証（並行安全性）は担保し conformancer で検証する」を死守。
