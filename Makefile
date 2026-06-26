@@ -12,7 +12,7 @@ SRC := manystore tests
 E2E_S3_ACCESS_KEY := manystore
 E2E_S3_SECRET_KEY := manystoresecret123
 
-.PHONY: format format-check lint test test-all check grep-todo ui e2e-up e2e-down conformance-docs docs docs-serve
+.PHONY: format format-check lint pylint test test-heavy test-benchmark test-all check grep-todo ui e2e-up e2e-down conformance-docs docs docs-serve
 
 # ストレージ UI / サーバを開発設定で起動（既定 http://127.0.0.1:8000）。
 # 既定ストレージは .cache/manystore_dev（使い捨て・起動時に自動作成）。PORT=xxxx で上書き可。
@@ -40,11 +40,20 @@ lint:
 pylint:
 	uvx pylint@$(PYLINT_VERSION) manystore --enable=duplicate-code
 
-# テスト（内ループ既定＝fast のみ。slow=実 backend/ネットワーク/ポーリング待ちを除外＝R13）
+# テスト 4 段（R13）。内ループ既定＝fast（slow=実 backend/ネットワーク/ポーリング待ち、
+# benchmark=性能計測 を除外）。slow/benchmark はマーカーで分離。
 test:
-	uv run pytest -m "not slow"
+	uv run pytest -m "not slow and not benchmark"
 
-# 全テスト（CI / 明示時。slow も含めて回す）
+# 重いテスト（実 backend/ネットワーク/ポーリング待ち）。CI では別 job（e2e-up）で回す。
+test-heavy:
+	uv run pytest -m "slow"
+
+# ベンチマーク（環境差で揺れる＝gate にせず情報収集に留める。該当無しなら exit 5 でも可）。
+test-benchmark:
+	uv run pytest -m "benchmark"
+
+# 全テスト（CI / 明示時。slow・benchmark も含めて回す）
 test-all:
 	uv run pytest
 

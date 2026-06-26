@@ -5,8 +5,8 @@
 
 ## 現在のフォーカス
 
-**アクティブな作業なし**（2026-06-27 に **M043 完了**＝基底↔Protocol lockstep を是正。共通基底 `_StoreBase` 新設で
-fail-loud 化＋conformancer parity assert。supervisor 指示の横展開ゲート〔IPFS/LB 本体は M043 前提〕の前提を満たした）。
+**アクティブな作業なし**（2026-06-27 に **M043 完了**＝基底↔Protocol lockstep 是正〔共通基底 `_StoreBase`・
+parity assert・conformancer drift ガード〕／**M047 完了**＝CI/Makefile/mkdocs を supervisor 新標準へ追従）。
 次サイクルで `progress.md`「残作業」から選定する（候補＝M046 conditional put 設計・M039/M040 本実装・M011 残フェーズ）。
 
 ## 直近の変更

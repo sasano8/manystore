@@ -39,7 +39,6 @@
 
 | ID | タスク | 優先 | 備考 |
 |----|--------|------|------|
-| M047 | CI/Makefile/mkdocs を supervisor 新標準へ追従 | normal | supervisor 下り dispatch（2026-06-27・急がない＝main は健全）。①`pages.yml` の deploy guard に `github.event_name == 'push'` を AND（PR run の環境保護落ちを恒久回避）②Makefile をテスト 4 段（`test`=not slow/not benchmark・`test-heavy`=slow・`test-benchmark`=benchmark・`test-all`=全部）＋pyproject markers に `benchmark` 追加③ci.yml の action を新 major へ（Node20 廃止 warning 解消・`setup-uv@v6` 等）④mkdocs は `--strict` 緑確認のみ。正本＝[[unit-quality]] R5/R13/R17・[[func-mkdocs]] 雛形。`interrupt/archive/2026-06-27-...mkdocs-standardize.md` |
 | M046 | put の並行更新（conditional put / lost-update 検出） | 相談 | ユーザー指摘（2026-06-27）＝local の `_LocalAtomicWriter` は temp+`os.replace` で **torn write は防ぐが排他はしない**＝同一キーへの並行 put は **last-writer-wins**（lost update を検出しない）。方針＝**optimistic concurrency（version/etag の compare-and-swap）を opt-in の conditional put として**：`put(..., if_match=<version>)` / `SupportsConditionalPut` で版不一致は **fail-loud に raise**。put 既定は無条件 set を維持（最小-core・M013 メタ・M045 と連動）。**version トークンは backend ごとに native を opaque な `version:str` へ畳む**＝S3=ETag・NATS=revision・**local=mtime（+size）**。**ユーザー合意（2026-06-27）: local では mtime を etag 的に使ってよい**（modern FS は statx で ns 精度＝実用上十分。nginx 等も mtime+size+inode で etag 生成）。**注意＝難所はトークン選択でなく「compare-and-swap の原子性」**：stat→比較→replace は TOCTOU で racy なので、commit を**ロック/原子 rename で直列化**する必要（Linux は create に `renameat2(RENAME_NOREPLACE)`、更新は flock/fcntl か lockfile）。要 doc-first。詳細は意思決定の変遷 |
 | M012 | `list(prefix=...)` / pagination | 中 | prefix は core `iter_all(prefix=…)` 引数化済（M030 capability は 2026-06-26 廃止）。**pagination 未対応**。設計案（2026-06-26 対話・要 doc-first）＝(a) `iter_all`/`list_all` に **offset+limit** を足す（単純・全 backend で scan 可だが大 offset は O(n)）／(b) **cursor/continuation-token** 形式（S3 ContinuationToken・NATS 等の native と整合・M021 の continuation と同一機構）。加えて **返り値を range メタ付きの独自型**にする案＝iter は「何件目〜何件目」を、list は from/to 件数属性を持つ（pagination メタ＝**file/value パラダイム内**。却下した transport の request/response 封筒とは別物）。未確定＝offset/limit vs cursor の二択と、独自結果型を入れるか。M021（S3 GW continuation）・M044（limit 既定の定数化）と連動 |
 | M013 | メタデータ / content-type | 中 | S3・NATS は native 対応だが共通 IF に無い |
@@ -64,6 +63,13 @@
 
 ### 完了マイルストーン（要点のみ・経緯は git 履歴）
 
+- **M047（2026-06-27・完了）**: CI/Makefile/mkdocs を supervisor 新標準へ追従（下り dispatch・急がない）。
+  ①`pages.yml`＝deploy と Upload Pages artifact の guard を `github.event_name == 'push' && github.ref ==
+  'refs/heads/main'` へ（PR run の環境保護落ちを恒久回避）＋`setup-uv@v6`（[[func-mkdocs]] 雛形が正本）。
+  ②Makefile をテスト 4 段＝`test`=`not slow and not benchmark`・`test-heavy`=slow・`test-benchmark`=benchmark・
+  `test-all`=全部（`.PHONY` 追補）。③pyproject markers に `benchmark` 追加。④`ci.yml`＝`checkout@v5`/`setup-uv@v6`
+  へ（Node20 廃止 warning 解消・R17）。⑤mkdocs `--strict` 緑確認（spec 再生成で tracked 変化なし）。
+  `make check` 緑（fast 126）・`test-all` 137 passed 1 skipped。benchmark 該当無し＝`test-benchmark` は exit 5（許容）。
 - **M043（2026-06-27・完了）**: ABC 基底 ↔ Protocol の lockstep を是正＝是正案①+②（supervisor 指示）。
   ①**基底に共通表面を全面宣言**＝`protocols.py` に共通基底 `_StoreBase(abc.ABC)` を新設し、
   `KeyValueStoreBase`/`FileStoreBase` の双方が継ぐ。`_StoreBase` は abstract primitive
