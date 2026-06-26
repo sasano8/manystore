@@ -31,6 +31,7 @@
 
 import base64
 import contextlib
+import inspect
 import json
 import typing
 import uuid
@@ -60,6 +61,52 @@ def assert_implements(obj: object, protocol: type) -> None:
         raise AssertionError(
             f"{type(obj).__name__} は {protocol.__name__} の "
             f"{sorted(missing)} を実装していません（メソッド存在チェック）"
+        )
+
+
+def base_protocol_parity_errors(base: type, protocol: type) -> list[str]:
+    """基底 `base` が `protocol` を **網羅し、各メソッドのシグネチャが一致するか** を検査する。
+
+    存在チェック（`assert_implements`）は instance がメンバを *持つ* かを見る。これは
+    **契約（Protocol）と既定実装（基底クラス）の lockstep** を見る: Protocol が要求する全メンバが
+    基底に（abstract か concrete で）宣言され、かつシグネチャ（引数名・既定値・並び・返り値注釈）が
+    Protocol と一致するか。崩れると「基底が一部メソッドを宣言せず部分実装が黙って Protocol を破る」
+    「基底と Protocol が別々に drift する」のを取り逃す（M043）。違反メッセージ list（空＝OK）。
+    """
+    errors: list[str] = []
+    for name in sorted(required_members(protocol)):
+        proto_member = getattr(protocol, name, None)
+        base_member = getattr(base, name, None)
+        if not callable(base_member):
+            errors.append(
+                f"{base.__name__} は {protocol.__name__}.{name} を宣言していない"
+                f"（基底が Protocol を網羅していない＝部分実装が黙って通りうる）"
+            )
+            continue
+        try:
+            proto_sig = inspect.signature(proto_member)
+            base_sig = inspect.signature(base_member)
+        except Exception:  # noqa: BLE001  シグネチャを取れないメンバは存在チェックに留める
+            continue
+        if str(base_sig) != str(proto_sig):
+            errors.append(
+                f"{base.__name__}.{name} のシグネチャが {protocol.__name__} と不一致: "
+                f"基底 {base_sig} ≠ Protocol {proto_sig}"
+            )
+    return errors
+
+
+def assert_base_protocol_parity(base: type, protocol: type) -> None:
+    """`base` が `protocol` を網羅しシグネチャも一致することを表明する（基底↔Protocol lockstep）。
+
+    違反があれば `AssertionError`（網羅漏れ・シグネチャ不一致を列挙）。`KeyValueStoreBase`↔
+    `AsyncKeyValueStore` / `FileStoreBase`↔`AsyncFileStore` を対称に点検する用途（M043）。
+    """
+    errors = base_protocol_parity_errors(base, protocol)
+    if errors:
+        raise AssertionError(
+            f"基底↔Protocol parity 違反（{base.__name__} ↔ {protocol.__name__}）:\n  "
+            + "\n  ".join(errors)
         )
 
 

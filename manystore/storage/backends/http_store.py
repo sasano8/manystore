@@ -50,7 +50,7 @@ class _HttpBase:
         return None
 
 
-class HttpKeyValueStore(KeyValueStoreBase, _HttpBase):
+class HttpKeyValueStore(_HttpBase, KeyValueStoreBase):
     """HTTP 越しの read-only KVS。`get` / `exists` のみ実装し、書き込み・一覧は非対応。"""
 
     async def put(self, key: str, value: bytes) -> FileInfo:

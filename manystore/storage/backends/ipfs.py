@@ -80,7 +80,7 @@ class _IpfsBase:
         return None
 
 
-class IpfsKeyValueStore(KeyValueStoreBase, _IpfsBase):
+class IpfsKeyValueStore(_IpfsBase, KeyValueStoreBase):
     """IPFS(MFS) 越しの KVS スキャフォールド。primitive は `get_or_raise`（kv 寄り）。
 
     本体は未実装（`NotImplementedError`）。上の docstring の MFS エンドポイント対応に沿って詰める。

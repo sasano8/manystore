@@ -22,12 +22,15 @@ from manystore import (
     S3KeyValueStore,
 )
 from manystore.client import RemoteKeyValueStore
-from manystore.protocols import KeyValueStoreBase
+from manystore.protocols import FileStoreBase, KeyValueStoreBase
+from manystore.storage.file import AsyncFileStore
 from manystore.storage.kv import AsyncKeyValueStore
 from manystore.tools.conformancer import (
     FileStoreTester,
+    assert_base_protocol_parity,
     assert_file_store,
     assert_key_value_store,
+    base_protocol_parity_errors,
     missing_members,
     required_members,
     save_report,
@@ -172,22 +175,70 @@ def test_conformance_detects_missing_method() -> None:
         assert_key_value_store(_Broken())
 
 
-def test_base_enforces_get_or_raise_at_instantiation() -> None:
-    # KeyValueStoreBase 上で primitive(get_or_raise) を実装し忘れたストアは、呼ぶ前に
-    # **インスタンス化時点で TypeError** になる＝関係するストアの実装漏れに必ず気づける。
-    class _ForgotPrimitive(KeyValueStoreBase):
-        async def put(self, key, value): ...  # get_or_raise を実装していない
+def test_base_enforces_full_protocol_at_instantiation() -> None:
+    # KeyValueStoreBase の primitive（put/get_or_raise/iter_all/exists/delete/connect/aclose）を
+    # 一部でも実装し忘れたストアは、呼ぶ前に **インスタンス化時点で TypeError**＝部分実装が黙って
+    # Protocol を破る（M043 のドリフト）のを fail-loud に防ぐ。get_or_raise だけ実装した旧来 OK な
+    # 部分実装も、いまは未実装の primitive が残るため生成できない。
+    class _ForgotMost(KeyValueStoreBase):
+        async def get_or_raise(self, key):  # 残り primitive を実装していない
+            raise FileNotFoundError(key)
 
     with pytest.raises(TypeError):
-        _ForgotPrimitive()
+        _ForgotMost()
 
-    # primitive を実装したサブクラスは生成でき、get は基底から得られる（default を返す）。
+    # primitive を全実装したサブクラスは生成でき、get/list_all/cp/mv は基底の既定実装から得られる。
     class _Ok(KeyValueStoreBase):
+        async def put(self, key, value):
+            return {"filename": key, "size": len(value)}
+
         async def get_or_raise(self, key):
             raise FileNotFoundError(key)
 
-    asyncio.run(_assert_get_default(_Ok()))
+        async def iter_all(self, limit=None, prefix=""):
+            return
+            yield  # 空ジェネレータ
+
+        async def exists(self, key):
+            return False
+
+        async def delete(self, key): ...
+        async def connect(self): ...
+        async def aclose(self): ...
+
+    asyncio.run(_assert_defaults(_Ok()))
 
 
-async def _assert_get_default(store) -> None:
-    assert await store.get("missing", default=b"d") == b"d"
+async def _assert_defaults(store) -> None:
+    assert await store.get("missing", default=b"d") == b"d"  # get は get_or_raise から
+    assert await store.list_all() == []  # list_all は iter_all から
+
+
+# ── 基底↔Protocol parity（M043: 契約と既定実装の lockstep を機械的に保証） ──
+
+
+def test_kvs_base_matches_protocol() -> None:
+    # KeyValueStoreBase が AsyncKeyValueStore を網羅し、全メソッドのシグネチャが一致する。
+    assert base_protocol_parity_errors(KeyValueStoreBase, AsyncKeyValueStore) == []
+    assert_base_protocol_parity(KeyValueStoreBase, AsyncKeyValueStore)
+
+
+def test_file_store_base_matches_protocol() -> None:
+    # FileStoreBase は AsyncFileStore（= KVS + open_reader/open_writer）を網羅・シグネチャ一致。
+    assert base_protocol_parity_errors(FileStoreBase, AsyncFileStore) == []
+    assert_base_protocol_parity(FileStoreBase, AsyncFileStore)
+
+
+def test_parity_detects_missing_and_signature_drift() -> None:
+    # ツール自体の健全性: 網羅漏れとシグネチャ不一致の両方を検出する。
+    class _PartialBase:
+        async def put(self, key, value): ...  # 他の Protocol メンバが無い
+
+    errors = base_protocol_parity_errors(_PartialBase, AsyncKeyValueStore)
+    assert any("get_or_raise" in e for e in errors)  # 網羅漏れを検出
+
+    class _SigDrift(KeyValueStoreBase):  # exists の引数名を変える（シグネチャ drift）
+        async def exists(self, name): ...  # type: ignore[override]
+
+    drift = base_protocol_parity_errors(_SigDrift, AsyncKeyValueStore)
+    assert any("exists" in e and "シグネチャ" in e for e in drift)

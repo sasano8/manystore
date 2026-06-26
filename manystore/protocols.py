@@ -131,17 +131,99 @@ class SyncFileStore(SyncKeyValueStore, Protocol):
 # ════════════════════════════════════════════════════════════════════════════
 
 
-class FileStoreBase(abc.ABC):
+class _StoreBase(abc.ABC):
+    """KVS / FileStore どちらの backend にも共通する store 操作の基底（[KeyValueStore] の表面）。
+
+    kv 寄り（[KeyValueStoreBase]）と file 寄り（[FileStoreBase]）の差は「どれを native primitive と
+    するか」だけで、**[KeyValueStore] Protocol の表面（put/get/iter_all/list_all/exists/delete/
+    cp/mv/connect/aclose）は両者で同一**。その共通表面をここに 1 か所だけ定義する:
+
+    - **abstract primitive**（派生が必ず実装＝未実装はインスタンス化時点で `TypeError`／fail-loud）:
+      `put` / `get_or_raise` / `iter_all` / `exists` / `delete` / `connect` / `aclose`。
+    - **既定実装**（primitive から導出。派生は必要なら上書き）: `get`（get_or_raise から）/
+      `list_all`（iter_all から）/ `cp`・`mv`（get→put / copy→delete）。
+
+    これで「基底が `get_or_raise` だけ abstract で残り 9 メソッドを宣言も強制もしない＝部分実装が
+    黙って Protocol を破る」ドリフト（M043）を断つ。Protocol との網羅・シグネチャ一致は conformancer
+    の `assert_base_protocol_parity` が機械的に保証する（基底↔Protocol の lockstep）。
+    """
+
+    # ── abstract primitive（未実装はインスタンス化時 TypeError＝fail-loud） ──
+
+    @abc.abstractmethod
+    async def put(self, key: str, value: bytes) -> FileInfo:
+        """値を書き、[FileInfo]（`{filename, size}`）を返す。**サブクラス必須**（primitive）。"""
+        raise NotImplementedError
+
+    @abc.abstractmethod
+    async def get_or_raise(self, key: str) -> bytes:
+        """キーの値を返す。欠損は `FileNotFoundError`。**サブクラス必須**（primitive）。"""
+        raise NotImplementedError
+
+    @abc.abstractmethod
+    async def iter_all(self, limit: int | None = None, prefix: str = "") -> AsyncIterable[FileInfo]:
+        """全キーを平坦に列挙（`limit`=件数上限・`prefix`=前方一致）。**サブクラス必須**（primitive）。"""
+        raise NotImplementedError
+
+    @abc.abstractmethod
+    async def exists(self, key: str) -> bool:
+        """キーの存在を返す。**サブクラス必須**（primitive）。"""
+        raise NotImplementedError
+
+    @abc.abstractmethod
+    async def delete(self, key: str) -> None:
+        """キーを削除する。**サブクラス必須**（primitive）。"""
+        raise NotImplementedError
+
+    @abc.abstractmethod
+    async def connect(self) -> None:
+        """接続を確立する（接続不要な backend は no-op で実装）。**サブクラス必須**。"""
+        raise NotImplementedError
+
+    @abc.abstractmethod
+    async def aclose(self) -> None:
+        """接続を閉じる（接続不要な backend は no-op で実装）。**サブクラス必須**。"""
+        raise NotImplementedError
+
+    # ── 既定実装（primitive から導出・派生は上書き可） ──
+
+    async def get(self, key: str, default: bytes | None = None) -> bytes | None:
+        # get_or_raise を捕捉し欠損時 default を返す（各 backend で try/except を重複させない）。
+        try:
+            return await self.get_or_raise(key)
+        except FileNotFoundError:
+            return default
+
+    async def list_all(self, limit: int | None = None, prefix: str = "") -> list[FileInfo]:
+        return [info async for info in self.iter_all(limit, prefix)]
+
+    async def cp(self, src: str, dst: str) -> None:
+        await _kv_copy(self, src, dst)
+
+    async def mv(self, src: str, dst: str) -> None:
+        await _kv_move(self, src, dst)
+
+
+class KeyValueStoreBase(_StoreBase):
+    """**kv 寄り** backend の基底＝primitive は `put` / `get_or_raise`（whole get/put が native）。
+
+    NATS/dict/HTTP/S3 のように「whole の取得・保存が native で、バッファが元から生じる」backend が
+    継承する。共通表面（iter_all/exists/delete/connect/aclose の abstract と get/list_all/cp/mv の
+    既定）は [_StoreBase] から継ぐ。ストリーム IO（open_reader/open_writer）が要るときは
+    [KeyValueFileStore] で被せて FileStore 化する。
+    """
+
+
+class FileStoreBase(_StoreBase):
     """**file 寄り** ([FileStore]) backend の基底＝primitive は `open_reader`/`open_writer`。
 
-    KVS 面（get_or_raise/put/get）は **IO から導出**する＝get は open_reader で全体読み、put は
+    KVS 面（get_or_raise/put）は **IO から導出**する＝get_or_raise は open_reader で全体読み、put は
     open_writer で全体書き（**値境界でのみバッファ**。ストリーム性能は open_reader/open_writer を
-    直接使えば得られる）。よって **[KeyValueStoreBase] は継承しない**（kv 寄りの buffered primitive
-    とは逆向き）。filesystem-native な `LocalFileStore` 等「真実が IO 側」の backend が継承する。
+    直接使えば得られる）。`LocalFileStore` 等「真実が IO 側」の backend が継ぐ。
+    iter_all/exists/delete/connect/aclose は依然 [_StoreBase] の abstract（backend が実装）。
 
-    対して **kv 寄り** backend（NATS/dict/HTTP＝whole get/put が native でバッファが元から生じる）は
-    [KeyValueStoreBase] を継承し、IO は whole の上に buffer 合成する。`open_reader`/`open_writer` は
-    **`@abstractmethod`**＝未実装ならインスタンス化時点で `TypeError`（実装漏れに必ず気づく）。
+    対して **kv 寄り** backend は [KeyValueStoreBase] を継承し IO は whole の上に buffer 合成する。
+    `open_reader`/`open_writer` は **`@abstractmethod`**＝未実装なら生成時に `TypeError`。
     """
 
     @abc.abstractmethod
@@ -154,12 +236,6 @@ class FileStoreBase(abc.ABC):
         """書き込みストリームを開く。**サブクラス必須**（primitive）。"""
         raise NotImplementedError
 
-    async def get(self, key: str, default: bytes | None = None) -> bytes | None:
-        try:
-            return await self.get_or_raise(key)
-        except FileNotFoundError:
-            return default
-
     async def get_or_raise(self, key: str) -> bytes:
         # open_reader（ストリーム primitive）で全体読み＝値境界でバッファ。
         async with await self.open_reader(key) as f:
@@ -170,30 +246,6 @@ class FileStoreBase(abc.ABC):
         async with await self.open_writer(key) as f:
             await f.write(value)
         return {"filename": key, "size": len(value)}
-
-
-class KeyValueStoreBase(abc.ABC):
-    """KVS の `get` 既定実装を与える基底（backend は `get_or_raise` だけ実装すればよい）。
-
-    primitive は **`get_or_raise`**（キーが無ければ `FileNotFoundError` を上げる）。全体取得の
-    `get(key, default=None)` は get_or_raise を捕捉して、欠損時に `default` を返す既定実装を
-    ここで 1 か所だけ提供する（各 backend で try/except を重複させない）。
-
-    `get_or_raise` は **`@abstractmethod`**。これを実装しないストアは **インスタンス化時点で
-    `TypeError`** になる＝「関係するストアが primitive を実装し忘れた」ことに必ず気づける
-    （[KeyValueStore] Protocol を部分的にしか満たさない実装が黙って通るのを防ぐ）。
-    """
-
-    @abc.abstractmethod
-    async def get_or_raise(self, key: str) -> bytes:
-        """キーの値を返す。欠損は `FileNotFoundError`。**サブクラス必須**（primitive）。"""
-        raise NotImplementedError
-
-    async def get(self, key: str, default: bytes | None = None) -> bytes | None:
-        try:
-            return await self.get_or_raise(key)
-        except FileNotFoundError:
-            return default
 
 
 # ════════════════════════════════════════════════════════════════════════════

@@ -5,21 +5,25 @@
 
 ## 現在のフォーカス
 
-**アクティブな作業なし**（2026-06-26 に scaffold 2 件＝IPFS backend〔M039〕／ロードバランサー層〔M040〕の
-空定義＋ネタを配置。本体は未実装・facade/factory 未公開。詳細は `progress.md` 残作業 M039/M040）。
-次サイクルで `progress.md`「残作業」から選定する。
-（前段: 2026-06-26 M038〔crypto StreamCipher 足場〕／M011〔安全入口の命名マトリクス〕。）
+**アクティブな作業なし**（2026-06-27 に **M043 完了**＝基底↔Protocol lockstep を是正。共通基底 `_StoreBase` 新設で
+fail-loud 化＋conformancer parity assert。supervisor 指示の横展開ゲート〔IPFS/LB 本体は M043 前提〕の前提を満たした）。
+次サイクルで `progress.md`「残作業」から選定する（候補＝M046 conditional put 設計・M039/M040 本実装・M011 残フェーズ）。
 
 ## 直近の変更
 
 > 完了マイルストーンの詳細は `progress.md` に集約。ここには溜めない（重複は memory clean で畳む）。
 
-- 【最重要】protocols.py 契約準拠を**横展開の必須ゲート**にすべき、というメタ判断を supervisor へ上りエスカレ
-  （`outbox/2026-06-26-protocols-conformance-is-load-bearing.md`）。証拠は M043。横断ルール化の是非・置き場・
-  ブロッカー扱いの確定を supervisor に仰ぐ（実装は M043 として worker 側に在る）。
-- 【最重要】ユーザー指摘＝`KeyValueStoreBase`(ABC) が `AsyncKeyValueStore`(Protocol) と完全一致しない（get_or_raise
-  だけ abstract・残り 9 メソッド未強制＝部分実装が黙って通る・fail-loud でない）。interrupt 経由で **M043** として
-  バックログ最上段に積んだ（最重要）。archive 退避済。実装は別サイクル。
+- **M043 完了**（最重要・supervisor 指示で最優先実装）＝基底↔Protocol の lockstep を①共通基底 `_StoreBase` の
+  全面 abstract/既定 ②conformancer parity assert で是正。波及で http/s3/nats/ipfs の基底列挙順を mixin 先置へ。詳細 progress。
+- interrupt 4 件取り込み・archive 退避＝①supervisor 指示（M043 先行・横展開はブロッカー扱い・横断昇格は MVP 後）
+  ②supervisor 指示（反省 metrics は手記録 MVP・2 ヒューリスティック即運用・新スキルは作らない）③TODO 規約 親正本反映済
+  ＋次サイクルで `make grep-todo` sweep して孤児 TODO 点検（→済＝M040/M041/M042/M044 の既知 id のみ・孤児なし）
+  ④user 要望 put→FileInfo（**確認＝既に全 backend 実装済**＝No-op。lockstep は M043 parity が担保）。
+- **ユーザー指摘（2026-06-27・対話）**＝atomic write は排他していない／並行更新で先勝ちが起きる。→ 方針を
+  意思決定の変遷に記録し **M046**（conditional put / lost-update 検出）としてバックログ化（相談・doc-first）。
+- ⚠️**作業環境の異常**: `conformancer/__init__.py` の `except (TypeError, ValueError):` が編集後に
+  Python2 構文 `except TypeError, ValueError:`（SyntaxError）へ**外部から繰り返し書き戻された**。`except Exception:`
+  へ書式変更して回避・緑維持。原因不明（hook/インジェクション疑い）。ユーザーに要報告。
 - TODO 規約＋`make grep-todo` 要望：配置を unit-quality（定義）／supervisor・flow（参照）に合意。**親正本の skill は
   worker から編集不可**（ガード発火＝役割モデル）→ `outbox/2026-06-26-todo-convention-and-grep-todo.md` に上りエスカレ。
   repo ローカルは実施：Makefile に `make grep-todo` 追加＋既存マーカー4件を `# TODO(<id>)` 書式へ整合（M040/M041/M042 を backlog 化）。

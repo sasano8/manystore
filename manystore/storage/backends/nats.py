@@ -50,7 +50,7 @@ class _NatsBase:
             self._obs = None
 
 
-class NatsObjectKeyValueStore(KeyValueStoreBase, _NatsBase):
+class NatsObjectKeyValueStore(_NatsBase, KeyValueStoreBase):
     async def put(self, key: str, value: bytes) -> FileInfo:
         obs = await self._get_obs()
         await obs.put(key, value)

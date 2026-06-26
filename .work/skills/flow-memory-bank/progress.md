@@ -39,7 +39,8 @@
 
 | ID | タスク | 優先 | 備考 |
 |----|--------|------|------|
-| **M043** | **ABC 基底 ↔ Protocol 契約の lockstep 保証** | **最重要** | `KeyValueStoreBase`(ABC) は `get_or_raise` だけ abstract で、`AsyncKeyValueStore`(Protocol) の残り（put/iter_all/list_all/exists/delete/cp/mv/connect/aclose）を宣言も強制もしない＝**部分実装でもインスタンス化が通り黙って Protocol を破れる**（fail-loud でない）。「protocols.py=契約＋既定実装の唯一の源泉」と緊張。是正案＝①基底に全面 `@abstractmethod`/既定 ②conformancer で base↔Protocol parity を assert ③Protocol 単一宣言へ再構成。`FileStoreBase` も対称点検。設計 `interrupt/archive/2026-06-26-base-protocol-drift.md` |
+| M047 | CI/Makefile/mkdocs を supervisor 新標準へ追従 | normal | supervisor 下り dispatch（2026-06-27・急がない＝main は健全）。①`pages.yml` の deploy guard に `github.event_name == 'push'` を AND（PR run の環境保護落ちを恒久回避）②Makefile をテスト 4 段（`test`=not slow/not benchmark・`test-heavy`=slow・`test-benchmark`=benchmark・`test-all`=全部）＋pyproject markers に `benchmark` 追加③ci.yml の action を新 major へ（Node20 廃止 warning 解消・`setup-uv@v6` 等）④mkdocs は `--strict` 緑確認のみ。正本＝[[unit-quality]] R5/R13/R17・[[func-mkdocs]] 雛形。`interrupt/archive/2026-06-27-...mkdocs-standardize.md` |
+| M046 | put の並行更新（conditional put / lost-update 検出） | 相談 | ユーザー指摘（2026-06-27）＝local の `_LocalAtomicWriter` は temp+`os.replace` で **torn write は防ぐが排他はしない**＝同一キーへの並行 put は **last-writer-wins**（lost update を検出しない）。「確定時に移動先 mtime が更新されていたら失敗すべき」案。**mtime は不適**（粒度粗・同値衝突・TOCTOU で racy）。proper は **optimistic concurrency＝version/etag の compare-and-swap**（S3 If-Match/ETag・NATS revision が native）。put 既定は無条件 set 契約を維持し、必要なら opt-in の `put(..., if_match=)` / `SupportsConditionalPut` capability で **fail-loud に raise**（最小-core・M013 メタ・M045 error-as-value と連動）。要 doc-first・YAGNI。詳細は意思決定の変遷 |
 | M012 | `list(prefix=...)` / pagination | 中 | prefix は core `iter_all(prefix=…)` 引数化済（M030 capability は 2026-06-26 廃止）。**pagination 未対応**。設計案（2026-06-26 対話・要 doc-first）＝(a) `iter_all`/`list_all` に **offset+limit** を足す（単純・全 backend で scan 可だが大 offset は O(n)）／(b) **cursor/continuation-token** 形式（S3 ContinuationToken・NATS 等の native と整合・M021 の continuation と同一機構）。加えて **返り値を range メタ付きの独自型**にする案＝iter は「何件目〜何件目」を、list は from/to 件数属性を持つ（pagination メタ＝**file/value パラダイム内**。却下した transport の request/response 封筒とは別物）。未確定＝offset/limit vs cursor の二択と、独自結果型を入れるか。M021（S3 GW continuation）・M044（limit 既定の定数化）と連動 |
 | M013 | メタデータ / content-type | 中 | S3・NATS は native 対応だが共通 IF に無い |
 | M016 | テスト拡充（エラーパス/並行/大容量） | 中 | fake は happy path 中心 |
@@ -63,6 +64,17 @@
 
 ### 完了マイルストーン（要点のみ・経緯は git 履歴）
 
+- **M043（2026-06-27・完了）**: ABC 基底 ↔ Protocol の lockstep を是正＝是正案①+②（supervisor 指示）。
+  ①**基底に共通表面を全面宣言**＝`protocols.py` に共通基底 `_StoreBase(abc.ABC)` を新設し、
+  `KeyValueStoreBase`/`FileStoreBase` の双方が継ぐ。`_StoreBase` は abstract primitive
+  （put/get_or_raise/iter_all/exists/delete/connect/aclose）＋既定実装（get/list_all/cp/mv）を 1 か所に持つ
+  ＝部分実装は**インスタンス化時 `TypeError`**（fail-loud）。`FileStoreBase` は open_reader/open_writer を
+  abstract に足し get_or_raise/put を IO から導出。②**conformancer に base↔Protocol parity assert**
+  （`base_protocol_parity_errors`/`assert_base_protocol_parity`）＝Protocol 全メンバの網羅＋シグネチャ一致を
+  機械チェック。test で `KeyValueStoreBase↔AsyncKeyValueStore`・`FileStoreBase↔AsyncFileStore` を点検。
+  **波及**: 共通 abstract を _StoreBase に上げた結果、mixin 後置だった backend（http/s3/nats/ipfs）は
+  abstract が concrete mixin を MRO で隠して生成不能になったため、宣言を `(_XBase, KeyValueStoreBase)` へ
+  並べ替え（mixin 先置の定石）。fast 124 passed。横展開ゲート（IPFS/LB 本体は M043 前提）の前提を満たした。
 - **M038（2026-06-26・完了）**: `manystore/crypto.py` 新設＝ストリーム暗号と FileStore IO への繋ぎこみ IF を明確化。
   primitive **`StreamCipher`**（`transform(offset, data)`＝オフセット指定・チャンク境界非依存の対称変換）＋参照実装
   `XorStreamCipher`（繰り返し鍵 XOR・**安全でない** placeholder）。`AsyncFileObject` を包む **`CipherReader`/`CipherWriter`**
@@ -138,6 +150,12 @@ error-swallow 監査 M036 / Safe 既定化 M011・M032 / テスト拡充）と U
 
 ## 意思決定の変遷
 
+- **atomic write は torn-write 防止であり排他制御ではない／並行更新は conditional put で別途**（2026-06-27・
+  ユーザー指摘を受けた方針メモ・未実装＝M046）: local の temp+`os.replace` は「壊れた半端ファイルを見せない」
+  原子性のみを保証し、同一キーへの並行 put の**lost update は検出しない**（last-writer-wins）。mtime 比較での
+  fail は粒度・同値・TOCTOU で不確実＝採らない。検出が要るなら **version/etag の compare-and-swap**
+  （S3 If-Match・NATS revision が native）を **opt-in の conditional put として fail-loud に raise**。put 既定の
+  無条件 set 契約は維持（最小-core）。doc-first で M046。
 - **`put` は共通レスポンス `FileInfo`（`{filename,size}`）を返す**（2026-06-26）: 全 backend が追加 I/O なしに生成できる
   最小・共通の *file メタデータ* のみ。revision/etag は共通でないため core には載せない。
 - **prefix 列挙を core の `iter_all(prefix="")`/`list_all(prefix="")` 引数に畳む（capability 廃止）**（2026-06-26・ユーザー判断）:
