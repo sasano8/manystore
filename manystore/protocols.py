@@ -418,6 +418,7 @@ class KeyValueFromFileStore(KeyValueStoreBase):
         return await self._store.get_or_raise(key)
 
     async def iter_all(self, limit: int | None = None, prefix: str = "") -> AsyncIterator[FileInfo]:
+        # TODO: self._store.iter_all(limit, prefix) をそのまま返しループを１つ減らせない？
         async for info in self._store.iter_all(
             limit, prefix
         ):  # 下層 FileStore へ limit/prefix 素通し
