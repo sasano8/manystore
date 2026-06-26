@@ -11,7 +11,9 @@
    **レポート（list）を渡す**と操作順に結果を追記する（ツールはレポートを保持しない）。
    `save_report` で JSON 保存でき将来リプレイに使える。段階実行 run_light<middle<heavy<full。
 
-**シグネチャ検査・spec 自動検出（file/kv 寄り）は未実装**（別タスク M022b）。
+シグネチャ検査は実装済＝**基底↔Protocol parity**（`assert_base_protocol_parity`）と
+**conformancer↔Protocol drift**（`assert_conformancer_protocol_current`・protocols.py が正）。
+**spec 自動検出（file/kv 寄り）は未実装**（別タスク M022b）。
 
 使い方（サードパーティ backend のテスト例）::
 
@@ -38,7 +40,7 @@ import uuid
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
-from ...protocols import AsyncFileStore, AsyncKeyValueStore
+from ...protocols import AsyncFileObject, AsyncFileStore, AsyncKeyValueStore
 
 
 def required_members(protocol: type) -> frozenset[str]:
@@ -106,6 +108,79 @@ def assert_base_protocol_parity(base: type, protocol: type) -> None:
     if errors:
         raise AssertionError(
             f"基底↔Protocol parity 違反（{base.__name__} ↔ {protocol.__name__}）:\n  "
+            + "\n  ".join(errors)
+        )
+
+
+def signature_drift(protocol: type, expected: dict[str, str]) -> list[str]:
+    """`protocol` の各メンバの現シグネチャが `expected`（写し）と一致するか検査する汎用ヘルパ。
+
+    `expected` は `{メンバ名: str(inspect.signature(...)) の写し}`。`protocol`（正）が `expected`
+    と食い違ったら、写しを持つ側が古い契約を前提にしている合図。違反メッセージ list（空＝一致）。
+    """
+    errors: list[str] = []
+    members = required_members(protocol)
+    for name, pinned in expected.items():
+        if name not in members:
+            errors.append(
+                f"{protocol.__name__} に前提メンバ {name} が無い（protocols.py で改廃された）"
+            )
+            continue
+        live = str(inspect.signature(getattr(protocol, name)))
+        if live != pinned:
+            errors.append(f"{protocol.__name__}.{name}: 前提 [{pinned}] ≠ protocols.py [{live}]")
+    return errors
+
+
+# ── conformancer 自身が前提とする Protocol（挙動テスト _OPS / FileObject 操作の写し） ──
+#
+# FileStoreTester（_OPS・_op_*）は `store.list_all(limit)` / `store.open_reader(key)` → `.read(n)` /
+# `.write(data)` のように Protocol の **呼び出し方を直書き**している。protocols.py が進化してここと
+# 食い違うと、conformancer は **古いプロトコルを前提に**テストし続ける（黙って誤検証）。下記は
+# conformancer が叩く Protocol メンバとその時点のシグネチャの写し（**protocols.py が正**）。drift
+# したら _op_* の呼び出しを新契約へ追従させ、この写しも更新する。逆（conformancer 先行・
+# protocols.py 未更新）は想定しない＝常に protocols.py を正として直す。
+_PINNED_STORE_SIGNATURES = {
+    "exists": "(self, key: str) -> bool",
+    "delete": "(self, key: str) -> None",
+    "open_reader": "(self, filename: str) -> manystore.protocols.AsyncFileObject",
+    "open_writer": "(self, filename: str) -> manystore.protocols.AsyncFileObject",
+    "iter_all": (
+        "(self, limit: int | None = None, prefix: str = '') -> "
+        "collections.abc.AsyncIterable[manystore.protocols.FileInfo]"
+    ),
+    "list_all": (
+        "(self, limit: int | None = None, prefix: str = '') -> list[manystore.protocols.FileInfo]"
+    ),
+}
+_PINNED_FILEOBJECT_SIGNATURES = {
+    "read": "(self, size: int = -1) -> bytes",
+    "write": "(self, data: bytes) -> int",
+    "close": "(self) -> None",
+}
+
+
+def conformancer_protocol_drift() -> list[str]:
+    """conformancer 前提の Protocol メソッドのシグネチャが protocols.py（正）と食い違わないか。
+
+    食い違い＝conformancer が **古いプロトコルを前提に**テストしている合図（protocols.py を正として
+    `_op_*` と写しを追従させる）。違反メッセージ list を返す（空＝一致）。
+    """
+    return signature_drift(AsyncFileStore, _PINNED_STORE_SIGNATURES) + signature_drift(
+        AsyncFileObject, _PINNED_FILEOBJECT_SIGNATURES
+    )
+
+
+def assert_conformancer_protocol_current() -> None:
+    """conformancer の前提 Protocol が protocols.py（正）と一致することを表明する。
+
+    不一致なら `AssertionError`＝conformancer が古い契約を叩いている。protocols.py を正とし、
+    `_op_*` の呼び出しと上記シグネチャ写しを新契約へ追従させること。
+    """
+    errors = conformancer_protocol_drift()
+    if errors:
+        raise AssertionError(
+            "conformancer が古いプロトコルを前提にしている（protocols.py が正）:\n  "
             + "\n  ".join(errors)
         )
 

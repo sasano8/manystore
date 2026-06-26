@@ -28,12 +28,15 @@ from manystore.storage.kv import AsyncKeyValueStore
 from manystore.tools.conformancer import (
     FileStoreTester,
     assert_base_protocol_parity,
+    assert_conformancer_protocol_current,
     assert_file_store,
     assert_key_value_store,
     base_protocol_parity_errors,
+    conformancer_protocol_drift,
     missing_members,
     required_members,
     save_report,
+    signature_drift,
 )
 
 
@@ -227,6 +230,23 @@ def test_file_store_base_matches_protocol() -> None:
     # FileStoreBase は AsyncFileStore（= KVS + open_reader/open_writer）を網羅・シグネチャ一致。
     assert base_protocol_parity_errors(FileStoreBase, AsyncFileStore) == []
     assert_base_protocol_parity(FileStoreBase, AsyncFileStore)
+
+
+def test_conformancer_assumes_current_protocol() -> None:
+    # conformancer（FileStoreTester/_OPS）が前提とする Protocol メソッドのシグネチャが protocols.py
+    # （正）と一致する。食い違えば conformancer が古い契約を叩いている＝_op_* と写しの追従が必要。
+    assert conformancer_protocol_drift() == []
+    assert_conformancer_protocol_current()
+
+
+def test_signature_drift_detects_stale_assumption() -> None:
+    # ツール自体の健全性: protocols.py が前提（写し）と食い違えば drift として検出する。
+    stale = {"exists": "(self, key: str, extra: int) -> bool"}  # 実際の Protocol には無い引数
+    drift = signature_drift(AsyncFileStore, stale)
+    assert any("exists" in e for e in drift)
+
+    removed = {"no_such_method": "(self) -> None"}  # 改廃されたメンバ
+    assert any("no_such_method" in e for e in signature_drift(AsyncFileStore, removed))
 
 
 def test_parity_detects_missing_and_signature_drift() -> None:

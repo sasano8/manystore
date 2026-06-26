@@ -74,7 +74,12 @@
   機械チェック。test で `KeyValueStoreBase↔AsyncKeyValueStore`・`FileStoreBase↔AsyncFileStore` を点検。
   **波及**: 共通 abstract を _StoreBase に上げた結果、mixin 後置だった backend（http/s3/nats/ipfs）は
   abstract が concrete mixin を MRO で隠して生成不能になったため、宣言を `(_XBase, KeyValueStoreBase)` へ
-  並べ替え（mixin 先置の定石）。fast 124 passed。横展開ゲート（IPFS/LB 本体は M043 前提）の前提を満たした。
+  並べ替え（mixin 先置の定石）。横展開ゲート（IPFS/LB 本体は M043 前提）の前提を満たした。
+  **追補（2026-06-27・ユーザー要望）＝conformancer↔Protocol drift ガード**: conformancer の `_OPS`/`_op_*` は
+  Protocol の呼び出し方を直書きする＝protocols.py が進化すると「古い契約を前提に黙って誤検証」しうる。
+  汎用 `signature_drift(protocol, expected)` ＋ conformancer が叩くメンバのシグネチャ写し
+  （`_PINNED_*_SIGNATURES`）＋ `assert_conformancer_protocol_current`（**protocols.py が正**・不一致は
+  conformancer が古い合図＝`_op_*` と写しを追従）。逆方向（conformancer 先行）は想定しない。fast 126 passed。
 - **M038（2026-06-26・完了）**: `manystore/crypto.py` 新設＝ストリーム暗号と FileStore IO への繋ぎこみ IF を明確化。
   primitive **`StreamCipher`**（`transform(offset, data)`＝オフセット指定・チャンク境界非依存の対称変換）＋参照実装
   `XorStreamCipher`（繰り返し鍵 XOR・**安全でない** placeholder）。`AsyncFileObject` を包む **`CipherReader`/`CipherWriter`**
