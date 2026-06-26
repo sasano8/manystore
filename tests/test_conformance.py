@@ -268,10 +268,9 @@ def test_parity_detects_missing_and_signature_drift() -> None:
 
 # ── 並行安全性（M046: put を持つストアの必須挙動を conformance で機械検証） ──
 #
-# 以下 2 つは **チェッカ自体の健全性**（衝突を検出してテストを落とせるか）を確認する自己テスト＝
-# 「衝突でテストに失敗させれること」を担保する。実 backend の検査は M046（put_if_absent）実装後に
-# 有効化（下の skip 参照）。チェッカは asyncio 単一スレッドでも、check と set の間に await(=yield)が
-# 入る非原子実装（TOCTOU）なら成功 >1 になり露見する。
+# 2 writer が内容を変えて同一キーへ put_if_absent し「一方成功・他方 ConflictError・保存値=勝者」を
+# 検証。以下 2 つは **チェッカの健全性**（衝突を検出して落とせるか）の自己テスト＝「衝突でテストを
+# 失敗させれること」を担保。実 backend は M046 実装後に有効化（skip 参照）。
 
 
 class _ConditionalDict:
@@ -284,6 +283,12 @@ class _ConditionalDict:
     async def delete(self, key: str) -> None:
         self._d.pop(key, None)
 
+    async def get_or_raise(self, key: str) -> bytes:
+        try:
+            return self._d[key]
+        except KeyError:
+            raise FileNotFoundError(key) from None
+
     async def put_if_absent(self, key: str, value: bytes):
         if self._safe:
             # 原子的: check と set の間に await を挟まない＝単一スレッドでは割り込まれない。
@@ -291,7 +296,7 @@ class _ConditionalDict:
                 raise ConflictError(key)
             self._d[key] = value
         else:
-            # 非安全(TOCTOU): 存在確認のあと yield し、その隙に他コルーチンが作成しうる。
+            # 非安全(TOCTOU): 存在確認を保持したまま yield し、その隙に他コルーチンが作成しうる。
             exists = key in self._d
             await asyncio.sleep(0)
             if exists:
@@ -301,25 +306,32 @@ class _ConditionalDict:
 
 
 def test_concurrency_checker_passes_for_safe_store() -> None:
-    # 原子的な put_if_absent は「成功ちょうど 1」＝チェッカを通る。
-    asyncio.run(assert_put_if_absent_concurrency_safe(_ConditionalDict(safe=True), concurrency=50))
+    # 原子的な put_if_absent は「ちょうど一方成功・保存値=勝者」を満たす＝チェッカを通る。
+    # 後発を stagger で遅らせるので先行（b"A"）が勝つ＝どちらが優先されたかを内容で識別できる。
+    winner = asyncio.run(
+        assert_put_if_absent_concurrency_safe(_ConditionalDict(safe=True), size=256)
+    )
+    assert winner == b"A" * 256  # 先行 writer が優先された
 
 
 def test_concurrency_checker_fails_on_collision() -> None:
-    # 非安全(TOCTOU)な実装は同時多重で成功 >1 ＝チェッカが AssertionError で落とす
-    # （= 衝突でテストを失敗させられることの確認）。
+    # 非安全(TOCTOU)＝両 writer が「無い」と判断し両方作成（lost-update）。stagger=0 で重なりを作り
+    # 成功 2 件にすると AssertionError で落とす（= 衝突でテストを失敗させられる確認）。
     with pytest.raises(AssertionError, match="並行安全性違反"):
         asyncio.run(
-            assert_put_if_absent_concurrency_safe(_ConditionalDict(safe=False), concurrency=50)
+            assert_put_if_absent_concurrency_safe(
+                _ConditionalDict(safe=False), size=256, stagger=0.0
+            )
         )
 
 
 @pytest.mark.skip(reason="M046 conditional put（put_if_absent/put_if_match）未実装＝実装後に有効化")
-def test_local_put_if_absent_concurrent_exactly_one_wins(tmp_path) -> None:
-    # 実 backend の必須挙動: 並行 put_if_absent → 成功ちょうど 1。M046 実装後に skip を外す。
+def test_local_put_if_absent_concurrent_winner_is_intact(tmp_path) -> None:
+    # 実 backend の必須挙動: 並行 put_if_absent → 一方成功・他方 ConflictError・保存値=勝者。
+    # M046 実装後に skip を外す。
     asyncio.run(assert_put_if_absent_concurrency_safe(LocalKeyValueStore(tmp_path)))
 
 
 @pytest.mark.skip(reason="M046 conditional put（put_if_absent/put_if_match）未実装＝実装後に有効化")
-def test_dict_put_if_absent_concurrent_exactly_one_wins() -> None:
+def test_dict_put_if_absent_concurrent_winner_is_intact() -> None:
     asyncio.run(assert_put_if_absent_concurrency_safe(DictKeyValueStore()))

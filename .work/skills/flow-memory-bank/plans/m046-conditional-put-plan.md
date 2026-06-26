@@ -115,9 +115,13 @@
   version=opaque str（S3 etag/NATS revision/local mtime_ns+size）、読み口 `head`、不一致は `ConflictError`。
 - **例外集約済**（M048）: `exceptions.py` に `UnsupportedOperation`(405)/`ConflictError`(409)。read-only は
   conditional 系も `UnsupportedOperation` を上げる（put と同じ＝capability 不要）。
-- **並行安全性チェッカ scaffold 済**: `conformancer.assert_put_if_absent_concurrency_safe`（同時 N 本→成功
-  ちょうど 1・残り `ConflictError`）。**自己テスト 2 本が active**（safe→pass / TOCTOU→AssertionError＝
-  「衝突でテストを落とせる」ことを確認済）。**実 backend テストは `@pytest.mark.skip`**（M046 本実装で解禁）。
+- **並行安全性チェッカ scaffold 済**: `conformancer.assert_put_if_absent_concurrency_safe`。**設計改訂
+  （ユーザー指摘）**＝50 並列「1 つ勝つ」は *何を確認するか* が曖昧 → **2 writer・内容を変え（A/B）・大きめ
+  size・後発を stagger 秒ずらす**方式へ。検証する不変条件＝①ちょうど一方成功・他方 `ConflictError`
+  ②**保存値=勝者の内容**（敗者上書き・torn write を排除）。戻り値＝勝者 content で**どちらが優先されたか
+  識別可**。**自己テスト 2 本 active**（safe→先行 A が勝つ / TOCTOU を `stagger=0` で重ねる→両方成功を
+  AssertionError 検出）。**実 backend テストは `@pytest.mark.skip`**（M046 本実装で解禁）。
+  put_if_match も同型（同一 base version の 2 writer・一方成功・保存値=勝者）で後日。
 - **残＝本実装**: 各 backend の `put_if_absent`/`put_if_match`/`head` 実装（local=os.link/flock・S3=条件ヘッダ）、
   `_StoreBase` への abstract 追加（M043 parity 揃え）、ラッパ委譲、skip 解除。
 
