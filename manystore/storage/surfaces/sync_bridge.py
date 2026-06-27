@@ -13,7 +13,7 @@
 import asyncio
 from collections.abc import Iterator
 
-from ...protocols import AsyncKeyValueStore, FileInfo, IfMatch
+from ...protocols import AsyncKeyValueStore, FileInfo, IfMatch, _Absent
 
 
 class AsyncToSyncKeyValueStore:
@@ -34,6 +34,9 @@ class AsyncToSyncKeyValueStore:
 
     def head(self, key: str) -> FileInfo:
         return self._run(self._store.head(key))
+
+    def head_or_absent(self, key: str) -> FileInfo | _Absent:
+        return self._run(self._store.head_or_absent(key))
 
     def get_or_raise(self, key: str) -> bytes:
         return self._run(self._store.get_or_raise(key))

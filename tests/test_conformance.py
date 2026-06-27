@@ -368,3 +368,21 @@ async def test_local_conditional_put_unit(tmp_path) -> None:
     assert await store.get_or_raise("k") == b"v3xx"
     with pytest.raises(ConflictError):
         await store.put("k", b"zzzz", if_match=meta)
+
+
+async def test_head_or_absent_upsert() -> None:
+    # head_or_absent の戻りをそのまま if_match に渡す＝create-or-update を一発で CAS 付きに。
+    store = DictKeyValueStore()
+    # 不在 → ABSENT が返り、create CAS として成功（新規作成）。
+    cond = await store.head_or_absent("k")
+    assert cond is ABSENT
+    await store.put("k", b"v1", if_match=cond)
+    assert await store.get_or_raise("k") == b"v1"
+    # 存在 → FileInfo が返り、update CAS として成功（版一致）。
+    cond = await store.head_or_absent("k")
+    assert cond is not ABSENT and cond["etag"] is not None
+    await store.put("k", b"v2", if_match=cond)
+    assert await store.get_or_raise("k") == b"v2"
+    # 古い cond（版が進んだ後）での upsert は ConflictError（並行変化を検出）。
+    with pytest.raises(ConflictError):
+        await store.put("k", b"v3", if_match=cond)

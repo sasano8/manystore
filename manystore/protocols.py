@@ -86,6 +86,9 @@ class AsyncKeyValueStore(Protocol):
     # head は値でなく **メタ情報**（filename/size/modified_at/etag）を返す情報取得。update CAS の
     # version 読み口＝head の戻り FileInfo をそのまま `put(if_match=...)` に渡す。欠損は NotFound。
     async def head(self, key: str) -> FileInfo: ...
+    # head_or_absent は head（存在＝FileInfo）か ABSENT（不在）を返す＝get の **メタ版**。戻りを
+    # そのまま `put(if_match=...)` に渡せば **upsert を CAS 付きで**（不在→create／存在→update）。
+    async def head_or_absent(self, key: str) -> FileInfo | _Absent: ...
     async def get_or_raise(self, key: str) -> bytes: ...
     async def get(self, key: str, default: bytes | None = None) -> bytes | None: ...
     # iter_all/list_all は **全キーを平坦に**列挙する（'/' を含むネストキーも再帰的に＝1 階層だけ
@@ -143,6 +146,7 @@ class SyncKeyValueStore(Protocol):
         self, key: str, value: bytes
     ) -> FileInfo: ...  # [AsyncKeyValueStore.create] の同期版
     def head(self, key: str) -> FileInfo: ...  # [AsyncKeyValueStore.head] の同期版
+    def head_or_absent(self, key: str) -> FileInfo | _Absent: ...  # 同期版
     def get_or_raise(self, key: str) -> bytes: ...
     def get(self, key: str, default: bytes | None = None) -> bytes | None: ...
     def iter_all(self, limit: int | None = None, prefix: str = "") -> Iterator[FileInfo]: ...
@@ -243,6 +247,14 @@ class _StoreBase(abc.ABC):
         # get_or_raise が NotFoundError を上げる。
         data = await self.get_or_raise(key)
         return {"filename": key, "size": len(data), "modified_at": None, "etag": None}
+
+    async def head_or_absent(self, key: str) -> FileInfo | _Absent:
+        # head（存在＝FileInfo）か ABSENT（不在）を返す派生＝get の メタ版（primitive ではない）。
+        # `cond = head_or_absent(k); put(k, v, if_match=cond)` で upsert を CAS 付きで安全に行える。
+        try:
+            return await self.head(key)
+        except FileNotFoundError:
+            return ABSENT
 
     async def get(self, key: str, default: bytes | None = None) -> bytes | None:
         # get_or_raise を捕捉し欠損時 default を返す（各 backend で try/except を重複させない）。
