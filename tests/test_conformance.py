@@ -89,22 +89,22 @@ def test_file_store_requires_io_on_top_of_kvs() -> None:
 # ── 挙動契約テストツール（辞書ストアをオラクルに run_light・report に追記） ──
 
 
-def test_run_light_local_file_store_matches_oracle(tmp_path) -> None:
+async def test_run_light_local_file_store_matches_oracle(tmp_path) -> None:
     # 辞書ストアを正に LocalFileStore の IO/exists/list_all/iter_all を差分検証。
     tester = FileStoreTester(DictFileStore(), LocalFileStore(tmp_path))
     report: list = []
-    asyncio.run(tester.run_light(report))
+    await tester.run_light(report)
     assert all(s["passed"] for s in report), report
     assert len(report) == 12  # 観点数
     aspects = {s["aspect"] for s in report}
     assert {"list_all:after_write", "iter_all:after_write"} <= aspects
 
 
-def test_run_light_records_state_per_op(tmp_path) -> None:
+async def test_run_light_records_state_per_op(tmp_path) -> None:
     # op 毎に「適用後の状態」（iter_all のファイル名・昇順）が返り値とは別に記録される。
     tester = FileStoreTester(DictFileStore(), LocalFileStore(tmp_path))
     report: list = []
-    asyncio.run(tester.run_light(report))
+    await tester.run_light(report)
     by_aspect = {s["aspect"]: s for s in report}
 
     # 全ステップが状態を持ち、昇順で reference/target 一致。
@@ -119,15 +119,15 @@ def test_run_light_records_state_per_op(tmp_path) -> None:
     assert len(written) == 1 and written[0].endswith("/a")
 
 
-def test_run_light_dict_self_consistent() -> None:
+async def test_run_light_dict_self_consistent() -> None:
     # 正=対象=辞書ストアなら全観点一致（ツールの健全性）。
     tester = FileStoreTester(DictFileStore(), DictFileStore())
     report: list = []
-    asyncio.run(tester.run_light(report))
+    await tester.run_light(report)
     assert all(s["passed"] for s in report)
 
 
-def test_run_light_detects_divergence(tmp_path) -> None:
+async def test_run_light_detects_divergence(tmp_path) -> None:
     # 壊れた実装（書いても保存されない）は観点が fail する＝ツールが差分を検出する。
     class _NoopWriter:
         async def write(self, data):
@@ -147,19 +147,19 @@ def test_run_light_detects_divergence(tmp_path) -> None:
     broken.open_writer = open_writer
     tester = FileStoreTester(DictFileStore(), broken)
     report: list = []
-    asyncio.run(tester.run_light(report))
+    await tester.run_light(report)
     assert any(
         not s["passed"] for s in report
     )  # 書けていない→read/exists/list がオラクルと食い違う
 
 
-def test_run_light_report_is_external_and_saves(tmp_path) -> None:
+async def test_run_light_report_is_external_and_saves(tmp_path) -> None:
     import json
 
     # ツールはレポートを保持しない＝呼び出し側の list に操作順で追記される。
     tester = FileStoreTester(DictFileStore(), LocalFileStore(tmp_path))
     report: list = []
-    asyncio.run(tester.run_light(report))
+    await tester.run_light(report)
     assert report[0]["op"] == "exists"  # 操作順・op/args/expected が残る（リプレイ素材）
     assert "expected" in report[0]
     assert "expected_state" in report[0] and "actual_state" in report[0]  # 状態も保存される
@@ -180,7 +180,7 @@ def test_conformance_detects_missing_method() -> None:
         assert_key_value_store(_Broken())
 
 
-def test_base_enforces_full_protocol_at_instantiation() -> None:
+async def test_base_enforces_full_protocol_at_instantiation() -> None:
     # KeyValueStoreBase の primitive（put/get_or_raise/iter_all/exists/delete/connect/aclose）を
     # 一部でも実装し忘れたストアは、呼ぶ前に **インスタンス化時点で TypeError**＝部分実装が黙って
     # Protocol を破る（M043 のドリフト）のを fail-loud に防ぐ。get_or_raise だけ実装した旧来 OK な
@@ -211,7 +211,7 @@ def test_base_enforces_full_protocol_at_instantiation() -> None:
         async def connect(self): ...
         async def aclose(self): ...
 
-    asyncio.run(_assert_defaults(_Ok()))
+    await _assert_defaults(_Ok())
 
 
 async def _assert_defaults(store) -> None:
@@ -305,33 +305,29 @@ class _ConditionalDict:
         return {"filename": key, "size": len(value)}
 
 
-def test_concurrency_checker_passes_for_safe_store() -> None:
+async def test_concurrency_checker_passes_for_safe_store() -> None:
     # 原子的な put_if_absent は「ちょうど一方成功・保存値=勝者」を満たす＝チェッカを通る。
     # 後発を stagger で遅らせるので先行（b"A"）が勝つ＝どちらが優先されたかを内容で識別できる。
-    winner = asyncio.run(
-        assert_put_if_absent_concurrency_safe(_ConditionalDict(safe=True), size=256)
-    )
+    winner = await assert_put_if_absent_concurrency_safe(_ConditionalDict(safe=True), size=256)
     assert winner == b"A" * 256  # 先行 writer が優先された
 
 
-def test_concurrency_checker_fails_on_collision() -> None:
+async def test_concurrency_checker_fails_on_collision() -> None:
     # 非安全(TOCTOU)＝両 writer が「無い」と判断し両方作成（lost-update）。stagger=0 で重なりを作り
     # 成功 2 件にすると AssertionError で落とす（= 衝突でテストを失敗させられる確認）。
     with pytest.raises(AssertionError, match="並行安全性違反"):
-        asyncio.run(
-            assert_put_if_absent_concurrency_safe(
-                _ConditionalDict(safe=False), size=256, stagger=0.0
-            )
+        await assert_put_if_absent_concurrency_safe(
+            _ConditionalDict(safe=False), size=256, stagger=0.0
         )
 
 
 @pytest.mark.skip(reason="M046 conditional put（put_if_absent/put_if_match）未実装＝実装後に有効化")
-def test_local_put_if_absent_concurrent_winner_is_intact(tmp_path) -> None:
+async def test_local_put_if_absent_concurrent_winner_is_intact(tmp_path) -> None:
     # 実 backend の必須挙動: 並行 put_if_absent → 一方成功・他方 ConflictError・保存値=勝者。
     # M046 実装後に skip を外す。
-    asyncio.run(assert_put_if_absent_concurrency_safe(LocalKeyValueStore(tmp_path)))
+    await assert_put_if_absent_concurrency_safe(LocalKeyValueStore(tmp_path))
 
 
 @pytest.mark.skip(reason="M046 conditional put（put_if_absent/put_if_match）未実装＝実装後に有効化")
-def test_dict_put_if_absent_concurrent_winner_is_intact() -> None:
-    asyncio.run(assert_put_if_absent_concurrency_safe(DictKeyValueStore()))
+async def test_dict_put_if_absent_concurrent_winner_is_intact() -> None:
+    await assert_put_if_absent_concurrency_safe(DictKeyValueStore())

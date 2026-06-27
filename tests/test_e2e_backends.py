@@ -22,7 +22,6 @@ S3 の鍵は既定で `make e2e-up` が作る dev identity。別サーバ（mini
 常に skip になる（virtual-host は実 AWS 等の DNS 環境向け）。`s3-path` がローカルの実証ケース。
 """
 
-import asyncio
 import contextlib
 import os
 import socket
@@ -177,12 +176,12 @@ async def _run(opener: Callable[[], object]) -> None:
     # 常時バグ検出ケースなので fast のまま残す（R13）。
     [pytest.param(c, id=c.id, marks=[pytest.mark.slow] if c.skip_on_error else []) for c in CASES],
 )
-def test_backend_crud(case: _Case) -> None:
+async def test_backend_crud(case: _Case) -> None:
     """注入するストアだけ変えて、全 backend で同じ CRUD を回す。"""
     if not case.reachable():
         pytest.skip(f"{case.id}: backend 未到達")
     try:
-        asyncio.run(_run(case.opener))
+        await _run(case.opener)
     except Exception as e:
         if case.skip_on_error:
             pytest.skip(f"{case.id}: 環境/認証 未整備 → {type(e).__name__}: {e}")
