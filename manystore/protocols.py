@@ -31,19 +31,37 @@ import os
 import tempfile
 from collections.abc import AsyncIterable, AsyncIterator, Iterator
 from pathlib import Path
-from typing import Protocol
+from typing import Literal, Protocol, overload
 
 from .exceptions import ConflictError, NotFoundError, UnsupportedOperation
 
 
 class FileInfo(dict):
-    """ファイルのメタ情報。`dict` 互換（`info["size"]` / `info.get("etag")`）＋ `is_absent()`。
+    """ファイルのメタ情報。**dict 互換**（subscript／`.get`／`== {...}`／JSON 化）＋ `is_absent()`。
 
-    キー: `filename:str` / `size:int|None` / `modified_at:float|None`（任意） /
+    キー: `filename:str` / `size:int|None`（None=不在） / `modified_at:float|None`（任意） /
     `etag:str|None`（任意・CAS 用の不透明トークン＝S3=ETag/local=mtime_ns+size/dict=世代）。
     **`size=None` は不在**（存在しないキー）を表す＝`is_absent()` が True。put の `if_match` には
     head/head_or_absent の戻り（存在なら版一致を要求／不在＝[ABSENT] なら create-only）を渡す。
+
+    TypedDict はメソッドを持てないため `dict` を継承する。失われがちな **キー別の型情報**は下の
+    `__getitem__` の `@overload`（Literal キー → 型）で取り戻す＝`info["size"]` は `int | None` に
+    型付けされる（実体は dict・実行時は素の subscript）。型チェッカ/IDE 用で、実行時コストは無い。
     """
+
+    # ── subscript のキー別型（TypedDict 相当。実体は dict.__getitem__） ──
+    @overload
+    def __getitem__(self, key: Literal["filename"]) -> str: ...
+    @overload
+    def __getitem__(self, key: Literal["size"]) -> int | None: ...
+    @overload
+    def __getitem__(self, key: Literal["modified_at"]) -> float | None: ...
+    @overload
+    def __getitem__(self, key: Literal["etag"]) -> str | None: ...
+    @overload
+    def __getitem__(self, key: str) -> object: ...
+    def __getitem__(self, key: str) -> object:
+        return super().__getitem__(key)
 
     def is_absent(self) -> bool:
         """このメタが **不在**（size=None）を表すか。put `if_match` の create-only 判定に使う。"""
