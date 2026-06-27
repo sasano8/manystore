@@ -16,6 +16,7 @@ httpx を遅延 import する。
 from collections.abc import AsyncIterator
 from urllib.parse import quote
 
+from ..exceptions import NotFoundError
 from ..protocols import FileInfo, KeyValueStoreBase, _kv_copy, _kv_move
 from ..serving.services.protocol import ContextInfo, EntryInfo
 
@@ -59,7 +60,7 @@ class ManystoreClient:
     async def get_or_raise(self, context: str, key: str) -> bytes:
         r = await self._client.get(f"{context}/{_quote_key(key)}")
         if r.status_code == 404:
-            raise FileNotFoundError(key)  # 欠損は FileNotFoundError に正規化（get_or_raise 規約）
+            raise NotFoundError(key)  # 欠損は NotFoundError に正規化（get_or_raise 規約）
         r.raise_for_status()
         return r.content
 

@@ -13,6 +13,7 @@ from manystore.exceptions import (
     ContextNotFound,
     ManystoreError,
     NoSuchUpload,
+    NotFoundError,
     ReadOnlyContext,
     UnsafePathError,
     to_problem,
@@ -26,6 +27,7 @@ def test_problem_json_media_type() -> None:
 def test_domain_exceptions_keep_stdlib_bases() -> None:
     # 多重継承で ManystoreError 性を足しつつ、従来の stdlib 例外でもある（後方互換）。
     assert issubclass(UnsafePathError, (ValueError, ManystoreError))
+    assert issubclass(NotFoundError, (FileNotFoundError, ManystoreError))
     assert issubclass(ContextNotFound, (KeyError, ManystoreError))
     assert issubclass(ReadOnlyContext, (PermissionError, ManystoreError))
     assert issubclass(NoSuchUpload, ManystoreError)
@@ -64,6 +66,9 @@ def test_to_problem_status_per_subclass() -> None:
     assert to_problem(UnsafePathError("../x"))["status"] == 400
     assert to_problem(ReadOnlyContext("ro"))["status"] == 403
     assert to_problem(NoSuchUpload("abc"))["status"] == 404
+    # NotFoundError は ManystoreError ゆえ自身の status/title を使う（生 FNF fallback ではない）。
+    nf = to_problem(NotFoundError("k"))
+    assert nf["status"] == 404 and nf["title"] == "Not Found"
 
 
 def test_to_problem_maps_stdlib_exceptions() -> None:

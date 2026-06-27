@@ -21,7 +21,7 @@ from typing import BinaryIO
 
 import anyio.to_thread
 
-from ...exceptions import UnsupportedOperation
+from ...exceptions import NotFoundError, UnsupportedOperation
 from ...protocols import (
     AsyncFileObject,
     FileInfo,
@@ -140,7 +140,10 @@ class LocalFileStore(FileStoreBase):
     # ── ストリーム入出力（primitive）。put/get_or_raise/get は [FileStoreBase] が導出 ──
 
     async def open_reader(self, filename: str) -> AsyncFileObject:
-        fh = await _offload((self._dir / filename).open, "rb")
+        try:
+            fh = await _offload((self._dir / filename).open, "rb")
+        except FileNotFoundError as e:
+            raise NotFoundError(filename) from e  # OS 生 FNF を NotFoundError に正規化
         return LocalFileObject(fh)
 
     async def open_writer(self, filename: str) -> AsyncFileObject:
@@ -211,7 +214,7 @@ class LocalFileStore(FileStoreBase):
         def _mv() -> None:
             src_path = self._dir / src
             if not src_path.is_file():
-                raise FileNotFoundError(src)
+                raise NotFoundError(src)
             dst_path = self._dir / dst
             dst_path.parent.mkdir(parents=True, exist_ok=True)
             os.replace(src_path, dst_path)  # 同一 FS 内の原子的 rename

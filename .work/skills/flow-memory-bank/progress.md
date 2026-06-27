@@ -64,6 +64,13 @@
 
 ### 完了マイルストーン（要点のみ・経緯は git 履歴）
 
+- **M053（2026-06-27・完了）**: 「欠損」を例外ファミリへ昇格＝**`NotFoundError(FileNotFoundError, ManystoreError)`**
+  （status=404・title="Not Found"）を新設（ユーザー指摘＝tests が exceptions.py 定義でない生 `FileNotFoundError`
+  を想定していた）。stdlib を先頭に残すので既存 `except FileNotFoundError`/`pytest.raises(FileNotFoundError)` は
+  継承で全通り（破壊変更ゼロ）。src の生 FNF を全て NotFoundError へ（protocols `_kv_copy`・memory/nats/s3/http/remote
+  の get_or_raise・local の `mv`／**`open_reader` の OS 生 FNF**・**s3 native `open_reader` の NoSuchKey**＝streaming 経路も
+  正規化）。トップ export 追加。tests は `pytest.raises(NotFoundError)` へ厳格化（test_storage/conformance/ui・fake も）。
+  `_STDLIB_PROBLEM` の FNF 行は生 FNF fallback 用に残置。
 - **M052（2026-06-27・完了）**: テストを pytest-asyncio（`asyncio_mode="auto"`）へ一括移行＝`asyncio.run(scenario())`/
   直接 `asyncio.run(coro)` 包み **75 箇所**を `async def test_*`＋`await` に展開（test_storage 55・conformance 10・
   e2e 1 ほか）。挙動・件数完全不変（133 passed/2 skip）。陳腐化した過渡コメントを除去。今後の新規テストは async def が標準。

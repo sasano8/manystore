@@ -33,7 +33,7 @@ from collections.abc import AsyncIterable, AsyncIterator, Iterator
 from pathlib import Path
 from typing import Protocol, TypedDict
 
-from .exceptions import ConflictError, UnsupportedOperation
+from .exceptions import ConflictError, NotFoundError, UnsupportedOperation
 
 
 class FileInfo(TypedDict):
@@ -165,7 +165,7 @@ class _StoreBase(abc.ABC):
 
     @abc.abstractmethod
     async def get_or_raise(self, key: str) -> bytes:
-        """キーの値を返す。欠損は `FileNotFoundError`。**サブクラス必須**（primitive）。"""
+        """キーの値を返す。欠損は `NotFoundError`（FNF 派生）。**サブクラス必須**（primitive）。"""
         raise NotImplementedError
 
     @abc.abstractmethod
@@ -245,7 +245,7 @@ class FileStoreBase(_StoreBase):
 
     @abc.abstractmethod
     async def open_reader(self, filename: str) -> AsyncFileObject:
-        """読み取りストリームを開く。欠損は `FileNotFoundError`。**サブクラス必須**(primitive)。"""
+        """読み取りストリームを開く。欠損は `NotFoundError`（FNF 派生）。**サブクラス必須**。"""
         raise NotImplementedError
 
     @abc.abstractmethod
@@ -288,10 +288,10 @@ def _atomic_write_bytes(path: Path, data: bytes) -> None:
 
 
 async def _kv_copy(store: AsyncKeyValueStore, src: str, dst: str) -> None:
-    """get→put で src を dst へコピーする汎用実装（src が無ければ FileNotFoundError）。"""
+    """get→put で src を dst へコピーする汎用実装（src が無ければ NotFoundError）。"""
     data = await store.get(src)
     if data is None:
-        raise FileNotFoundError(src)
+        raise NotFoundError(src)
     await store.put(dst, data)
 
 

@@ -26,6 +26,7 @@ from manystore import (
     LocalKeyValueStore,
     NatsFileStore,
     NatsObjectKeyValueStore,
+    NotFoundError,
     S3FileStore,
     S3KeyValueStore,
     SafeFileStore,
@@ -156,9 +157,9 @@ async def test_local_kvs_cp_and_mv(tmp_path: Path) -> None:
     assert not await store.exists("a.txt")
     assert await store.get("moved.txt") == b"hi"
     # 無い src はエラー。
-    with pytest.raises(FileNotFoundError):
+    with pytest.raises(NotFoundError):
         await store.cp("missing", "x")
-    with pytest.raises(FileNotFoundError):
+    with pytest.raises(NotFoundError):
         await store.mv("missing", "x")
 
 
@@ -227,19 +228,19 @@ async def test_key_value_file_store_open_over_kvs(tmp_path: Path) -> None:
         await f.write(b"de")  # close 時にまとめて put
     async with await fs.open_reader("k/v.bin") as f:
         assert await f.read() == b"abcde"
-    # 無いキーの読み取りは FileNotFoundError。
-    with pytest.raises(FileNotFoundError):
+    # 無いキーの読み取りは NotFoundError。
+    with pytest.raises(NotFoundError):
         await fs.open_reader("missing")
 
 
 async def test_kvs_get_default_and_get_or_raise(tmp_path: Path) -> None:
-    # get は欠損時にデフォルト値（既定 None）を返し、get_or_raise は FileNotFoundError を上げる。
+    # get は欠損時にデフォルト値（既定 None）を返し、get_or_raise は NotFoundError を上げる。
     store = LocalKeyValueStore(tmp_path)
 
     # 欠損キー
     assert await store.get("missing") is None  # 既定デフォルト
     assert await store.get("missing", b"fallback") == b"fallback"  # 明示デフォルト
-    with pytest.raises(FileNotFoundError):
+    with pytest.raises(NotFoundError):
         await store.get_or_raise("missing")
     # 存在キーは default を無視して実値を返す（get / get_or_raise とも）。
     await store.put("k", b"v")
@@ -256,7 +257,7 @@ async def test_local_file_store_is_full_kvs(tmp_path: Path) -> None:
     assert await fs.get("a/b.bin") == b"hello"
     assert await fs.get("missing") is None
     assert await fs.get("missing", b"def") == b"def"
-    with pytest.raises(FileNotFoundError):
+    with pytest.raises(NotFoundError):
         await fs.get_or_raise("missing")
     assert [i["filename"] async for i in fs.iter_all()] == ["a/b.bin"]
     # IO 面: open_reader でも同じ真実が読める
@@ -277,8 +278,8 @@ async def test_key_value_file_store_is_full_file_store(tmp_path: Path) -> None:
     assert await fs.get_or_raise("k.bin") == b"xyz"
     assert await fs.get("missing", b"d") == b"d"
     assert [i["filename"] async for i in fs.iter_all()] == ["k.bin"]
-    # 欠損キーの open_reader は FileNotFoundError（get_or_raise 経由）
-    with pytest.raises(FileNotFoundError):
+    # 欠損キーの open_reader は NotFoundError（get_or_raise 経由）
+    with pytest.raises(NotFoundError):
         await fs.open_reader("missing")
 
 
@@ -471,7 +472,7 @@ async def test_s3_file_store_is_full_kvs() -> None:
     assert await store.get_or_raise("kv") == b"data"
     assert await store.get("missing") is None  # 欠損は default
     assert await store.get("missing", b"d") == b"d"
-    with pytest.raises(FileNotFoundError):
+    with pytest.raises(NotFoundError):
         await store.get_or_raise("missing")
     assert await store.exists("kv") is True  # head_object 200
     assert await store.exists("missing") is False  # head_object 404
@@ -565,8 +566,8 @@ async def test_nats_file_store_buffered_read_write() -> None:
         assert await f.read(5) == b"hello"
         assert await f.read() == b" world"
 
-    # 無いキーは FileNotFoundError。
-    with pytest.raises(FileNotFoundError):
+    # 無いキーは NotFoundError。
+    with pytest.raises(NotFoundError):
         await store.open_reader("missing")
 
 
@@ -581,7 +582,7 @@ async def test_nats_file_store_is_full_kvs() -> None:
     assert await store.get("kv") == b"data"  # 継承 get（whole）
     assert await store.get_or_raise("kv") == b"data"
     assert await store.get("missing") is None
-    with pytest.raises(FileNotFoundError):
+    with pytest.raises(NotFoundError):
         await store.get_or_raise("missing")
     assert await store.exists("kv") is True
     assert [i["filename"] async for i in store.iter_all()] == ["kv"]
@@ -799,8 +800,8 @@ async def test_download_cache_fetches_caches_and_force(tmp_path: Path) -> None:
     # force=True で取り直す。
     assert (await cache.download("m/model.bin", force=True)).read_bytes() == b"CHANGED"
 
-    # 上流に無ければ FileNotFoundError。
-    with pytest.raises(FileNotFoundError):
+    # 上流に無ければ NotFoundError。
+    with pytest.raises(NotFoundError):
         await cache.download("missing")
 
 
@@ -970,7 +971,7 @@ async def test_http_file_store_is_full_read_only_kvs() -> None:
     # read IO（whole get の buffer 合成）
     async with await store.open_reader("a.txt") as f:
         assert await f.read() == b"hello"
-    with pytest.raises(FileNotFoundError):
+    with pytest.raises(NotFoundError):
         await store.open_reader("missing")
     # KVS 面（継承）も使える
     assert await store.get("a.txt") == b"hello"
@@ -1011,7 +1012,7 @@ async def test_http_file_store_read() -> None:
 
     async with await fs.open_reader("a.txt") as f:
         assert await f.read() == b"hello"
-    with pytest.raises(FileNotFoundError):  # 404 → FileNotFoundError
+    with pytest.raises(NotFoundError):  # 404 → NotFoundError
         await fs.open_reader("missing")
     with pytest.raises(io.UnsupportedOperation):  # write は非対応
         await fs.open_writer("a.txt")

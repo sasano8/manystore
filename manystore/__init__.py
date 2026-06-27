@@ -14,6 +14,7 @@ from .exceptions import PROBLEM_JSON as PROBLEM_JSON
 from .exceptions import ContextNotFound as ContextNotFound
 from .exceptions import ManystoreError as ManystoreError
 from .exceptions import NoSuchUpload as NoSuchUpload
+from .exceptions import NotFoundError as NotFoundError
 from .exceptions import ReadOnlyContext as ReadOnlyContext
 from .exceptions import UnsafePathError as UnsafePathError
 from .exceptions import to_problem as to_problem

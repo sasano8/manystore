@@ -8,9 +8,10 @@
 **M049/M050 完了**（2026-06-27・ユーザー対話で着手）＝① `create`（create-if-not-exists・非原子の派生／既存は
 `ConflictError`）を `_StoreBase` 既定実装に追加（lockstep 維持）／② 2 ストア片方向同期 `StorageMirror` を
 新パッケージ `storage/sync/` に新設（集合差 reconcile・source 正・prune は opt-in）。`make check` 緑。
-**M052 完了**（2026-06-27）＝テスト 75 箇所を `async def`＋`await` へ一括移行（pytest-asyncio・挙動/件数不変）。
-今後の新規テストは async def 標準。次は **M051（kubernetes backend＝M050 の具体 sink・doc-first）** が本命。
-M046 conditional put 設計も継続候補。
+**M052/M053 完了**（2026-06-27）＝M052: テスト 75 箇所を `async def` 一括移行（挙動/件数不変・以後 async def 標準）。
+M053: 欠損を `NotFoundError(FileNotFoundError, ManystoreError)` へ昇格（src の生 FNF を全正規化＝local open_reader の
+OS 生 FNF・s3 native streaming の NoSuchKey も含む／tests を NotFoundError へ厳格化／破壊変更ゼロ）。
+次は **M051（kubernetes backend＝M050 の具体 sink・doc-first）** が本命。M046 conditional put 設計も継続候補。
 
 ## 直近の変更
 

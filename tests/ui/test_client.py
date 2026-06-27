@@ -10,6 +10,7 @@ import httpx
 import pytest
 
 from manystore.client import RemoteKeyValueStore
+from manystore.exceptions import NotFoundError
 from manystore.serving.server.app import create_app
 from manystore.serving.server.routes import KV_RAW_PREFIX  # native NS prefix の単一正本
 from manystore.serving.services.config import parse_config
@@ -52,7 +53,7 @@ async def test_remote_kvs_roundtrip(tmp_path: Path) -> None:
 
 
 async def test_remote_get_or_raise_and_default(tmp_path: Path) -> None:
-    # get_or_raise が client/service に波及済み：欠損は FileNotFoundError、get は default を返す。
+    # get_or_raise が client/service に波及済み：欠損は NotFoundError、get は default を返す。
     cfg = parse_config({"contexts": {"work": {"backend": "local", "root": str(tmp_path)}}})
     service = StorageService(cfg, watch_interval=1.0)
     await service.connect()
@@ -61,12 +62,12 @@ async def test_remote_get_or_raise_and_default(tmp_path: Path) -> None:
         f"http://test{KV_RAW_PREFIX}", "work", transport=httpx.ASGITransport(app=app)
     )
     try:
-        # サーバ層（StorageService）の get_or_raise も欠損で FileNotFoundError。
-        with pytest.raises(FileNotFoundError):
+        # サーバ層（StorageService）の get_or_raise も欠損で NotFoundError。
+        with pytest.raises(NotFoundError):
             await service.get_or_raise("work", "missing.txt")
 
         # クライアント層（RemoteKeyValueStore）：欠損は get_or_raise が送出、get は default。
-        with pytest.raises(FileNotFoundError):
+        with pytest.raises(NotFoundError):
             await store.get_or_raise("missing.txt")
         assert await store.get("missing.txt", default=b"fallback") == b"fallback"
 

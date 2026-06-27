@@ -6,6 +6,7 @@ nats-py はメソッド内で遅延 import する。FileStore は read=全体取
 import contextlib
 from collections.abc import AsyncIterator
 
+from ...exceptions import NotFoundError
 from ...protocols import (
     AsyncFileObject,
     FileInfo,
@@ -61,7 +62,7 @@ class NatsObjectKeyValueStore(_NatsBase, KeyValueStoreBase):
         try:
             result = await obs.get(key)
         except Exception as e:
-            raise FileNotFoundError(key) from e  # 欠損は FileNotFoundError に正規化
+            raise NotFoundError(key) from e  # 欠損は NotFoundError に正規化
         return result.data or b""
 
     async def iter_all(self, limit: int | None = None, prefix: str = "") -> AsyncIterator[FileInfo]:

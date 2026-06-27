@@ -11,7 +11,7 @@ KVS の get/exists と FileStore の read のみ実装する。httpx はメソ�
 
 from collections.abc import AsyncIterator
 
-from ...exceptions import UnsupportedOperation
+from ...exceptions import NotFoundError, UnsupportedOperation
 from ...protocols import AsyncFileObject, FileInfo, KeyValueStoreBase, _KvReadFileObject
 
 
@@ -60,7 +60,7 @@ class HttpKeyValueStore(_HttpBase, KeyValueStoreBase):
         async with self._client() as client:
             resp = await client.get(self._url(key))
             if resp.status_code == 404:
-                raise FileNotFoundError(key)  # 欠損は FileNotFoundError に正規化
+                raise NotFoundError(key)  # 欠損は NotFoundError に正規化
             resp.raise_for_status()
             return resp.content
 

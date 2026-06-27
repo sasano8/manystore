@@ -71,6 +71,18 @@ class UnsafePathError(ValueError, ManystoreError):
     title = "Unsafe Path"
 
 
+class NotFoundError(FileNotFoundError, ManystoreError):
+    """キー/ファイルが存在しない（`get_or_raise` 等の欠損正規化先）。
+
+    stdlib の `FileNotFoundError` を**先頭に残す**＝既存の `except FileNotFoundError` や
+    `pytest.raises(FileNotFoundError)` を継承で満たしつつ、manystore 例外ファミリ（status/title・
+    problem 変換）に載せる。backend は欠損を生 `FileNotFoundError` でなく**これ**で正規化する。
+    """
+
+    status = 404
+    title = "Not Found"
+
+
 class ContextNotFound(KeyError, ManystoreError):
     """指定された context が公開されていない。"""
 

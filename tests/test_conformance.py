@@ -22,7 +22,7 @@ from manystore import (
     S3KeyValueStore,
 )
 from manystore.client import RemoteKeyValueStore
-from manystore.exceptions import ConflictError
+from manystore.exceptions import ConflictError, NotFoundError
 from manystore.protocols import FileStoreBase, KeyValueStoreBase
 from manystore.storage.file import AsyncFileStore
 from manystore.storage.kv import AsyncKeyValueStore
@@ -187,7 +187,7 @@ async def test_base_enforces_full_protocol_at_instantiation() -> None:
     # 部分実装も、いまは未実装の primitive が残るため生成できない。
     class _ForgotMost(KeyValueStoreBase):
         async def get_or_raise(self, key):  # 残り primitive を実装していない
-            raise FileNotFoundError(key)
+            raise NotFoundError(key)
 
     with pytest.raises(TypeError):
         _ForgotMost()
@@ -198,7 +198,7 @@ async def test_base_enforces_full_protocol_at_instantiation() -> None:
             return {"filename": key, "size": len(value)}
 
         async def get_or_raise(self, key):
-            raise FileNotFoundError(key)
+            raise NotFoundError(key)
 
         async def iter_all(self, limit=None, prefix=""):
             return
@@ -287,7 +287,7 @@ class _ConditionalDict:
         try:
             return self._d[key]
         except KeyError:
-            raise FileNotFoundError(key) from None
+            raise NotFoundError(key) from None
 
     async def put_if_absent(self, key: str, value: bytes):
         if self._safe:
