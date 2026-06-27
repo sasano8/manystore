@@ -26,6 +26,7 @@ from .connect import ConnectPolicy, connect_key_value_store, connecting
 from .surfaces.array import DEFAULT_CACHE_DIR, ArrayKeyValueStore, DownloadCache
 from .surfaces.safe import SafeKeyValueStore, UnsafePathError, validate_safe_path
 from .surfaces.sync_bridge import AsyncToSyncKeyValueStore
+from .sync import StorageMirror, SyncPlan, SyncResult
 
 __all__ = [
     # shared
@@ -51,6 +52,10 @@ __all__ = [
     "ArrayKeyValueStore",
     "DownloadCache",
     "DEFAULT_CACHE_DIR",
+    # 2 ストア片方向同期（one-way mirror）
+    "StorageMirror",
+    "SyncPlan",
+    "SyncResult",
     # connection lifecycle
     "ConnectPolicy",
     "connecting",

@@ -40,6 +40,8 @@
 | ID | タスク | 優先 | 備考 |
 |----|--------|------|------|
 | M046 | put の並行更新（conditional put / lost-update 検出） | 相談 | ユーザー指摘（2026-06-27）＝local の `_LocalAtomicWriter` は temp+`os.replace` で **torn write は防ぐが排他はしない**＝同一キーへの並行 put は **last-writer-wins**（lost update を検出しない）。方針＝**optimistic concurrency（version/etag の compare-and-swap）を opt-in の conditional put として**：`put(..., if_match=<version>)` / `SupportsConditionalPut` で版不一致は **fail-loud に raise**。put 既定は無条件 set を維持（最小-core・M013 メタ・M045 と連動）。**version トークンは backend ごとに native を opaque な `version:str` へ畳む**＝S3=ETag・NATS=revision・**local=mtime（+size）**。**ユーザー合意（2026-06-27）: local では mtime を etag 的に使ってよい**（modern FS は statx で ns 精度＝実用上十分。nginx 等も mtime+size+inode で etag 生成）。**注意＝難所はトークン選択でなく「compare-and-swap の原子性」**：stat→比較→replace は TOCTOU で racy なので、commit を**ロック/原子 rename で直列化**する必要（Linux は create に `renameat2(RENAME_NOREPLACE)`、更新は flock/fcntl か lockfile）。**設計 `plans/m046-conditional-put-plan.md`**（2026-06-27・着手前 deep think 済・ユーザー討議反映）＝**capability ではなく core 契約**（put を持つなら並行安全は必須挙動・read-only は put 同様 raise・conformancer で強制）。`put_if_absent`（create CAS・local=`os.link`）＋`put_if_match`（update CAS・version=S3 etag/NATS rev/local mtime+size＋flock）を core へ。原体験＝既存上書きなので MVP は P1+P2。残未確定＝version 読み口(`head`)/エラー粒度(409 vs 412)/NATS native 範囲。詳細は意思決定の変遷 |
+| M052 | テストを pytest-asyncio（`async def`）へ一括移行 | 中 | ユーザー指摘（2026-06-27）＝`asyncio_mode="auto"` 在中なのに既存テストが `asyncio.run(scenario())` で包んでいる（冗長）。新規分（M049/M050 テスト）は既に `async def` 化済。残 **72 箇所**（test_storage.py 61・test_conformance.py 10・test_e2e_backends.py 1）を機械的にスイープ。挙動不変のリファクタ＝独立コミット推奨 |
+| M051 | kubernetes backend（M050 の具体 sink） | 相談 | ユーザー要望（2026-06-27・討議中・doc-first）＝put=server-side apply / get=補完済み live（put≠get）。キー=`namespace/resource_type/name`（`.yml` 含めず・group/version は discovery 補完・衝突時 `type.group`）。**FileInfo に世代情報**（resourceVersion/generation/uid/creationTimestamp）。**resourceVersion CAS を M046 の参照実装**に（`if_version` 不一致は ConflictError）。ローカル側=`KubeManifestStore` ラッパ（パス↔内容の同一性検証＝Safe 風 1 枚）。依存=`kubernetes-asyncio` を extra `[k8s]`（遅延 import）。cluster-scoped は後回し。詳細は interrupt |
 | M012 | `list(prefix=...)` / pagination | 中 | prefix は core `iter_all(prefix=…)` 引数化済（M030 capability は 2026-06-26 廃止）。**pagination 未対応**。設計案（2026-06-26 対話・要 doc-first）＝(a) `iter_all`/`list_all` に **offset+limit** を足す（単純・全 backend で scan 可だが大 offset は O(n)）／(b) **cursor/continuation-token** 形式（S3 ContinuationToken・NATS 等の native と整合・M021 の continuation と同一機構）。加えて **返り値を range メタ付きの独自型**にする案＝iter は「何件目〜何件目」を、list は from/to 件数属性を持つ（pagination メタ＝**file/value パラダイム内**。却下した transport の request/response 封筒とは別物）。未確定＝offset/limit vs cursor の二択と、独自結果型を入れるか。M021（S3 GW continuation）・M044（limit 既定の定数化）と連動 |
 | M013 | メタデータ / content-type | 中 | S3・NATS は native 対応だが共通 IF に無い |
 | M016 | テスト拡充（エラーパス/並行/大容量） | 中 | fake は happy path 中心 |
@@ -63,6 +65,14 @@
 
 ### 完了マイルストーン（要点のみ・経緯は git 履歴）
 
+- **M049（2026-06-27・完了）**: `create`（create-if-not-exists）を **`_StoreBase` の既定実装**として追加（cp/mv と
+  同列の*非原子の派生*＝backend primitive ではない）。既存なら `ConflictError`。exists→put で組む＝TOCTOU で
+  並行二重作成しうる（原子版は M046 `put_if_absent` が正本＝役割分担）。async/sync 両 Protocol＋sync_bridge に追加し
+  M043 lockstep（parity assert）を維持。Safe 越しでも override 済み exists/put を呼ぶのでキー検証が透過。
+- **M050（2026-06-27・完了）**: 2 ストア片方向同期 `StorageMirror` を新パッケージ `storage/sync/` に新設。source→sink を
+  **集合差 reconcile**（両側 iter_all を突合）で create/update/skip 分類＋`prune=True` で delete。source が常に正・
+  sink→source 書き戻しなし（one-way）。`compare`（既定 size 比較）で無駄更新スキップ。`plan()`=dry-run / `sync()`=適用。
+  kv facade＋トップへ export。**残＝M051 で k8s を具体 sink に**（apply 変換は sink backend の put に内包）。
 - **M048（2026-06-27・完了）**: 例外を `exceptions.py` に集約＝**`UnsupportedOperation(io.UnsupportedOperation,
   ManystoreError)`**（status=405・stdlib を先頭に残し `except io.UnsupportedOperation`/FileObject 慣習を維持しつつ
   HTTP status を持たせる）＋ **`ConflictError(ManystoreError)`**（status=409・M046 用）を新設。生 `io.UnsupportedOperation`

@@ -1342,3 +1342,78 @@ def test_create_safe_factories_wrap_without_connecting(tmp_path: Path) -> None:
         assert await arr.get("docs/x") == b"d"
 
     asyncio.run(scenario())
+
+
+# ── create（create-if-not-exists・M049） ──────────────────────────────────────
+# 新規テストは pytest-asyncio（asyncio_mode="auto"）に乗せて `async def` で直接書く
+# （既存の asyncio.run(scenario()) 包みは過渡的＝別途まとめて見直す）。
+
+
+async def test_create_new_key_then_conflict_on_existing() -> None:
+    """create は新規なら put 同様に書け、既存キーへは ConflictError（create-if-not-exists）。"""
+    from manystore.exceptions import ConflictError
+
+    store = DictKeyValueStore()
+    info = await store.create("a/b", b"hello")
+    assert info == {"filename": "a/b", "size": 5}
+    assert await store.get("a/b") == b"hello"
+    # 既存キーは ConflictError（値も上書きされない）。
+    with pytest.raises(ConflictError):
+        await store.create("a/b", b"NEW")
+    assert await store.get("a/b") == b"hello"
+
+
+async def test_create_through_safe_validates_key() -> None:
+    """Safe 越しの create も（基底 default が override 済み exists/put を呼ぶ）キー検証が効く。"""
+    store = SafeKeyValueStore(DictKeyValueStore())
+    await store.create("ok/key", b"v")
+    assert await store.get("ok/key") == b"v"
+    with pytest.raises(UnsafePathError):
+        await store.create("../escape", b"x")
+
+
+# ── StorageMirror（2 ストア片方向同期・M050） ─────────────────────────────────
+
+
+async def test_storage_mirror_plan_classifies_create_update_skip_delete() -> None:
+    """plan は集合差で create/update/skip と（prune 時の）delete を分類する（適用はしない）。"""
+    from manystore import StorageMirror
+
+    source = DictKeyValueStore({"new": b"x", "same": b"AA", "changed": b"AAAA"})
+    sink = DictKeyValueStore({"same": b"BB", "changed": b"BB", "orphan": b"Z"})
+    mirror = StorageMirror(source, sink)  # 既定 comparator＝size 比較
+    plan = await mirror.plan(prune=True)
+    assert plan.create == ["new"]  # source のみ
+    assert plan.update == ["changed"]  # size 違い（4 vs 2）
+    assert plan.skip == ["same"]  # size 一致（2 vs 2）
+    assert plan.delete == ["orphan"]  # sink のみ＝prune 対象
+
+
+async def test_storage_mirror_sync_makes_sink_match_source_without_prune() -> None:
+    """prune=False（既定）は orphan を残し source の値で sink を作成/更新（片方向・source 正）。"""
+    from manystore import StorageMirror
+
+    src_data = {"new": b"x", "same": b"AA", "changed": b"AAAA"}
+    sink_data = {"same": b"BB", "changed": b"BB", "orphan": b"Z"}
+    mirror = StorageMirror(DictKeyValueStore(src_data), DictKeyValueStore(sink_data))
+    result = await mirror.sync()  # prune 既定 False
+    assert result.created == ["new"]
+    assert result.updated == ["changed"]
+    assert result.skipped == ["same"]
+    assert result.deleted == []
+    # sink は source の値に一致（orphan は keep）。
+    assert sink_data["new"] == b"x"
+    assert sink_data["changed"] == b"AAAA"
+    assert sink_data["orphan"] == b"Z"
+
+
+async def test_storage_mirror_sync_prune_removes_orphans() -> None:
+    """prune=True で sink にあって source に無いキーを削除＝完全ミラー。"""
+    from manystore import StorageMirror
+
+    sink_data = {"keep": b"v", "orphan": b"Z"}
+    mirror = StorageMirror(DictKeyValueStore({"keep": b"v"}), DictKeyValueStore(sink_data))
+    result = await mirror.sync(prune=True)
+    assert result.deleted == ["orphan"]
+    assert "orphan" not in sink_data
+    assert sink_data["keep"] == b"v"

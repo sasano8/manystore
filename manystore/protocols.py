@@ -33,7 +33,7 @@ from collections.abc import AsyncIterable, AsyncIterator, Iterator
 from pathlib import Path
 from typing import Protocol, TypedDict
 
-from .exceptions import UnsupportedOperation
+from .exceptions import ConflictError, UnsupportedOperation
 
 
 class FileInfo(TypedDict):
@@ -58,6 +58,9 @@ class AsyncKeyValueStore(Protocol):
     # put は書いた値の [FileInfo]（`{filename: key, size: len(value)}`）を返す＝**全 backend が
     # 追加 I/O なしに生成できる共通レスポンス**。revision/etag は共通でない（capability 行き）。
     async def put(self, key: str, value: bytes) -> FileInfo: ...
+    # create は **新規作成専用**（既存なら [ConflictError]）。exists→put の **非原子**な利便メソッド
+    # （並行下は TOCTOU で二重作成しうる）。原子版は M046 `put_if_absent`。
+    async def create(self, key: str, value: bytes) -> FileInfo: ...
     async def get_or_raise(self, key: str) -> bytes: ...
     async def get(self, key: str, default: bytes | None = None) -> bytes | None: ...
     # iter_all/list_all は **全キーを平坦に**列挙する（'/' を含むネストキーも再帰的に＝1 階層だけ
@@ -109,6 +112,9 @@ class SyncKeyValueStore(Protocol):
     """[KeyValueStore] の同期版（put/get がメイン）。teardown は async `aclose` ↔ sync `close`。"""
 
     def put(self, key: str, value: bytes) -> FileInfo: ...  # [AsyncKeyValueStore.put] の同期版
+    def create(
+        self, key: str, value: bytes
+    ) -> FileInfo: ...  # [AsyncKeyValueStore.create] の同期版
     def get_or_raise(self, key: str) -> bytes: ...
     def get(self, key: str, default: bytes | None = None) -> bytes | None: ...
     def iter_all(self, limit: int | None = None, prefix: str = "") -> Iterator[FileInfo]: ...
@@ -188,6 +194,15 @@ class _StoreBase(abc.ABC):
         raise NotImplementedError
 
     # ── 既定実装（primitive から導出・派生は上書き可） ──
+
+    async def create(self, key: str, value: bytes) -> FileInfo:
+        # 新規作成専用＝既存なら ConflictError。exists→put で組む **非原子の利便メソッド**
+        # （cp/mv と同じく primitive から導出する派生・backend primitive ではない）。並行下では
+        # exists と put の間に隙間があり TOCTOU で二重作成しうる＝**原子的な create は M046
+        # `put_if_absent`（local=os.link）が正本**。役割分担: ここは利便・非原子／M046 は原子 CAS。
+        if await self.exists(key):
+            raise ConflictError(f"key already exists: {key}")
+        return await self.put(key, value)
 
     async def get(self, key: str, default: bytes | None = None) -> bytes | None:
         # get_or_raise を捕捉し欠損時 default を返す（各 backend で try/except を重複させない）。

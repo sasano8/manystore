@@ -5,9 +5,11 @@
 
 ## 現在のフォーカス
 
-**アクティブな作業なし**（2026-06-27 に **M043 完了**＝基底↔Protocol lockstep 是正〔共通基底 `_StoreBase`・
-parity assert・conformancer drift ガード〕／**M047 完了**＝CI/Makefile/mkdocs を supervisor 新標準へ追従）。
-次サイクルで `progress.md`「残作業」から選定する（候補＝M046 conditional put 設計・M039/M040 本実装・M011 残フェーズ）。
+**M049/M050 完了**（2026-06-27・ユーザー対話で着手）＝① `create`（create-if-not-exists・非原子の派生／既存は
+`ConflictError`）を `_StoreBase` 既定実装に追加（lockstep 維持）／② 2 ストア片方向同期 `StorageMirror` を
+新パッケージ `storage/sync/` に新設（集合差 reconcile・source 正・prune は opt-in）。`make check` 緑。
+次は **M051（kubernetes backend＝M050 の具体 sink・doc-first）** が本命。並行で **M052**（テストの `async def` 一括移行・
+72 箇所）はユーザー判断待ち（今やるか backlog か）。M046 conditional put 設計も継続候補。
 
 ## 直近の変更
 
