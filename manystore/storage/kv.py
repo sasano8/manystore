@@ -9,7 +9,6 @@ from contextlib import asynccontextmanager
 
 from ..protocols import (
     ABSENT,
-    Absent,
     AsyncKeyValueStore,
     FileInfo,
     IfMatch,
@@ -34,9 +33,8 @@ from .sync import StorageMirror, SyncPlan, SyncResult
 __all__ = [
     # shared
     "FileInfo",
-    # conditional put（CAS）: if_match の型と「不在」FileInfo（type＋センチネル）
+    # conditional put（CAS）: if_match の型と「不在」FileInfo（センチネル）
     "IfMatch",
-    "Absent",
     "ABSENT",
     # abstraction
     "AsyncKeyValueStore",

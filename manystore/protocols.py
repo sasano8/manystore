@@ -31,7 +31,7 @@ import os
 import tempfile
 from collections.abc import AsyncIterable, AsyncIterator, Iterator
 from pathlib import Path
-from typing import Literal, Protocol, overload
+from typing import Any, Literal, Protocol, overload
 
 from .exceptions import ConflictError, NotFoundError, UnsupportedOperation
 
@@ -44,10 +44,36 @@ class FileInfo(dict):
     **`size=None` は不在**（存在しないキー）を表す＝`is_absent()` が True。put の `if_match` には
     head/head_or_absent の戻り（存在なら版一致を要求／不在＝[ABSENT] なら create-only）を渡す。
 
-    TypedDict はメソッドを持てないため `dict` を継承する。失われがちな **キー別の型情報**は下の
-    `__getitem__` の `@overload`（Literal キー → 型）で取り戻す＝`info["size"]` は `int | None` に
-    型付けされる（実体は dict・実行時は素の subscript）。型チェッカ/IDE 用で、実行時コストは無い。
+    TypedDict はメソッドを持てないため `dict` を継承する。`__init__` で **構築時の型**（filename/
+    size/modified_at/etag）を付け、`__getitem__` の `@overload` で **subscript 読みの型**を取り戻す
+    （`info["size"]` は `int | None`）。実体は dict・実行時コストは無い（型チェッカ/IDE 用）。
+    任意メタ（modified_at/etag）は None のとき省略＝put の安価な戻りは `{filename, size}` のまま。
     """
+
+    @overload
+    def __init__(
+        self,
+        *,
+        filename: str = "",
+        size: int | None = None,
+        modified_at: float | None = None,
+        etag: str | None = None,
+    ) -> None: ...
+    @overload
+    def __init__(self, data: Any, /) -> None: ...  # dict 互換（asdict/copy 等の再構築用）
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        # 位置引数（mapping / pairs 反復子）＝dict 互換の再構築経路（dataclasses.asdict が
+        # `type(obj)(genexpr)` で呼ぶ）。素の dict と同じ意味にするためそのまま委譲する。
+        if args:
+            super().__init__(*args, **kwargs)
+            return
+        # 型付きキーワード構築。任意メタは値があるときだけ持たせる（None は省略＝put の安価な
+        # 戻りを {filename, size} に保つ）。
+        super().__init__(filename=kwargs.get("filename", ""), size=kwargs.get("size"))
+        if kwargs.get("modified_at") is not None:
+            self["modified_at"] = kwargs["modified_at"]
+        if kwargs.get("etag") is not None:
+            self["etag"] = kwargs["etag"]
 
     # ── subscript のキー別型（TypedDict 相当。実体は dict.__getitem__） ──
     @overload
@@ -67,13 +93,14 @@ class FileInfo(dict):
         """このメタが **不在**（size=None）を表すか。put `if_match` の create-only 判定に使う。"""
         return self.get("size") is None
 
-
-class Absent(FileInfo):
-    """不在を表す [FileInfo]（size=None）。型として区別する（`isinstance(x, Absent)` 可）。"""
+    @classmethod
+    def absent(cls, filename: str = "") -> FileInfo:
+        """不在を表す [FileInfo]（size=None）。`put(if_match=...)` の create-only 指定に使う。"""
+        return cls(filename=filename)  # size 既定 None＝is_absent() True
 
 
 #: `put(if_match=ABSENT)` のセンチネル＝不在を要求（create-only CAS）。`ABSENT.is_absent()`=True。
-ABSENT = Absent(size=None)
+ABSENT = FileInfo.absent()
 
 #: conditional put の条件。None=無条件（LWW）／不在 FileInfo（`is_absent()`）=create-only／
 #: その他 FileInfo=その etag に一致を要求（update CAS）。

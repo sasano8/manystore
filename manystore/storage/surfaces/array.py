@@ -78,7 +78,13 @@ class ArrayKeyValueStore(KeyValueStoreBase):
     async def head(self, key: str) -> FileInfo:
         store, subkey = self._route(key)  # 不明な mount は KeyError（欠損ではない）
         info = await store.head(subkey)
-        return FileInfo({**info, "filename": key})  # version トークンは下層のまま透過
+        # version トークン（modified_at/etag）は下層のまま透過し、filename だけ論理名へ。
+        return FileInfo(
+            filename=key,
+            size=info["size"],
+            modified_at=info.get("modified_at"),
+            etag=info.get("etag"),
+        )
 
     async def get_or_raise(self, key: str) -> bytes:
         store, subkey = self._route(key)  # 不明な mount は KeyError（欠損ではない）
