@@ -82,3 +82,8 @@ markers = [
     "slow: 実バックエンド/ネットワーク/ポーリング待ちを伴う重いテスト",
     "benchmark: 性能計測テスト（環境差で揺れる＝gate にせず情報収集）",
 ]
+# 上流（starlette/fastapi の TestClient）が httpx 利用で出す Deprecation を抑制（httpx2 移行は
+# 上流都合で当方の責ではない）。message 前方一致で対象を絞る（他の警告は素通しのまま）。
+filterwarnings = [
+    "ignore:Using `httpx` with `starlette.testclient` is deprecated:Warning",
+]
