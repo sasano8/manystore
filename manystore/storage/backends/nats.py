@@ -63,7 +63,7 @@ class NatsObjectKeyValueStore(_NatsBase, KeyValueStoreBase):
             )
         obs = await self._get_obs()
         await obs.put(key, value)
-        return {"filename": key, "size": len(value)}
+        return FileInfo(filename=key, size=len(value))
 
     async def head(self, key: str) -> FileInfo:
         from nats.js.errors import NotFoundError as NatsNotFound
@@ -77,7 +77,7 @@ class NatsObjectKeyValueStore(_NatsBase, KeyValueStoreBase):
             raise NotFoundError(key)
         # version は digest/nuid を不透明トークンに。mtime は版差があるため modified_at は None。
         etag = str(getattr(info, "digest", "") or getattr(info, "nuid", "") or "") or None
-        return {"filename": key, "size": info.size or 0, "modified_at": None, "etag": etag}
+        return FileInfo(filename=key, size=info.size or 0, modified_at=None, etag=etag)
 
     async def get_or_raise(self, key: str) -> bytes:
         obs = await self._get_obs()

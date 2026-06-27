@@ -31,33 +31,35 @@ import os
 import tempfile
 from collections.abc import AsyncIterable, AsyncIterator, Iterator
 from pathlib import Path
-from typing import NotRequired, Protocol, TypedDict
+from typing import Protocol
 
 from .exceptions import ConflictError, NotFoundError, UnsupportedOperation
 
 
-class FileInfo(TypedDict):
-    filename: str
-    size: int
-    # 任意メタ。put の安価な戻りでは省略され、head（情報取得）が埋める。
-    modified_at: NotRequired[float | None]  # 更新時刻（epoch 秒）。不明なら None
-    etag: NotRequired[str | None]  # CAS 用の不透明トークン（S3=ETag/local=mtime_ns+size/dict=世代）
+class FileInfo(dict):
+    """ファイルのメタ情報。`dict` 互換（`info["size"]` / `info.get("etag")`）＋ `is_absent()`。
+
+    キー: `filename:str` / `size:int|None` / `modified_at:float|None`（任意） /
+    `etag:str|None`（任意・CAS 用の不透明トークン＝S3=ETag/local=mtime_ns+size/dict=世代）。
+    **`size=None` は不在**（存在しないキー）を表す＝`is_absent()` が True。put の `if_match` には
+    head/head_or_absent の戻り（存在なら版一致を要求／不在＝[ABSENT] なら create-only）を渡す。
+    """
+
+    def is_absent(self) -> bool:
+        """このメタが **不在**（size=None）を表すか。put `if_match` の create-only 判定に使う。"""
+        return self.get("size") is None
 
 
-class _Absent:
-    """`put(if_match=ABSENT)` 用のセンチネル＝『不在であること』を条件にする（create-only CAS）。"""
-
-    __slots__ = ()
-
-    def __repr__(self) -> str:
-        return "ABSENT"
+class Absent(FileInfo):
+    """不在を表す [FileInfo]（size=None）。型として区別する（`isinstance(x, Absent)` 可）。"""
 
 
-#: `put(..., if_match=...)` のセンチネル。`if_match=ABSENT` で「既存なら ConflictError」。
-ABSENT = _Absent()
+#: `put(if_match=ABSENT)` のセンチネル＝不在を要求（create-only CAS）。`ABSENT.is_absent()`=True。
+ABSENT = Absent(size=None)
 
-#: conditional put の条件。None=無条件（LWW）／ABSENT=不在を要求／FileInfo=その etag に一致を要求。
-type IfMatch = FileInfo | _Absent | None
+#: conditional put の条件。None=無条件（LWW）／不在 FileInfo（`is_absent()`）=create-only／
+#: その他 FileInfo=その etag に一致を要求（update CAS）。
+type IfMatch = FileInfo | None
 
 
 # ── async（一次） ──
@@ -86,9 +88,9 @@ class AsyncKeyValueStore(Protocol):
     # head は値でなく **メタ情報**（filename/size/modified_at/etag）を返す情報取得。update CAS の
     # version 読み口＝head の戻り FileInfo をそのまま `put(if_match=...)` に渡す。欠損は NotFound。
     async def head(self, key: str) -> FileInfo: ...
-    # head_or_absent は head（存在＝FileInfo）か ABSENT（不在）を返す＝get の **メタ版**。戻りを
+    # head_or_absent は head（存在）か ABSENT（不在＝size=None）を返す＝get の **メタ版**。戻りを
     # そのまま `put(if_match=...)` に渡せば **upsert を CAS 付きで**（不在→create／存在→update）。
-    async def head_or_absent(self, key: str) -> FileInfo | _Absent: ...
+    async def head_or_absent(self, key: str) -> FileInfo: ...
     async def get_or_raise(self, key: str) -> bytes: ...
     async def get(self, key: str, default: bytes | None = None) -> bytes | None: ...
     # iter_all/list_all は **全キーを平坦に**列挙する（'/' を含むネストキーも再帰的に＝1 階層だけ
@@ -146,7 +148,7 @@ class SyncKeyValueStore(Protocol):
         self, key: str, value: bytes
     ) -> FileInfo: ...  # [AsyncKeyValueStore.create] の同期版
     def head(self, key: str) -> FileInfo: ...  # [AsyncKeyValueStore.head] の同期版
-    def head_or_absent(self, key: str) -> FileInfo | _Absent: ...  # 同期版
+    def head_or_absent(self, key: str) -> FileInfo: ...  # 同期版
     def get_or_raise(self, key: str) -> bytes: ...
     def get(self, key: str, default: bytes | None = None) -> bytes | None: ...
     def iter_all(self, limit: int | None = None, prefix: str = "") -> Iterator[FileInfo]: ...
@@ -246,11 +248,11 @@ class _StoreBase(abc.ABC):
         # backend は **head と put(if_match=) を対で override** して CAS トークンを埋める。欠損は
         # get_or_raise が NotFoundError を上げる。
         data = await self.get_or_raise(key)
-        return {"filename": key, "size": len(data), "modified_at": None, "etag": None}
+        return FileInfo(filename=key, size=len(data), modified_at=None, etag=None)
 
-    async def head_or_absent(self, key: str) -> FileInfo | _Absent:
-        # head（存在＝FileInfo）か ABSENT（不在）を返す派生＝get の メタ版（primitive ではない）。
-        # `cond = head_or_absent(k); put(k, v, if_match=cond)` で upsert を CAS 付きで安全に行える。
+    async def head_or_absent(self, key: str) -> FileInfo:
+        # head（存在）か ABSENT（不在＝size=None）を返す派生＝get の メタ版（primitive ではない）。
+        # `cond = head_or_absent(k); put(k, v, if_match=cond)` で upsert を CAS 付きで行える。
         try:
             return await self.head(key)
         except FileNotFoundError:
@@ -318,7 +320,7 @@ class FileStoreBase(_StoreBase):
             raise NotImplementedError("conditional put requires backend-native CAS; override put")
         async with await self.open_writer(key) as f:
             await f.write(value)
-        return {"filename": key, "size": len(value)}
+        return FileInfo(filename=key, size=len(value))
 
 
 # ════════════════════════════════════════════════════════════════════════════

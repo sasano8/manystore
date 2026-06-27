@@ -64,12 +64,12 @@ class HttpKeyValueStore(_HttpBase, KeyValueStoreBase):
             if resp.status_code == 404:
                 raise NotFoundError(key)
             resp.raise_for_status()
-            return {
-                "filename": key,
-                "size": int(resp.headers.get("content-length", 0)),
-                "modified_at": None,
-                "etag": resp.headers.get("etag"),
-            }
+            return FileInfo(
+                filename=key,
+                size=int(resp.headers.get("content-length", 0)),
+                modified_at=None,
+                etag=resp.headers.get("etag"),
+            )
 
     async def get_or_raise(self, key: str) -> bytes:
         async with self._client() as client:

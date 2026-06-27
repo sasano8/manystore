@@ -112,7 +112,7 @@ class RemoteKeyValueStore(KeyValueStoreBase):
                 "（native REST に条件ヘッダが無い）"
             )
         await self._client.put(self._context, key, value)
-        return {"filename": key, "size": len(value)}
+        return FileInfo(filename=key, size=len(value))
 
     async def get_or_raise(self, key: str) -> bytes:
         return await self._client.get_or_raise(self._context, key)

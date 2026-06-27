@@ -298,7 +298,7 @@ class _RacyCreateDict:
     async def put(self, key: str, value: bytes, *, if_match=None):
         exists = key in self._d
         await asyncio.sleep(0)  # 存在確認を保持したまま yield＝TOCTOU の窓
-        if if_match is ABSENT and exists:
+        if if_match is not None and if_match.is_absent() and exists:
             raise ConflictError(key)
         self._d[key] = value
         return {"filename": key, "size": len(value)}
@@ -373,14 +373,14 @@ async def test_local_conditional_put_unit(tmp_path) -> None:
 async def test_head_or_absent_upsert() -> None:
     # head_or_absent の戻りをそのまま if_match に渡す＝create-or-update を一発で CAS 付きに。
     store = DictKeyValueStore()
-    # 不在 → ABSENT が返り、create CAS として成功（新規作成）。
+    # 不在 → is_absent() な FileInfo（ABSENT）が返り、create CAS として成功（新規作成）。
     cond = await store.head_or_absent("k")
-    assert cond is ABSENT
+    assert cond.is_absent()
     await store.put("k", b"v1", if_match=cond)
     assert await store.get_or_raise("k") == b"v1"
-    # 存在 → FileInfo が返り、update CAS として成功（版一致）。
+    # 存在 → 実 FileInfo が返り、update CAS として成功（版一致）。
     cond = await store.head_or_absent("k")
-    assert cond is not ABSENT and cond["etag"] is not None
+    assert not cond.is_absent() and cond["etag"] is not None
     await store.put("k", b"v2", if_match=cond)
     assert await store.get_or_raise("k") == b"v2"
     # 古い cond（版が進んだ後）での upsert は ConflictError（並行変化を検出）。

@@ -10,7 +10,6 @@ from collections.abc import AsyncIterator
 
 from ...exceptions import ConflictError, NotFoundError
 from ...protocols import (
-    ABSENT,
     AsyncFileObject,
     FileInfo,
     IfMatch,
@@ -50,25 +49,25 @@ class DictKeyValueStore(KeyValueStoreBase):
         value = bytes(value)
         exists = key in self._data
         # 条件判定→set の間に await を挟まない＝単一イベントループ内では原子的（割り込まれない）。
-        if if_match is ABSENT and exists:
-            raise ConflictError(f"key already exists: {key}")
+        if if_match is not None and if_match.is_absent() and exists:
+            raise ConflictError(f"key already exists: {key}")  # create-only＝既存なら衝突
         # update CAS: 期待 etag と現在 etag を突合（不在・不一致は Conflict＝lost-update 検出）。
-        is_update_cas = if_match is not None and if_match is not ABSENT
+        is_update_cas = if_match is not None and not if_match.is_absent()
         if is_update_cas and (not exists or if_match.get("etag") != self._etag.get(key)):
             raise ConflictError(f"version mismatch: {key}")
         self._data[key] = value
         self._bump_meta(key)
-        return {"filename": key, "size": len(value)}
+        return FileInfo(filename=key, size=len(value))
 
     async def head(self, key: str) -> FileInfo:
         if key not in self._data:
             raise NotFoundError(key)
-        return {
-            "filename": key,
-            "size": len(self._data[key]),
-            "modified_at": self._mtime.get(key),
-            "etag": self._etag.get(key),
-        }
+        return FileInfo(
+            filename=key,
+            size=len(self._data[key]),
+            modified_at=self._mtime.get(key),
+            etag=self._etag.get(key),
+        )
 
     async def get_or_raise(self, key: str) -> bytes:
         try:

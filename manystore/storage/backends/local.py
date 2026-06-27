@@ -24,7 +24,6 @@ import anyio.to_thread
 
 from ...exceptions import ConflictError, NotFoundError, UnsupportedOperation
 from ...protocols import (
-    ABSENT,
     AsyncFileObject,
     FileInfo,
     FileStoreBase,
@@ -207,11 +206,11 @@ class LocalFileStore(FileStoreBase):
             path.parent.mkdir(parents=True, exist_ok=True)
             if if_match is None:
                 _atomic_write_bytes(path, value)
-            elif if_match is ABSENT:
+            elif if_match.is_absent():
                 _create_only(path, value)
             else:
                 _cas_replace(path, value, if_match)
-            return {"filename": filename, "size": len(value)}
+            return FileInfo(filename=filename, size=len(value))
 
         return await _offload(_do)
 
@@ -224,12 +223,12 @@ class LocalFileStore(FileStoreBase):
                 raise NotFoundError(filename) from e
             if not os.path.isfile(path):
                 raise NotFoundError(filename)
-            return {
-                "filename": filename,
-                "size": st.st_size,
-                "modified_at": st.st_mtime,
-                "etag": _local_etag(st),
-            }
+            return FileInfo(
+                filename=filename,
+                size=st.st_size,
+                modified_at=st.st_mtime,
+                etag=_local_etag(st),
+            )
 
         return await _offload(_stat)
 
