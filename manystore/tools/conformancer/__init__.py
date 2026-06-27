@@ -42,7 +42,7 @@ from dataclasses import dataclass, fields
 from pathlib import Path
 
 from ...exceptions import ConflictError
-from ...protocols import ABSENT, AsyncFileObject, AsyncFileStore, AsyncKeyValueStore
+from ...protocols import AsyncFileObject, AsyncFileStore, AsyncKeyValueStore, FileInfo
 
 
 def required_members(protocol: type) -> frozenset[str]:
@@ -190,7 +190,7 @@ def assert_conformancer_protocol_current() -> None:
 async def assert_put_if_absent_concurrency_safe(
     store: object, *, size: int = 1 << 20, stagger: float = 0.001
 ) -> bytes:
-    """**create-only CAS**（`put(key, value, if_match=ABSENT)`）の並行安全性を検査する。
+    """**create-only CAS**（`put(key, value, if_match=FileInfo.absent())`）の並行安全性を検査する。
 
     2 つの writer が同一キーへ同時に create-only put する。**内容を変え**（先行=`b"A"*size`／
     後発=`b"B"*size`）、**大きめの `size`** で窓を広げ、後発を `stagger` 秒遅らせて重なりを作る。
@@ -213,7 +213,7 @@ async def assert_put_if_absent_concurrency_safe(
         if delay:
             await asyncio.sleep(delay)  # 後発をわずかに遅らせて先行/後発の重なりを作る
         try:
-            await store.put(key, value, if_match=ABSENT)
+            await store.put(key, value, if_match=FileInfo.absent(key))
             return value  # この writer が作成に成功（＝勝者の内容）
         except ConflictError:
             return None  # 既に作られていた（敗者）
@@ -222,13 +222,13 @@ async def assert_put_if_absent_concurrency_safe(
     winners = [v for v in results if v is not None]
     if len(winners) != 1:
         raise AssertionError(
-            f"put(if_match=ABSENT) 並行安全性違反: 同時 2 本で成功 {len(winners)} 件"
+            f"create-only put 並行安全性違反: 同時 2 本で成功 {len(winners)} 件"
             f"（期待＝ちょうど 1・他方は ConflictError／両方成功なら二重作成）"
         )
     stored = await store.get_or_raise(key)
     if stored != winners[0]:
         raise AssertionError(
-            "put(if_match=ABSENT) 並行安全性違反: 保存値が勝者の内容と不一致"
+            "create-only put 並行安全性違反: 保存値が勝者の内容と不一致"
             "（敗者に上書きされた＝torn write か取り違え）"
         )
     return winners[0]  # 勝者の content（＝どちらが優先されたかを観測できる）

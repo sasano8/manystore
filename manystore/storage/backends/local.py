@@ -198,7 +198,7 @@ class LocalFileStore(FileStoreBase):
     # ── conditional put（CAS）＋ head（情報取得）。FileStoreBase の派生 put を native で上書き ──
 
     async def put(self, filename: str, value: bytes, *, if_match: IfMatch = None) -> FileInfo:
-        # None=無条件（原子的 temp+replace の LWW）／ABSENT=create-only（os.link）／FileInfo=update
+        # None=無条件 LWW（temp+replace）／不在 FileInfo=create-only（os.link）／他=update
         # CAS（flock+stat 比較+replace）。同期 syscall 一式をまとめてスレッドへ逃がす。
         path = self._dir / filename
 

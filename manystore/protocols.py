@@ -42,7 +42,8 @@ class FileInfo(dict):
     キー: `filename:str` / `size:int|None`（None=不在） / `modified_at:float|None`（任意） /
     `etag:str|None`（任意・CAS 用の不透明トークン＝S3=ETag/local=mtime_ns+size/dict=世代）。
     **`size=None` は不在**（存在しないキー）を表す＝`is_absent()` が True。put の `if_match` には
-    head/head_or_absent の戻り（存在なら版一致を要求／不在＝[ABSENT] なら create-only）を渡す。
+    head/head_or_absent の戻り（存在なら版一致を要求／不在 FileInfo（`FileInfo.absent()`）なら
+    create-only）を渡す。
 
     TypedDict はメソッドを持てないため `dict` を継承する。`__init__` で **構築時の型**（filename/
     size/modified_at/etag）を付ける（実体は dict＝`info["x"]` で読める）。
@@ -56,21 +57,17 @@ class FileInfo(dict):
         etag: str | None = None,
         **kwargs,
     ):
-        # 任意メタ（modified_at/etag）は値があるときだけ持たせる（None は省略＝put の安価な
-        # 戻りを {filename, size} に保つ）。
+        # filename/size＋modified_at/etag を常に保持（未設定 None）。size=None が不在の標識。
         super().__init__(filename=filename, size=size, modified_at=modified_at, etag=etag, **kwargs)
 
     @classmethod
-    def absent(cls, filename: str) -> FileInfo:
+    def absent(cls, filename: str = "") -> FileInfo:
         """不在を表す [FileInfo]（size=None）。`put(if_match=...)` の create-only 指定に使う。"""
         return cls(filename=filename)
 
     def is_absent(self: FileInfo) -> bool:
         return self.get("size") is None
 
-
-#: `put(if_match=ABSENT)` のセンチネル＝不在を要求（create-only CAS）。`ABSENT.is_absent()`=True。
-ABSENT = FileInfo.absent("")
 
 #: conditional put の条件。None=無条件（LWW）／不在 FileInfo（`is_absent()`）=create-only／
 #: その他 FileInfo=その etag に一致を要求（update CAS）。
@@ -92,18 +89,19 @@ class AsyncFileObject(Protocol):
 
 class AsyncKeyValueStore(Protocol):
     # put は書いた値の安価な [FileInfo]（`{filename, size}`）を返す。`if_match` で **conditional
-    # put（CAS）**: None=無条件（原子＋直列化の last-writer-wins）／ABSENT=不在を要求（create-only・
-    # 既存なら ConflictError）／FileInfo=その etag に一致を要求（update CAS・不一致は Conflict）。
+    # put（CAS）**: None=無条件（原子＋直列化の last-writer-wins）／不在 FileInfo（`is_absent()`）=
+    # 不在を要求（create-only・既存なら ConflictError）／その他 FileInfo=その etag に一致を要求
+    # （update CAS・不一致は Conflict）。
     # version は不透明トークンとして FileInfo（head が返す）に畳む＝呼び出し側は解釈しない。
     # 並行安全性は **put を持つストアの必須挙動**（conformancer が検証）。
     async def put(self, key: str, value: bytes, *, if_match: IfMatch = None) -> FileInfo: ...
     # create は **新規作成専用**（既存なら [ConflictError]）。exists→put の **非原子**な利便メソッド
-    # （並行下は TOCTOU で二重作成しうる）。原子版は `put(if_match=ABSENT)`。
+    # （並行下は TOCTOU で二重作成しうる）。原子版は `put(if_match=FileInfo.absent())`。
     async def create(self, key: str, value: bytes) -> FileInfo: ...
     # head は値でなく **メタ情報**（filename/size/modified_at/etag）を返す情報取得。update CAS の
     # version 読み口＝head の戻り FileInfo をそのまま `put(if_match=...)` に渡す。欠損は NotFound。
     async def head(self, key: str) -> FileInfo: ...
-    # head_or_absent は head（存在）か ABSENT（不在＝size=None）を返す＝get の **メタ版**。戻りを
+    # head_or_absent は head（存在）か 不在 FileInfo（size=None）を返す＝get の **メタ版**。戻りを
     # そのまま `put(if_match=...)` に渡せば **upsert を CAS 付きで**（不在→create／存在→update）。
     async def head_or_absent(self, key: str) -> FileInfo: ...
     async def get_or_raise(self, key: str) -> bytes: ...
@@ -211,8 +209,8 @@ class _StoreBase(abc.ABC):
     async def put(self, key: str, value: bytes, *, if_match: IfMatch = None) -> FileInfo:
         """値を書き、[FileInfo]（`{filename, size}`）を返す。**サブクラス必須**（primitive）。
 
-        `if_match` で conditional put（CAS）: None=無条件（原子＋直列化の LWW）／ABSENT=不在を要求
-        （既存なら `ConflictError`）／FileInfo=その etag に一致を要求（不一致は `ConflictError`）。
+        `if_match` で conditional put（CAS）: None=無条件（原子＋直列化の LWW）／不在 FileInfo=不在
+        を要求（既存なら Conflict）／その他 FileInfo=etag 一致を要求（不一致は Conflict）。
         並行安全性は **put を持つストアの必須挙動**（conformancer が検証）。
         """
         raise NotImplementedError
@@ -253,7 +251,7 @@ class _StoreBase(abc.ABC):
         # 新規作成専用＝既存なら ConflictError。exists→put で組む **非原子の利便メソッド**
         # （cp/mv と同じく primitive から導出する派生・backend primitive ではない）。並行下では
         # exists と put の間に隙間があり TOCTOU で二重作成しうる＝**原子的な create は
-        # `put(if_match=ABSENT)`（local=os.link）が正本**。ここは利便・非原子／CAS は原子。
+        # `put(if_match=FileInfo.absent())`（local=os.link）が正本**。ここは利便・非原子。
         if await self.exists(key):
             raise ConflictError(f"key already exists: {key}")
         return await self.put(key, value)
@@ -266,12 +264,12 @@ class _StoreBase(abc.ABC):
         return FileInfo(filename=key, size=len(data), modified_at=None, etag=None)
 
     async def head_or_absent(self, key: str) -> FileInfo:
-        # head（存在）か ABSENT（不在＝size=None）を返す派生＝get の メタ版（primitive ではない）。
+        # head（存在）か 不在 FileInfo（size=None）を返す派生＝get の メタ版（primitive ではない）。
         # `cond = head_or_absent(k); put(k, v, if_match=cond)` で upsert を CAS 付きで行える。
         try:
             return await self.head(key)
         except FileNotFoundError:
-            return ABSENT
+            return FileInfo.absent(key)
 
     async def get(self, key: str, default: bytes | None = None) -> bytes | None:
         # get_or_raise を捕捉し欠損時 default を返す（各 backend で try/except を重複させない）。

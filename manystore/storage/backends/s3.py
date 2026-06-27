@@ -54,8 +54,8 @@ class _S3Base:
 
 class S3KeyValueStore(_S3Base, KeyValueStoreBase):
     async def put(self, key: str, value: bytes, *, if_match: IfMatch = None) -> FileInfo:
-        # conditional put はサーバ側で原子的: ABSENT=IfNoneMatch="*"（create-only）／FileInfo=
-        # IfMatch=etag（update CAS）。412/409 は ConflictError へ正規化。
+        # conditional put はサーバ側で原子的: 不在 FileInfo=IfNoneMatch="*"（create-only）／
+        # 他 FileInfo=IfMatch=etag（update CAS）。412/409 は ConflictError へ正規化。
         from botocore.exceptions import ClientError
 
         extra: dict = {}

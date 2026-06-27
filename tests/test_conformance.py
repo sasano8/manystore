@@ -23,7 +23,7 @@ from manystore import (
 )
 from manystore.client import RemoteKeyValueStore
 from manystore.exceptions import ConflictError, NotFoundError
-from manystore.protocols import ABSENT, FileStoreBase, KeyValueStoreBase
+from manystore.protocols import FileInfo, FileStoreBase, KeyValueStoreBase
 from manystore.storage.file import AsyncFileStore
 from manystore.storage.kv import AsyncKeyValueStore
 from manystore.tools.conformancer import (
@@ -270,7 +270,7 @@ def test_parity_detects_missing_and_signature_drift() -> None:
 # ── 並行安全性（M046: put を持つストアの必須挙動を conformance で機械検証） ──
 #
 # conditional put（`put(if_match=...)`）の並行安全性を **実ストア経由**で検証する。create 競合は
-# `if_match=ABSENT`、更新の lost-update 検出は `if_match=<head の FileInfo>`。チェッカ自身の健全性
+# `if_match=FileInfo.absent()`、更新は `if_match=<head の FileInfo>`。チェッカの健全性
 # （衝突を検出して落とせるか）は、**故意に壊した TOCTOU ストア**を 1 つだけ残して担保する
 # （正しい実ストアは原理的に競合を起こせないため、否定テストには壊したダブルが要る）。
 
@@ -278,7 +278,7 @@ def test_parity_detects_missing_and_signature_drift() -> None:
 class _RacyCreateDict:
     """チェッカの否定テスト専用＝**故意に TOCTOU で壊した** create-only ストア。
 
-    `put(if_match=ABSENT)` の存在確認を保持したまま `await` で yield し、その隙に他コルーチンが
+    create-only put の存在確認を保持したまま `await` で yield し、その隙に他コルーチンが
     作成できる＝両方が「無い」と判断して二重作成しうる（lost-update）。これでチェッカが衝突を
     検出して落とせることを確認する（実ストアでは起こせない壊れ方を意図的に作る）。
     """
@@ -346,7 +346,7 @@ async def test_dict_conditional_put_unit(tmp_path) -> None:
     assert (info["filename"], info["size"]) == ("k", 2)  # put の戻りは filename/size
     # create-only: 2 回目は ConflictError
     with pytest.raises(ConflictError):
-        await store.put("k", b"v2", if_match=ABSENT)
+        await store.put("k", b"v2", if_match=FileInfo.absent("k"))
     # head で version を読み、一致すれば update できる
     meta = await store.head("k")
     assert meta["size"] == 2 and meta["etag"] is not None
@@ -361,7 +361,7 @@ async def test_local_conditional_put_unit(tmp_path) -> None:
     store = LocalKeyValueStore(tmp_path)
     await store.put("k", b"v1")
     with pytest.raises(ConflictError):
-        await store.put("k", b"v2", if_match=ABSENT)
+        await store.put("k", b"v2", if_match=FileInfo.absent("k"))
     meta = await store.head("k")
     assert meta["etag"] is not None and meta["modified_at"] is not None
     await store.put("k", b"v3xx", if_match=meta)
@@ -373,7 +373,7 @@ async def test_local_conditional_put_unit(tmp_path) -> None:
 async def test_head_or_absent_upsert() -> None:
     # head_or_absent の戻りをそのまま if_match に渡す＝create-or-update を一発で CAS 付きに。
     store = DictKeyValueStore()
-    # 不在 → is_absent() な FileInfo（ABSENT）が返り、create CAS として成功（新規作成）。
+    # 不在 → is_absent() な FileInfo が返り、create CAS として成功（新規作成）。
     cond = await store.head_or_absent("k")
     assert cond.is_absent()
     await store.put("k", b"v1", if_match=cond)
