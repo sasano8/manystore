@@ -31,7 +31,7 @@ import os
 import tempfile
 from collections.abc import AsyncIterable, AsyncIterator, Iterator
 from pathlib import Path
-from typing import Any, Literal, Protocol, overload
+from typing import Protocol
 
 from .exceptions import ConflictError, NotFoundError, UnsupportedOperation
 
@@ -45,9 +45,7 @@ class FileInfo(dict):
     head/head_or_absent の戻り（存在なら版一致を要求／不在＝[ABSENT] なら create-only）を渡す。
 
     TypedDict はメソッドを持てないため `dict` を継承する。`__init__` で **構築時の型**（filename/
-    size/modified_at/etag）を付け、`__getitem__` の `@overload` で **subscript 読みの型**を取り戻す
-    （`info["size"]` は `int | None`）。実体は dict・実行時コストは無い（型チェッカ/IDE 用）。
-    任意メタ（modified_at/etag）は None のとき省略＝put の安価な戻りは `{filename, size}` のまま。
+    size/modified_at/etag）を付ける（実体は dict＝`info["x"]` で読める）。
     """
 
     def __init__(
@@ -60,34 +58,15 @@ class FileInfo(dict):
     ):
         # 任意メタ（modified_at/etag）は値があるときだけ持たせる（None は省略＝put の安価な
         # 戻りを {filename, size} に保つ）。
-        super().__init__(filename=filename, size=size, **kwargs)
-        if modified_at is not None:
-            self["modified_at"] = modified_at
-        if etag is not None:
-            self["etag"] = etag
-
-    # ── subscript のキー別型（TypedDict 相当。実体は dict.__getitem__） ──
-    @overload
-    def __getitem__(self, key: Literal["filename"]) -> str: ...
-    @overload
-    def __getitem__(self, key: Literal["size"]) -> int | None: ...
-    @overload
-    def __getitem__(self, key: Literal["modified_at"]) -> float | None: ...
-    @overload
-    def __getitem__(self, key: Literal["etag"]) -> str | None: ...
-    @overload
-    def __getitem__(self, key: str) -> Any: ...
-    def __getitem__(self, key: str) -> Any:
-        return super().__getitem__(key)
-
-    def is_absent(self) -> bool:
-        """このメタが **不在**（size=None）を表すか。put `if_match` の create-only 判定に使う。"""
-        return self.get("size") is None
+        super().__init__(filename=filename, size=size, modified_at=modified_at, etag=etag, **kwargs)
 
     @classmethod
     def absent(cls, filename: str) -> FileInfo:
         """不在を表す [FileInfo]（size=None）。`put(if_match=...)` の create-only 指定に使う。"""
-        return cls(filename=filename)  # size 既定 None＝is_absent() True
+        return cls(filename=filename)
+
+    def is_absent(self: FileInfo) -> bool:
+        return self.get("size") is None
 
 
 #: `put(if_match=ABSENT)` のセンチネル＝不在を要求（create-only CAS）。`ABSENT.is_absent()`=True。

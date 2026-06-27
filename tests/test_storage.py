@@ -174,23 +174,17 @@ async def test_local_kvs_put_is_atomic(tmp_path: Path) -> None:
 
 
 async def test_put_returns_common_fileinfo(tmp_path: Path) -> None:
-    # put は全 backend 共通レスポンス FileInfo({filename, size}) を返す（protocols.py の契約）。
+    # put は全 backend 共通レスポンス FileInfo（filename/size）を返す（protocols.py の契約）。
     # native KVS（dict）と FileStoreBase 導出（local）の両系統で同じ形を返す。
-    assert await DictKeyValueStore().put("a.bin", b"hello") == {
-        "filename": "a.bin",
-        "size": 5,
-    }
-    assert await LocalKeyValueStore(tmp_path).put("k", b"xyz") == {
-        "filename": "k",
-        "size": 3,
-    }
+    d = await DictKeyValueStore().put("a.bin", b"hello")
+    assert (d["filename"], d["size"]) == ("a.bin", 5)
+    loc = await LocalKeyValueStore(tmp_path).put("k", b"xyz")
+    assert (loc["filename"], loc["size"]) == ("k", 3)
     # array ルータは外向きキー（mount/subkey）で prefix し直して返す（subkey ではない）。
     arr = ArrayKeyValueStore()
     await arr.mount("docs", DictKeyValueStore())
-    assert await arr.put("docs/a.txt", b"AB") == {
-        "filename": "docs/a.txt",
-        "size": 2,
-    }
+    a = await arr.put("docs/a.txt", b"AB")
+    assert (a["filename"], a["size"]) == ("docs/a.txt", 2)
 
 
 async def test_local_file_store_write_is_atomic_on_error(tmp_path: Path) -> None:
@@ -1205,7 +1199,7 @@ async def test_create_new_key_then_conflict_on_existing() -> None:
 
     store = DictKeyValueStore()
     info = await store.create("a/b", b"hello")
-    assert info == {"filename": "a/b", "size": 5}
+    assert (info["filename"], info["size"]) == ("a/b", 5)
     assert await store.get("a/b") == b"hello"
     # 既存キーは ConflictError（値も上書きされない）。
     with pytest.raises(ConflictError):

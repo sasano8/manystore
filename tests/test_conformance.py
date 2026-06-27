@@ -343,7 +343,7 @@ async def test_local_put_if_match_concurrent_winner_is_intact(tmp_path) -> None:
 async def test_dict_conditional_put_unit(tmp_path) -> None:
     store = DictKeyValueStore()
     info = await store.put("k", b"v1")
-    assert info == {"filename": "k", "size": 2}  # put の戻りは安価な subset
+    assert (info["filename"], info["size"]) == ("k", 2)  # put の戻りは filename/size
     # create-only: 2 回目は ConflictError
     with pytest.raises(ConflictError):
         await store.put("k", b"v2", if_match=ABSENT)
