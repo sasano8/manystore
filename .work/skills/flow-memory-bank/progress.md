@@ -39,7 +39,7 @@
 
 | ID | タスク | 優先 | 備考 |
 |----|--------|------|------|
-| M046 | put の並行更新（conditional put / lost-update 検出） | 相談 | ユーザー指摘（2026-06-27）＝local の `_LocalAtomicWriter` は temp+`os.replace` で **torn write は防ぐが排他はしない**＝同一キーへの並行 put は **last-writer-wins**（lost update を検出しない）。方針＝**optimistic concurrency（version/etag の compare-and-swap）を opt-in の conditional put として**：`put(..., if_match=<version>)` / `SupportsConditionalPut` で版不一致は **fail-loud に raise**。put 既定は無条件 set を維持（最小-core・M013 メタ・M045 と連動）。**version トークンは backend ごとに native を opaque な `version:str` へ畳む**＝S3=ETag・NATS=revision・**local=mtime（+size）**。**ユーザー合意（2026-06-27）: local では mtime を etag 的に使ってよい**（modern FS は statx で ns 精度＝実用上十分。nginx 等も mtime+size+inode で etag 生成）。**注意＝難所はトークン選択でなく「compare-and-swap の原子性」**：stat→比較→replace は TOCTOU で racy なので、commit を**ロック/原子 rename で直列化**する必要（Linux は create に `renameat2(RENAME_NOREPLACE)`、更新は flock/fcntl か lockfile）。**設計 `plans/m046-conditional-put-plan.md`**（2026-06-27・着手前 deep think 済・ユーザー討議反映）＝**capability ではなく core 契約**（put を持つなら並行安全は必須挙動・read-only は put 同様 raise・conformancer で強制）。`put_if_absent`（create CAS・local=`os.link`）＋`put_if_match`（update CAS・version=S3 etag/NATS rev/local mtime+size＋flock）を core へ。原体験＝既存上書きなので MVP は P1+P2。残未確定＝version 読み口(`head`)/エラー粒度(409 vs 412)/NATS native 範囲。詳細は意思決定の変遷 |
+| M046残 | conditional put の残（NATS CAS / serving 配線） | low | **MVP 完了（2026-06-28）＝完了マイルストーン参照**。残＝① NATS の revision/digest CAS（`put(if_match)` は現状 loud `NotImplementedError`・head は digest を etag に）② serving 層（native REST・S3 GW）への If-Match 配線 ③ remote backend の条件 put（native REST に条件ヘッダ無し＝現状 loud）。設計 `plans/m046-conditional-put-plan.md` |
 | M051 | kubernetes backend（M050 の具体 sink） | 相談 | ユーザー要望（2026-06-27・討議中・doc-first）＝put=server-side apply / get=補完済み live（put≠get）。キー=`namespace/resource_type/name`（`.yml` 含めず・group/version は discovery 補完・衝突時 `type.group`）。**FileInfo に世代情報**（resourceVersion/generation/uid/creationTimestamp）。**resourceVersion CAS を M046 の参照実装**に（`if_version` 不一致は ConflictError）。ローカル側=`KubeManifestStore` ラッパ（パス↔内容の同一性検証＝Safe 風 1 枚）。依存=`kubernetes-asyncio` を extra `[k8s]`（遅延 import）。cluster-scoped は後回し。詳細は interrupt |
 | M012 | `list(prefix=...)` / pagination | 中 | prefix は core `iter_all(prefix=…)` 引数化済（M030 capability は 2026-06-26 廃止）。**pagination 未対応**。設計案（2026-06-26 対話・要 doc-first）＝(a) `iter_all`/`list_all` に **offset+limit** を足す（単純・全 backend で scan 可だが大 offset は O(n)）／(b) **cursor/continuation-token** 形式（S3 ContinuationToken・NATS 等の native と整合・M021 の continuation と同一機構）。加えて **返り値を range メタ付きの独自型**にする案＝iter は「何件目〜何件目」を、list は from/to 件数属性を持つ（pagination メタ＝**file/value パラダイム内**。却下した transport の request/response 封筒とは別物）。未確定＝offset/limit vs cursor の二択と、独自結果型を入れるか。M021（S3 GW continuation）・M044（limit 既定の定数化）と連動 |
 | M013 | メタデータ / content-type | 中 | S3・NATS は native 対応だが共通 IF に無い |
@@ -64,6 +64,21 @@
 
 ### 完了マイルストーン（要点のみ・経緯は git 履歴）
 
+- **M046 MVP（2026-06-28・完了）**: put の並行安全性（lost-update 検出）を **conditional put** で実装。
+  **派生メソッドを作らず put 1 本＋任意 `if_match`**（ユーザー確定）＝`put(key, value, *, if_match=None)`:
+  None=原子＋直列化の **LWW**（失敗しない）／`ABSENT`=create-only（既存なら `ConflictError`）／
+  `FileInfo`=update CAS（etag 不一致は `ConflictError`）。**opaque version 文字列は出さず**、比較トークンは
+  `FileInfo` 内に畳む（`_Absent`/`ABSENT` センチネル＋`type IfMatch` を protocols に新設・kv facade で公開）。
+  **`head(key)->FileInfo` 新設**（`FileInfo` に `modified_at`/`etag` を `NotRequired` 追加・既定実装は
+  get 由来で etag=None・native backend が override）。backend: **dict=メタストア**（通し番号 `_seq` を etag に・
+  ABA 安全）／**local=os.link（create）＋flock+stat 比較+replace（update CAS）・head は os.stat**／S3=
+  IfNoneMatch/IfMatch＋HeadObject／NATS=head のみ（CAS は P2 で loud）／http=read-only（head は HTTP HEAD）。
+  ラッパ（Safe/Array/DownloadCache/sync_bridge/KeyValueFile(From)Store）は put if_match＋head を委譲。
+  M043 lockstep を全揃え（Protocol async/sync・`_StoreBase`・parity 緑）。**conformancer が並行安全性を強制**＝
+  `assert_put_if_absent_concurrency_safe`（create 競合・put(if_match=ABSENT)）＋新 `assert_put_if_match_
+  concurrency_safe`（update CAS）。テストは **実ストア経由**（Dict/Local）＝旧 `_ConditionalDict` フェイクを
+  廃し、否定テストだけ故意 TOCTOU の `_RacyCreateDict` を残置（チェッカの牙を担保）。put 戻りは安価な
+  `{filename,size}` 据置。残＝M046残（NATS CAS / serving 配線 / remote）。fast 139 passed・`make check` 緑。
 - **M053（2026-06-27・完了）**: 「欠損」を例外ファミリへ昇格＝**`NotFoundError(FileNotFoundError, ManystoreError)`**
   （status=404・title="Not Found"）を新設（ユーザー指摘＝tests が exceptions.py 定義でない生 `FileNotFoundError`
   を想定していた）。stdlib を先頭に残すので既存 `except FileNotFoundError`/`pytest.raises(FileNotFoundError)` は

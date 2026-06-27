@@ -12,6 +12,7 @@
 """
 
 import contextlib
+import fcntl
 import os
 import tempfile
 from collections.abc import AsyncIterator
@@ -21,18 +22,63 @@ from typing import BinaryIO
 
 import anyio.to_thread
 
-from ...exceptions import NotFoundError, UnsupportedOperation
+from ...exceptions import ConflictError, NotFoundError, UnsupportedOperation
 from ...protocols import (
+    ABSENT,
     AsyncFileObject,
     FileInfo,
     FileStoreBase,
+    IfMatch,
     KeyValueFromFileStore,
+    _atomic_write_bytes,
     _kv_copy,
 )
 
 # 同期関数をワーカースレッドへ逃がす（event loop を塞がない）。
 # 位置引数のみ＝kwargs は partial で畳む。
 _offload = anyio.to_thread.run_sync
+
+
+def _local_etag(st: os.stat_result) -> str:
+    """local の CAS トークン＝`mtime_ns-size`（modern FS は statx で ns 精度＝etag 的に使える）。"""
+    return f"{st.st_mtime_ns}-{st.st_size}"
+
+
+def _create_only(path: Path, value: bytes) -> None:
+    """`os.link` で **原子的 create-only**（既存なら ConflictError）。ロック不要。"""
+    fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=f"{path.name}.", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "wb") as f:
+            f.write(value)
+        try:
+            os.link(tmp, path)  # dst が在れば FileExistsError＝原子的に二重作成を弾く
+        except FileExistsError as e:
+            raise ConflictError(f"key already exists: {path.name}") from e
+    finally:
+        with contextlib.suppress(OSError):
+            os.unlink(tmp)  # link 成功でも tmp は不要（target が別 inode で残る）
+
+
+def _cas_replace(path: Path, value: bytes, if_match: FileInfo) -> None:
+    """update CAS＝parent dir を flock で囲い `stat→etag 比較→replace` を直列化（TOCTOU 回避）。
+
+    Linux には「変化していたら失敗する replace」syscall が無いため、比較と差し替えを排他で括る。
+    flock は同一 dir への並行 CAS どうしを直列化する（無条件 put の LWW 経路はロックを取らない＝
+    LWW は元から先勝ち上書きを許す契約なので CAS の健全性を損なわない）。
+    """
+    lock_fd = os.open(path.parent, os.O_RDONLY)
+    try:
+        fcntl.flock(lock_fd, fcntl.LOCK_EX)
+        try:
+            st = path.stat()
+        except FileNotFoundError as e:
+            raise ConflictError(f"version mismatch (absent): {path.name}") from e
+        if _local_etag(st) != if_match.get("etag"):
+            raise ConflictError(f"version mismatch: {path.name}")
+        _atomic_write_bytes(path, value)  # 一致時のみ原子的差し替え
+    finally:
+        fcntl.flock(lock_fd, fcntl.LOCK_UN)
+        os.close(lock_fd)
 
 
 class LocalFileObject:
@@ -149,6 +195,43 @@ class LocalFileStore(FileStoreBase):
     async def open_writer(self, filename: str) -> AsyncFileObject:
         # 親ディレクトリ作成＋temp+rename で all-or-nothing（ネストキーもそのまま置ける）。
         return await _LocalAtomicWriter.open(self._dir / filename)
+
+    # ── conditional put（CAS）＋ head（情報取得）。FileStoreBase の派生 put を native で上書き ──
+
+    async def put(self, filename: str, value: bytes, *, if_match: IfMatch = None) -> FileInfo:
+        # None=無条件（原子的 temp+replace の LWW）／ABSENT=create-only（os.link）／FileInfo=update
+        # CAS（flock+stat 比較+replace）。同期 syscall 一式をまとめてスレッドへ逃がす。
+        path = self._dir / filename
+
+        def _do() -> FileInfo:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            if if_match is None:
+                _atomic_write_bytes(path, value)
+            elif if_match is ABSENT:
+                _create_only(path, value)
+            else:
+                _cas_replace(path, value, if_match)
+            return {"filename": filename, "size": len(value)}
+
+        return await _offload(_do)
+
+    async def head(self, filename: str) -> FileInfo:
+        def _stat() -> FileInfo:
+            path = self._dir / filename
+            try:
+                st = path.stat()
+            except (FileNotFoundError, NotADirectoryError) as e:
+                raise NotFoundError(filename) from e
+            if not os.path.isfile(path):
+                raise NotFoundError(filename)
+            return {
+                "filename": filename,
+                "size": st.st_size,
+                "modified_at": st.st_mtime,
+                "etag": _local_etag(st),
+            }
+
+        return await _offload(_stat)
 
     # ── 名前空間操作（filesystem-native） ──
 

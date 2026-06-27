@@ -24,7 +24,7 @@ Kubo は HTTP API なので **httpx を流用**（http backend と同じ遅延 i
 from collections.abc import AsyncIterator
 
 from ...exceptions import UnsupportedOperation
-from ...protocols import AsyncFileObject, FileInfo, KeyValueStoreBase, _KvReadFileObject
+from ...protocols import AsyncFileObject, FileInfo, IfMatch, KeyValueStoreBase, _KvReadFileObject
 
 # 既定の Kubo HTTP API（ローカルデーモン）と Gateway。
 DEFAULT_API_URL = "http://127.0.0.1:5001"
@@ -86,7 +86,7 @@ class IpfsKeyValueStore(_IpfsBase, KeyValueStoreBase):
     本体は未実装（`NotImplementedError`）。上の docstring の MFS エンドポイント対応に沿って詰める。
     """
 
-    async def put(self, key: str, value: bytes) -> FileInfo:
+    async def put(self, key: str, value: bytes, *, if_match: IfMatch = None) -> FileInfo:
         _todo("put")  # files/write（create/parents/truncate）＋任意 pin
 
     async def get_or_raise(self, key: str) -> bytes:

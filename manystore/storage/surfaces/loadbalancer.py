@@ -26,7 +26,7 @@
 from collections.abc import AsyncIterator
 from typing import Protocol, TypedDict, runtime_checkable
 
-from ...protocols import AsyncKeyValueStore, FileInfo, KeyValueStoreBase
+from ...protocols import AsyncKeyValueStore, FileInfo, IfMatch, KeyValueStoreBase
 
 
 # ── ネタ①: 負荷メトリクスの capability（backend が任意で報告する） ──
@@ -124,7 +124,7 @@ class LoadBalancedKeyValueStore(KeyValueStoreBase):
         """policy で書き込み先 member を1つ選ぶ。"""
         raise NotImplementedError("loadbalancer scaffold: _select")
 
-    async def put(self, key: str, value: bytes) -> FileInfo:
+    async def put(self, key: str, value: bytes, *, if_match: IfMatch = None) -> FileInfo:
         # 負荷で1 member を選んで書く（選んだ先は鍵に残さない＝読みは probe-all）。
         raise NotImplementedError("loadbalancer scaffold: put")
 

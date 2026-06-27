@@ -5,6 +5,62 @@
 > を etag 的トークンに使ってよい（modern FS は ns 精度）。本ファイルは **doc-first の設計成果物**。実装はしない
 > ＝設計と段階計画・未確定点の確定まで。命名は M021/M025 plan の慣習に倣う。
 
+## 設計改訂（2026-06-28・ユーザー確定）＝**派生メソッド撤回・put 1 本＋`if_match`**
+
+> 以下が**最新の正本**。本セクションと矛盾する下部記述（`put_if_absent`/`put_if_match` を別メソッドで
+> core に足す案・opaque `version: str` 引数）は**撤回**。経緯は git 履歴に残す。
+
+- **派生メソッドを作らない**: `put_if_absent`/`put_if_match` という別メソッドは**不要**。堅牢性は
+  「1 つの挙動」を put の標準にする。core 表面を太らせない（ユーザー判断）。
+- **API は put 1 本＋任意キーワード `if_match`**:
+  `async def put(self, key, value, *, if_match: FileInfo | None = None) -> FileInfo`
+  - **`if_match` 省略**（既定）＝**原子＋直列化の無条件 put（LWW）**。torn write/interleave を防ぎ
+    常に丸ごと着地するが**失敗はしない**（last-writer-wins）。並行変化の検出は呼び出し側が `head()` で行う。
+  - **`if_match=<head で読んだ FileInfo>`** ＝**update CAS**。読んだ版から変わっていれば `ConflictError`
+    （lost-update を検出して fail-loud）。当初要望「先勝ち上書きは失敗すべき」を満たすのはこの経路。
+- **opaque な `version: str` 引数は出さない**: 呼ぶ側が触るのは `head()` が返す **`FileInfo` そのまま**。
+  比較用の backend ネイティブトークン（S3=ETag・local=mtime_ns+size・NATS=revision・dict=世代）は
+  **`FileInfo` の中に畳む**（呼び出し側は解釈しない）。
+- **ファイル情報取得メソッド `head(key) -> FileInfo` を新設**（put 派生でない読み取り系）。
+  `FileInfo` に **`modified_at`（更新日付）** を追加＝`{filename, size, modified_at, <native token>}`。
+  - put の戻り値は現状どおり**安価な subset**（`{filename, size}`・追加 I/O なし）。mtime/native token は
+    `head` が読む（S3=HeadObject・local=os.stat・NATS=get_info）。
+  - **dict backend は素の `{key: bytes}` ゆえメタストアが必要**＝`{key: FileInfo}` を併設し put 時に
+    値とロック下で同時更新（`if_match` 省略時の head 成立にも必要）。`modified_at` は実クロック・世代は
+    カウンタ。
+- **スコープ（MVP・2026-06-28 更新）＝update CAS ＋ create 競合の両方**: 当初 create 競合をスコープ外と
+  したが、「put_if_absent をストアに実装しストア経由でテスト」とのユーザー指示で**スコープ拡大＝create 競合も
+  今実装**。create-only は `os.link`/`in` 判定でロック不要・安価。update CAS（既存値の lost-update 検知）と
+  両方を **put 1 本＋`if_match`** で表現する（下記センチネル設計）。
+- **backend 実装方針**（この計画で可能なことを確認済）:
+
+  | backend | `if_match` 省略（LWW）| `if_match` 指定（update CAS）| head の情報源 |
+  |---------|------|------|------|
+  | local | temp+`os.replace`（原子）＋flock で直列化 | flock→`os.stat` で mtime_ns+size 比較→一致時 replace・不一致 `ConflictError` | `os.stat` |
+  | S3 | `PutObject`（原子）| `PutObject(IfMatch=etag)`→412 を `ConflictError` | `HeadObject`（LastModified/ETag）|
+  | dict | ロック下で値＋メタ更新 | メタの世代/サイズ比較 | **メタストア** |
+  | NATS | `put`（原子）| `put`＋revision 比較（native 範囲は要調査・不足は loud に `NotImplementedError`）| `get_info` |
+
+### create 競合（スコープ外・将来フェーズとして保持）
+
+- create-only（既存なら失敗）を put で表すには `if_match` に**「不在を期待」を示す値**が要る
+  （案: `if_match=ABSENT` センチネル / `head` が欠損時に返す「不在 FileInfo」を渡す）。
+- backend native: local=`os.link`（dst 在れば `FileExistsError`）／S3=`IfNoneMatch="*"`（412）／
+  dict=`key in` 判定／NATS=create セマンティクス。いずれもロック不要・原子。
+- **今回は実装しない**。`if_match` のセンチネル設計が決まり次第、別フェーズで追加（update CAS と同一の
+  conformancer 枠で「create 競合」観点を足すだけ）。
+
+### conformancer scaffold の改修（旧 `put_if_absent` 前提からの追従）
+
+- 既存 scaffold は旧設計（`put_if_absent` メソッド）で書かれている＝本実装時に**新 API へ書き換え**:
+  - `assert_put_if_absent_concurrency_safe`（`tools/conformancer/__init__.py:190`）が叩く呼び出しを
+    新 API に。**今回の MVP は update CAS** なので、まず **update 競合チェッカ**
+    （同一 base `FileInfo` から 2 writer → 一方成功・他方 `ConflictError`・保存値=勝者）を正本にする。
+  - 自己テスト `_ConditionalDict`（`tests/test_conformance.py:276`）も `put(if_match=...)` 形へ。
+    自己テスト 2 本（safe 通過 / TOCTOU 落下）の二段構えは維持。
+  - 実 backend テスト（`tests/test_conformance.py:324,331`・現 skip）は update CAS 版に直して skip 解除。
+  - create 競合チェッカは**スコープ外フェーズで追加**（プレースホルダとして名前だけ計画に残す）。
+
 ## ゴール（要約）
 
 同一キーへの並行 `put` で **lost update（先に書かれた更新が黙って消える）を検出**できるようにする。
@@ -85,14 +141,16 @@
 
 ## フェーズ分割
 
+> ↓ 旧フェーズ表は**設計改訂（2026-06-28）で置換**。新 API（put 1 本＋`if_match`）に合わせた下表が正本。
+
 | Phase | 内容 | 原子性 | 規模 |
 |-------|------|--------|------|
-| **P1（MVP）** | `put_if_absent`（create-only）＋ `ConflictError` ＋ local(`os.link`)/dict/S3(`IfNoneMatch`) | 全 backend native・**ロック不要** | 小 |
-| P2 | `head`(version 読み口) ＋ `put_if_match`（CAS）＝S3 etag / dict 世代 / local mtime+size+flock | local は flock 必須・S3/NATS はサーバ側 | 中 |
-| P3 | NATS の create/CAS 対応（要調査の結果しだい）／serving 層（native REST・S3 GW If-Match）への配線 | — | 中 |
+| **P1（MVP）** | `head(key) -> FileInfo`（`modified_at` 追加・native token 内包）＋ `put(..., if_match=FileInfo)` の **update CAS**（不一致 `ConflictError`）。backend: local mtime+size+flock / S3 IfMatch / dict メタストア+世代。`if_match` 省略時は原子＋直列化の LWW | local は flock 必須・S3/NATS はサーバ側 | 中 |
+| P2 | NATS の CAS 対応（revision・要調査／不足は loud に `NotImplementedError`）／serving 層（native REST・S3 GW If-Match）への配線 | — | 中 |
+| **将来（スコープ外）** | create 競合（create-only）＝`if_match=ABSENT` センチネル設計 ＋ local `os.link`/S3 `IfNoneMatch`/dict `in`/NATS create ＋ conformancer の create 競合観点 | 全 backend native・ロック不要 | 小 |
 
-> ユーザーの原体験は**既存値の並行上書き**＝更新 lost-update なので、**MVP は P1+P2**（create と update の
-> 両 CAS）が筋。P1 単独は「キー確保・冪等 create」のみで既存上書きは守れない。P3 は後追い。
+> ユーザーの原体験は**既存値の並行上書き**＝更新 lost-update。よって **MVP は update CAS（P1）**。
+> create 競合は安価だが今回スコープ外（将来フェーズに保持）。
 
 ## 未確定（ユーザー判断を仰ぐ点）
 
@@ -122,8 +180,12 @@
   識別可**。**自己テスト 2 本 active**（safe→先行 A が勝つ / TOCTOU を `stagger=0` で重ねる→両方成功を
   AssertionError 検出）。**実 backend テストは `@pytest.mark.skip`**（M046 本実装で解禁）。
   put_if_match も同型（同一 base version の 2 writer・一方成功・保存値=勝者）で後日。
-- **残＝本実装**: 各 backend の `put_if_absent`/`put_if_match`/`head` 実装（local=os.link/flock・S3=条件ヘッダ）、
-  `_StoreBase` への abstract 追加（M043 parity 揃え）、ラッパ委譲、skip 解除。
+- **MVP 実装完了（2026-06-28）**: put 1 本＋`if_match`（None/ABSENT/FileInfo）＋`head` を実装。
+  protocols（`_Absent`/`ABSENT`/`type IfMatch`・FileInfo に modified_at/etag・put 全署名変更・head 既定実装）／
+  dict メタストア（`_seq`→etag・ABA 安全）／local（os.link create・flock+stat update CAS・os.stat head）／
+  S3（IfNoneMatch/IfMatch・HeadObject）／NATS（head のみ・CAS は loud）／http（read-only・HEAD head）／
+  全 wrapper 委譲。conformancer は実ストア経由（Dict/Local）で create+update CAS を強制、否定テストのみ
+  故意 TOCTOU ダブル。`make check` 緑（fast 139）。**残＝M046残**（NATS CAS / serving 配線 / remote）。
 
 ## テスト戦略（conformancer が並行安全性を強制＝製品コンセプトの核）
 

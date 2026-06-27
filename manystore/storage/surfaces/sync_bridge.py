@@ -13,7 +13,7 @@
 import asyncio
 from collections.abc import Iterator
 
-from ...protocols import AsyncKeyValueStore, FileInfo
+from ...protocols import AsyncKeyValueStore, FileInfo, IfMatch
 
 
 class AsyncToSyncKeyValueStore:
@@ -26,11 +26,14 @@ class AsyncToSyncKeyValueStore:
     def _run(self, coro):
         return self._loop.run_until_complete(coro)
 
-    def put(self, key: str, value: bytes) -> FileInfo:
-        return self._run(self._store.put(key, value))
+    def put(self, key: str, value: bytes, *, if_match: IfMatch = None) -> FileInfo:
+        return self._run(self._store.put(key, value, if_match=if_match))
 
     def create(self, key: str, value: bytes) -> FileInfo:
         return self._run(self._store.create(key, value))
+
+    def head(self, key: str) -> FileInfo:
+        return self._run(self._store.head(key))
 
     def get_or_raise(self, key: str) -> bytes:
         return self._run(self._store.get_or_raise(key))

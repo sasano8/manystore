@@ -17,7 +17,7 @@ from collections.abc import AsyncIterator
 from urllib.parse import quote
 
 from ..exceptions import NotFoundError
-from ..protocols import FileInfo, KeyValueStoreBase, _kv_copy, _kv_move
+from ..protocols import FileInfo, IfMatch, KeyValueStoreBase, _kv_copy, _kv_move
 from ..serving.services.protocol import ContextInfo, EntryInfo
 
 
@@ -104,7 +104,13 @@ class RemoteKeyValueStore(KeyValueStoreBase):
         self._client = ManystoreClient(base_url, headers=headers, transport=transport)
         self._context = context
 
-    async def put(self, key: str, value: bytes) -> FileInfo:
+    async def put(self, key: str, value: bytes, *, if_match: IfMatch = None) -> FileInfo:
+        if if_match is not None:
+            # native REST に条件ヘッダが無い＝conditional put は未対応（黙って LWW に落とさない）。
+            raise NotImplementedError(
+                "remote backend: conditional put (if_match) は未対応"
+                "（native REST に条件ヘッダが無い）"
+            )
         await self._client.put(self._context, key, value)
         return {"filename": key, "size": len(value)}
 

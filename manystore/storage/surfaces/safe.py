@@ -13,6 +13,7 @@ from ...protocols import (
     AsyncFileStore,
     AsyncKeyValueStore,
     FileInfo,
+    IfMatch,
     KeyValueStoreBase,
 )
 
@@ -44,8 +45,11 @@ class SafeKeyValueStore(KeyValueStoreBase):
     def __init__(self, store: AsyncKeyValueStore) -> None:
         self._store = store
 
-    async def put(self, key: str, value: bytes) -> FileInfo:
-        return await self._store.put(validate_safe_path(key), value)
+    async def put(self, key: str, value: bytes, *, if_match: IfMatch = None) -> FileInfo:
+        return await self._store.put(validate_safe_path(key), value, if_match=if_match)
+
+    async def head(self, key: str) -> FileInfo:
+        return await self._store.head(validate_safe_path(key))
 
     async def get_or_raise(self, key: str) -> bytes:
         return await self._store.get_or_raise(validate_safe_path(key))

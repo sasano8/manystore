@@ -31,7 +31,7 @@ import os
 import tempfile
 from collections.abc import AsyncIterable, AsyncIterator, Iterator
 from pathlib import Path
-from typing import Protocol, TypedDict
+from typing import NotRequired, Protocol, TypedDict
 
 from .exceptions import ConflictError, NotFoundError, UnsupportedOperation
 
@@ -39,6 +39,25 @@ from .exceptions import ConflictError, NotFoundError, UnsupportedOperation
 class FileInfo(TypedDict):
     filename: str
     size: int
+    # 任意メタ。put の安価な戻りでは省略され、head（情報取得）が埋める。
+    modified_at: NotRequired[float | None]  # 更新時刻（epoch 秒）。不明なら None
+    etag: NotRequired[str | None]  # CAS 用の不透明トークン（S3=ETag/local=mtime_ns+size/dict=世代）
+
+
+class _Absent:
+    """`put(if_match=ABSENT)` 用のセンチネル＝『不在であること』を条件にする（create-only CAS）。"""
+
+    __slots__ = ()
+
+    def __repr__(self) -> str:
+        return "ABSENT"
+
+
+#: `put(..., if_match=...)` のセンチネル。`if_match=ABSENT` で「既存なら ConflictError」。
+ABSENT = _Absent()
+
+#: conditional put の条件。None=無条件（LWW）／ABSENT=不在を要求／FileInfo=その etag に一致を要求。
+type IfMatch = FileInfo | _Absent | None
 
 
 # ── async（一次） ──
@@ -55,12 +74,18 @@ class AsyncFileObject(Protocol):
 
 
 class AsyncKeyValueStore(Protocol):
-    # put は書いた値の [FileInfo]（`{filename: key, size: len(value)}`）を返す＝**全 backend が
-    # 追加 I/O なしに生成できる共通レスポンス**。revision/etag は共通でない（capability 行き）。
-    async def put(self, key: str, value: bytes) -> FileInfo: ...
+    # put は書いた値の安価な [FileInfo]（`{filename, size}`）を返す。`if_match` で **conditional
+    # put（CAS）**: None=無条件（原子＋直列化の last-writer-wins）／ABSENT=不在を要求（create-only・
+    # 既存なら ConflictError）／FileInfo=その etag に一致を要求（update CAS・不一致は Conflict）。
+    # version は不透明トークンとして FileInfo（head が返す）に畳む＝呼び出し側は解釈しない。
+    # 並行安全性は **put を持つストアの必須挙動**（conformancer が検証）。
+    async def put(self, key: str, value: bytes, *, if_match: IfMatch = None) -> FileInfo: ...
     # create は **新規作成専用**（既存なら [ConflictError]）。exists→put の **非原子**な利便メソッド
-    # （並行下は TOCTOU で二重作成しうる）。原子版は M046 `put_if_absent`。
+    # （並行下は TOCTOU で二重作成しうる）。原子版は `put(if_match=ABSENT)`。
     async def create(self, key: str, value: bytes) -> FileInfo: ...
+    # head は値でなく **メタ情報**（filename/size/modified_at/etag）を返す情報取得。update CAS の
+    # version 読み口＝head の戻り FileInfo をそのまま `put(if_match=...)` に渡す。欠損は NotFound。
+    async def head(self, key: str) -> FileInfo: ...
     async def get_or_raise(self, key: str) -> bytes: ...
     async def get(self, key: str, default: bytes | None = None) -> bytes | None: ...
     # iter_all/list_all は **全キーを平坦に**列挙する（'/' を含むネストキーも再帰的に＝1 階層だけ
@@ -111,10 +136,13 @@ class SyncFileObject(Protocol):
 class SyncKeyValueStore(Protocol):
     """[KeyValueStore] の同期版（put/get がメイン）。teardown は async `aclose` ↔ sync `close`。"""
 
-    def put(self, key: str, value: bytes) -> FileInfo: ...  # [AsyncKeyValueStore.put] の同期版
+    def put(
+        self, key: str, value: bytes, *, if_match: IfMatch = None
+    ) -> FileInfo: ...  # [AsyncKeyValueStore.put] の同期版
     def create(
         self, key: str, value: bytes
     ) -> FileInfo: ...  # [AsyncKeyValueStore.create] の同期版
+    def head(self, key: str) -> FileInfo: ...  # [AsyncKeyValueStore.head] の同期版
     def get_or_raise(self, key: str) -> bytes: ...
     def get(self, key: str, default: bytes | None = None) -> bytes | None: ...
     def iter_all(self, limit: int | None = None, prefix: str = "") -> Iterator[FileInfo]: ...
@@ -159,8 +187,13 @@ class _StoreBase(abc.ABC):
     # ── abstract primitive（未実装はインスタンス化時 TypeError＝fail-loud） ──
 
     @abc.abstractmethod
-    async def put(self, key: str, value: bytes) -> FileInfo:
-        """値を書き、[FileInfo]（`{filename, size}`）を返す。**サブクラス必須**（primitive）。"""
+    async def put(self, key: str, value: bytes, *, if_match: IfMatch = None) -> FileInfo:
+        """値を書き、[FileInfo]（`{filename, size}`）を返す。**サブクラス必須**（primitive）。
+
+        `if_match` で conditional put（CAS）: None=無条件（原子＋直列化の LWW）／ABSENT=不在を要求
+        （既存なら `ConflictError`）／FileInfo=その etag に一致を要求（不一致は `ConflictError`）。
+        並行安全性は **put を持つストアの必須挙動**（conformancer が検証）。
+        """
         raise NotImplementedError
 
     @abc.abstractmethod
@@ -198,11 +231,18 @@ class _StoreBase(abc.ABC):
     async def create(self, key: str, value: bytes) -> FileInfo:
         # 新規作成専用＝既存なら ConflictError。exists→put で組む **非原子の利便メソッド**
         # （cp/mv と同じく primitive から導出する派生・backend primitive ではない）。並行下では
-        # exists と put の間に隙間があり TOCTOU で二重作成しうる＝**原子的な create は M046
-        # `put_if_absent`（local=os.link）が正本**。役割分担: ここは利便・非原子／M046 は原子 CAS。
+        # exists と put の間に隙間があり TOCTOU で二重作成しうる＝**原子的な create は
+        # `put(if_match=ABSENT)`（local=os.link）が正本**。ここは利便・非原子／CAS は原子。
         if await self.exists(key):
             raise ConflictError(f"key already exists: {key}")
         return await self.put(key, value)
+
+    async def head(self, key: str) -> FileInfo:
+        # 既定: 値を読んで size を得る派生（modified_at/etag は不明＝None）。native メタを持つ
+        # backend は **head と put(if_match=) を対で override** して CAS トークンを埋める。欠損は
+        # get_or_raise が NotFoundError を上げる。
+        data = await self.get_or_raise(key)
+        return {"filename": key, "size": len(data), "modified_at": None, "etag": None}
 
     async def get(self, key: str, default: bytes | None = None) -> bytes | None:
         # get_or_raise を捕捉し欠損時 default を返す（各 backend で try/except を重複させない）。
@@ -258,8 +298,12 @@ class FileStoreBase(_StoreBase):
         async with await self.open_reader(key) as f:
             return await f.read()
 
-    async def put(self, key: str, value: bytes) -> FileInfo:
-        # open_writer（ストリーム primitive）で全体書き＝値境界でバッファ。
+    async def put(self, key: str, value: bytes, *, if_match: IfMatch = None) -> FileInfo:
+        # open_writer（ストリーム primitive）で全体書き＝値境界でバッファ。conditional put は
+        # open_writer 由来では原子的 CAS を保証できない＝fail-loud（native CAS を持つ file 寄り
+        # backend は put を override する＝LocalFileStore）。
+        if if_match is not None:
+            raise NotImplementedError("conditional put requires backend-native CAS; override put")
         async with await self.open_writer(key) as f:
             await f.write(value)
         return {"filename": key, "size": len(value)}
@@ -381,8 +425,11 @@ class KeyValueFileStore(KeyValueStoreBase):
 
     # ── KVS 面は下層へ委譲（FileStore = KVS + IO の KVS 部分） ──
 
-    async def put(self, key: str, value: bytes) -> FileInfo:
-        return await self._store.put(key, value)
+    async def put(self, key: str, value: bytes, *, if_match: IfMatch = None) -> FileInfo:
+        return await self._store.put(key, value, if_match=if_match)
+
+    async def head(self, key: str) -> FileInfo:
+        return await self._store.head(key)
 
     async def get_or_raise(self, key: str) -> bytes:
         return await self._store.get_or_raise(key)
@@ -428,8 +475,11 @@ class KeyValueFromFileStore(KeyValueStoreBase):
     def __init__(self, store: AsyncFileStore) -> None:
         self._store = store
 
-    async def put(self, key: str, value: bytes) -> FileInfo:
-        return await self._store.put(key, value)
+    async def put(self, key: str, value: bytes, *, if_match: IfMatch = None) -> FileInfo:
+        return await self._store.put(key, value, if_match=if_match)
+
+    async def head(self, key: str) -> FileInfo:
+        return await self._store.head(key)
 
     async def get_or_raise(self, key: str) -> bytes:
         return await self._store.get_or_raise(key)

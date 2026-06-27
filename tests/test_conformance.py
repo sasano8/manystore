@@ -23,7 +23,7 @@ from manystore import (
 )
 from manystore.client import RemoteKeyValueStore
 from manystore.exceptions import ConflictError, NotFoundError
-from manystore.protocols import FileStoreBase, KeyValueStoreBase
+from manystore.protocols import ABSENT, FileStoreBase, KeyValueStoreBase
 from manystore.storage.file import AsyncFileStore
 from manystore.storage.kv import AsyncKeyValueStore
 from manystore.tools.conformancer import (
@@ -33,6 +33,7 @@ from manystore.tools.conformancer import (
     assert_file_store,
     assert_key_value_store,
     assert_put_if_absent_concurrency_safe,
+    assert_put_if_match_concurrency_safe,
     base_protocol_parity_errors,
     conformancer_protocol_drift,
     missing_members,
@@ -268,17 +269,22 @@ def test_parity_detects_missing_and_signature_drift() -> None:
 
 # ── 並行安全性（M046: put を持つストアの必須挙動を conformance で機械検証） ──
 #
-# 2 writer が内容を変えて同一キーへ put_if_absent し「一方成功・他方 ConflictError・保存値=勝者」を
-# 検証。以下 2 つは **チェッカの健全性**（衝突を検出して落とせるか）の自己テスト＝「衝突でテストを
-# 失敗させれること」を担保。実 backend は M046 実装後に有効化（skip 参照）。
+# conditional put（`put(if_match=...)`）の並行安全性を **実ストア経由**で検証する。create 競合は
+# `if_match=ABSENT`、更新の lost-update 検出は `if_match=<head の FileInfo>`。チェッカ自身の健全性
+# （衝突を検出して落とせるか）は、**故意に壊した TOCTOU ストア**を 1 つだけ残して担保する
+# （正しい実ストアは原理的に競合を起こせないため、否定テストには壊したダブルが要る）。
 
 
-class _ConditionalDict:
-    """並行安全性チェッカの自己テスト用ストア。`safe=False` は exists→(yield)→put の TOCTOU。"""
+class _RacyCreateDict:
+    """チェッカの否定テスト専用＝**故意に TOCTOU で壊した** create-only ストア。
 
-    def __init__(self, *, safe: bool) -> None:
+    `put(if_match=ABSENT)` の存在確認を保持したまま `await` で yield し、その隙に他コルーチンが
+    作成できる＝両方が「無い」と判断して二重作成しうる（lost-update）。これでチェッカが衝突を
+    検出して落とせることを確認する（実ストアでは起こせない壊れ方を意図的に作る）。
+    """
+
+    def __init__(self) -> None:
         self._d: dict[str, bytes] = {}
-        self._safe = safe
 
     async def delete(self, key: str) -> None:
         self._d.pop(key, None)
@@ -289,45 +295,76 @@ class _ConditionalDict:
         except KeyError:
             raise NotFoundError(key) from None
 
-    async def put_if_absent(self, key: str, value: bytes):
-        if self._safe:
-            # 原子的: check と set の間に await を挟まない＝単一スレッドでは割り込まれない。
-            if key in self._d:
-                raise ConflictError(key)
-            self._d[key] = value
-        else:
-            # 非安全(TOCTOU): 存在確認を保持したまま yield し、その隙に他コルーチンが作成しうる。
-            exists = key in self._d
-            await asyncio.sleep(0)
-            if exists:
-                raise ConflictError(key)
-            self._d[key] = value
+    async def put(self, key: str, value: bytes, *, if_match=None):
+        exists = key in self._d
+        await asyncio.sleep(0)  # 存在確認を保持したまま yield＝TOCTOU の窓
+        if if_match is ABSENT and exists:
+            raise ConflictError(key)
+        self._d[key] = value
         return {"filename": key, "size": len(value)}
 
 
-async def test_concurrency_checker_passes_for_safe_store() -> None:
-    # 原子的な put_if_absent は「ちょうど一方成功・保存値=勝者」を満たす＝チェッカを通る。
+async def test_concurrency_checker_passes_for_real_dict_store() -> None:
+    # 実ストア（DictKeyValueStore）の create-only CAS は「一方成功・保存値=勝者」を満たす＝通る。
     # 後発を stagger で遅らせるので先行（b"A"）が勝つ＝どちらが優先されたかを内容で識別できる。
-    winner = await assert_put_if_absent_concurrency_safe(_ConditionalDict(safe=True), size=256)
+    winner = await assert_put_if_absent_concurrency_safe(DictKeyValueStore(), size=256)
     assert winner == b"A" * 256  # 先行 writer が優先された
 
 
 async def test_concurrency_checker_fails_on_collision() -> None:
-    # 非安全(TOCTOU)＝両 writer が「無い」と判断し両方作成（lost-update）。stagger=0 で重なりを作り
-    # 成功 2 件にすると AssertionError で落とす（= 衝突でテストを失敗させられる確認）。
+    # 故意に壊した TOCTOU ストア＝両 writer が「無い」と判断し両方作成（二重作成）。stagger=0 で
+    # 重なりを作り成功 2 件にすると AssertionError で落とす（= 衝突でテストを失敗させられる確認）。
     with pytest.raises(AssertionError, match="並行安全性違反"):
-        await assert_put_if_absent_concurrency_safe(
-            _ConditionalDict(safe=False), size=256, stagger=0.0
-        )
+        await assert_put_if_absent_concurrency_safe(_RacyCreateDict(), size=256, stagger=0.0)
 
 
-@pytest.mark.skip(reason="M046 conditional put（put_if_absent/put_if_match）未実装＝実装後に有効化")
+# ── 実 backend の必須挙動（ストア経由）: create 競合 ＋ 更新 lost-update を実ストアで検証 ──
+
+
+async def test_dict_put_if_absent_concurrent_winner_is_intact() -> None:
+    await assert_put_if_absent_concurrency_safe(DictKeyValueStore())
+
+
 async def test_local_put_if_absent_concurrent_winner_is_intact(tmp_path) -> None:
-    # 実 backend の必須挙動: 並行 put_if_absent → 一方成功・他方 ConflictError・保存値=勝者。
-    # M046 実装後に skip を外す。
     await assert_put_if_absent_concurrency_safe(LocalKeyValueStore(tmp_path))
 
 
-@pytest.mark.skip(reason="M046 conditional put（put_if_absent/put_if_match）未実装＝実装後に有効化")
-async def test_dict_put_if_absent_concurrent_winner_is_intact() -> None:
-    await assert_put_if_absent_concurrency_safe(DictKeyValueStore())
+async def test_dict_put_if_match_concurrent_winner_is_intact() -> None:
+    await assert_put_if_match_concurrency_safe(DictKeyValueStore())
+
+
+async def test_local_put_if_match_concurrent_winner_is_intact(tmp_path) -> None:
+    await assert_put_if_match_concurrency_safe(LocalKeyValueStore(tmp_path))
+
+
+# ── conditional put の単体挙動（実ストア経由） ──
+
+
+async def test_dict_conditional_put_unit(tmp_path) -> None:
+    store = DictKeyValueStore()
+    info = await store.put("k", b"v1")
+    assert info == {"filename": "k", "size": 2}  # put の戻りは安価な subset
+    # create-only: 2 回目は ConflictError
+    with pytest.raises(ConflictError):
+        await store.put("k", b"v2", if_match=ABSENT)
+    # head で version を読み、一致すれば update できる
+    meta = await store.head("k")
+    assert meta["size"] == 2 and meta["etag"] is not None
+    await store.put("k", b"v3xx", if_match=meta)
+    assert await store.get_or_raise("k") == b"v3xx"
+    # 古い version での update は ConflictError（lost-update 検出）
+    with pytest.raises(ConflictError):
+        await store.put("k", b"zzzz", if_match=meta)
+
+
+async def test_local_conditional_put_unit(tmp_path) -> None:
+    store = LocalKeyValueStore(tmp_path)
+    await store.put("k", b"v1")
+    with pytest.raises(ConflictError):
+        await store.put("k", b"v2", if_match=ABSENT)
+    meta = await store.head("k")
+    assert meta["etag"] is not None and meta["modified_at"] is not None
+    await store.put("k", b"v3xx", if_match=meta)
+    assert await store.get_or_raise("k") == b"v3xx"
+    with pytest.raises(ConflictError):
+        await store.put("k", b"zzzz", if_match=meta)

@@ -5,8 +5,8 @@ aiobotocore はメソッド内で遅延 import する（依存を __init__ 直�
 
 from collections.abc import AsyncIterator
 
-from ...exceptions import NotFoundError, UnsupportedOperation
-from ...protocols import AsyncFileObject, FileInfo, KeyValueStoreBase
+from ...exceptions import ConflictError, NotFoundError, UnsupportedOperation
+from ...protocols import ABSENT, AsyncFileObject, FileInfo, IfMatch, KeyValueStoreBase
 
 
 class _S3Base:
@@ -53,10 +53,45 @@ class _S3Base:
 
 
 class S3KeyValueStore(_S3Base, KeyValueStoreBase):
-    async def put(self, key: str, value: bytes) -> FileInfo:
+    async def put(self, key: str, value: bytes, *, if_match: IfMatch = None) -> FileInfo:
+        # conditional put はサーバ側で原子的: ABSENT=IfNoneMatch="*"（create-only）／FileInfo=
+        # IfMatch=etag（update CAS）。412/409 は ConflictError へ正規化。
+        from botocore.exceptions import ClientError
+
+        extra: dict = {}
+        if if_match is ABSENT:
+            extra["IfNoneMatch"] = "*"
+        elif if_match is not None and if_match.get("etag"):
+            extra["IfMatch"] = if_match["etag"]
         async with self._session() as client:
-            await client.put_object(Bucket=self._bucket, Key=key, Body=value)
+            try:
+                await client.put_object(Bucket=self._bucket, Key=key, Body=value, **extra)
+            except ClientError as e:
+                code = e.response.get("ResponseMetadata", {}).get("HTTPStatusCode")
+                if code in (409, 412):
+                    raise ConflictError(f"conditional put failed: {key}") from e
+                raise
         return {"filename": key, "size": len(value)}
+
+    async def head(self, key: str) -> FileInfo:
+        from botocore.exceptions import ClientError
+
+        async with self._session() as client:
+            try:
+                resp = await client.head_object(Bucket=self._bucket, Key=key)
+            except ClientError as e:
+                if e.response.get("ResponseMetadata", {}).get("HTTPStatusCode") == 404:
+                    raise NotFoundError(key) from e
+                raise
+        etag = (resp.get("ETag") or "").strip('"') or None
+        last_modified = resp.get("LastModified")
+        modified_at = last_modified.timestamp() if last_modified is not None else None
+        return {
+            "filename": key,
+            "size": resp.get("ContentLength", 0),
+            "modified_at": modified_at,
+            "etag": etag,
+        }
 
     async def get_or_raise(self, key: str) -> bytes:
         async with self._session() as client:

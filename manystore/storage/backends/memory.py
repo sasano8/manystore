@@ -5,12 +5,15 @@
 FileStore は KVS を継承して IO を buffer 合成する（systemPatterns 原則7）。
 """
 
+import time
 from collections.abc import AsyncIterator
 
-from ...exceptions import NotFoundError
+from ...exceptions import ConflictError, NotFoundError
 from ...protocols import (
+    ABSENT,
     AsyncFileObject,
     FileInfo,
+    IfMatch,
     KeyValueStoreBase,
     _kv_copy,
     _kv_move,
@@ -25,14 +28,47 @@ class DictKeyValueStore(KeyValueStoreBase):
     外から既存 dict を渡せば共有・観測できる（テストの fake 兼参照実装）。iter は他 backend と
     同じく名前降順。get の primitive は get_or_raise（欠損で FileNotFoundError）で、get(default) は
     基底 [KeyValueStoreBase] が与える。
+
+    conditional put（CAS）用に **メタストア**（`_etag`/`_mtime`）を値と同時更新する。素の dict には
+    更新時刻・版が無いため、put のたびに **単調増加の通し番号**（`_seq`）を etag に焼き、`_mtime` に
+    実クロックを記録する。通し番号はグローバル単調＝delete→再作成で版が再利用されない（ABA 安全）。
+    外部から直接挿入されたキーはメタが無く、head は etag/modified_at=None（CAS は不一致＝安全側）。
     """
 
     def __init__(self, data: dict[str, bytes] | None = None) -> None:
         self._data: dict[str, bytes] = data if data is not None else {}
+        self._etag: dict[str, str] = {}  # key -> 不透明な版トークン（通し番号の文字列）
+        self._mtime: dict[str, float] = {}  # key -> 更新時刻（epoch 秒）
+        self._seq = 0  # put ごとに単調増加（版トークンの源・ABA 回避）
 
-    async def put(self, key: str, value: bytes) -> FileInfo:
-        self._data[key] = bytes(value)
+    def _bump_meta(self, key: str) -> None:
+        self._seq += 1
+        self._etag[key] = str(self._seq)
+        self._mtime[key] = time.time()
+
+    async def put(self, key: str, value: bytes, *, if_match: IfMatch = None) -> FileInfo:
+        value = bytes(value)
+        exists = key in self._data
+        # 条件判定→set の間に await を挟まない＝単一イベントループ内では原子的（割り込まれない）。
+        if if_match is ABSENT and exists:
+            raise ConflictError(f"key already exists: {key}")
+        # update CAS: 期待 etag と現在 etag を突合（不在・不一致は Conflict＝lost-update 検出）。
+        is_update_cas = if_match is not None and if_match is not ABSENT
+        if is_update_cas and (not exists or if_match.get("etag") != self._etag.get(key)):
+            raise ConflictError(f"version mismatch: {key}")
+        self._data[key] = value
+        self._bump_meta(key)
         return {"filename": key, "size": len(value)}
+
+    async def head(self, key: str) -> FileInfo:
+        if key not in self._data:
+            raise NotFoundError(key)
+        return {
+            "filename": key,
+            "size": len(self._data[key]),
+            "modified_at": self._mtime.get(key),
+            "etag": self._etag.get(key),
+        }
 
     async def get_or_raise(self, key: str) -> bytes:
         try:
@@ -60,6 +96,8 @@ class DictKeyValueStore(KeyValueStoreBase):
 
     async def delete(self, key: str) -> None:
         self._data.pop(key, None)  # 無いキーは無視
+        self._etag.pop(key, None)  # メタも掃除（再作成は新しい通し番号で版を振り直す）
+        self._mtime.pop(key, None)
 
     async def cp(self, src: str, dst: str) -> None:
         await _kv_copy(self, src, dst)

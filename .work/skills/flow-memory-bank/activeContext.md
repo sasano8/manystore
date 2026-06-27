@@ -11,7 +11,17 @@
 **M052/M053 完了**（2026-06-27）＝M052: テスト 75 箇所を `async def` 一括移行（挙動/件数不変・以後 async def 標準）。
 M053: 欠損を `NotFoundError(FileNotFoundError, ManystoreError)` へ昇格（src の生 FNF を全正規化＝local open_reader の
 OS 生 FNF・s3 native streaming の NoSuchKey も含む／tests を NotFoundError へ厳格化／破壊変更ゼロ）。
-次は **M051（kubernetes backend＝M050 の具体 sink・doc-first）** が本命。M046 conditional put 設計も継続候補。
+**M046 MVP 完了**（2026-06-28・ユーザー対話で実装）＝conditional put を **put 1 本＋任意 `if_match`** で実装
+（派生メソッドなし）。None=LWW／ABSENT=create CAS／FileInfo=update CAS（不一致 `ConflictError`）。`head` 新設・
+dict メタストア・local os.link/flock・全 wrapper 委譲・M043 parity 緑。conformancer が実ストア経由で並行安全性を強制。
+詳細は progress 完了マイルストーン。残＝M046残（NATS CAS / serving 配線 / remote）。
+**M046 設計確定**（2026-06-28・ユーザー対話）＝**派生メソッド撤回**。`put_if_absent`/`put_if_match` は作らず、
+**put 1 本＋任意 `if_match: FileInfo|None`** に集約。`if_match` 省略＝原子＋直列化の **LWW（失敗しない）**／
+`if_match=<head の FileInfo>`＝**update CAS**（不一致 `ConflictError`）。**opaque `version:str` 引数は出さず**、比較トークンは
+`FileInfo` 内に畳む（S3=ETag・local=mtime_ns+size・NATS=revision・dict=世代）。**`head(key)->FileInfo` 新設**
+（`modified_at` 追加・dict は**メタストア**併設）。put 戻りは安価な `{filename,size}` 据置。**MVP=update CAS のみ**、
+**create 競合はスコープ外（計画に保持）**。詳細・backend 表・conformancer 改修要件は `plans/m046-conditional-put-plan.md`
+の「設計改訂（2026-06-28）」。次は本実装に着手。
 
 ## 直近の変更
 

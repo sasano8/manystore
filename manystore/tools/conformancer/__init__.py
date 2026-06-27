@@ -42,7 +42,7 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 
 from ...exceptions import ConflictError
-from ...protocols import AsyncFileObject, AsyncFileStore, AsyncKeyValueStore
+from ...protocols import ABSENT, AsyncFileObject, AsyncFileStore, AsyncKeyValueStore
 
 
 def required_members(protocol: type) -> frozenset[str]:
@@ -190,18 +190,18 @@ def assert_conformancer_protocol_current() -> None:
 async def assert_put_if_absent_concurrency_safe(
     store: object, *, size: int = 1 << 20, stagger: float = 0.001
 ) -> bytes:
-    """`put_if_absent` の **並行安全性**（put を持つストアの必須挙動）を検査する。
+    """**create-only CAS**（`put(key, value, if_match=ABSENT)`）の並行安全性を検査する。
 
-    2 つの writer が同一キーへ同時に `put_if_absent` する。**内容を変え**（先行=`b"A"*size`／
+    2 つの writer が同一キーへ同時に create-only put する。**内容を変え**（先行=`b"A"*size`／
     後発=`b"B"*size`）、**大きめの `size`** で窓を広げ、後発を `stagger` 秒遅らせて重なりを作る。
     検証する不変条件（= 製品の必須挙動）:
 
-    1. **ちょうど一方だけ成功**し、他方は `ConflictError`（両方成功＝lost-update／両方失敗＝NG）。
+    1. **ちょうど一方だけ成功**し、他方は `ConflictError`（両方成功＝二重作成／両方失敗＝NG）。
     2. **保存値が成功した側の内容と完全一致**（敗者に上書きされない・torn/混在しない）。
 
     50 並列「1 つ勝つ」より *何を確認するか* が明確で、**内容で勝者を識別**できる（戻り値＝勝者の
     content＝どちらが優先されたか）。「最小機能だが提供挙動の最小保証（並行安全性）は担保」という
-    製品コンセプトを conformance（標準）で機械検証する核。read-only は `put_if_absent` が
+    製品コンセプトを conformance（標準）で機械検証する核。read-only は `put` が
     `UnsupportedOperation` を上げる＝呼ばない。違反は `AssertionError`。
     """
     key = f"_conformance/cc/{uuid.uuid4().hex}"
@@ -213,7 +213,7 @@ async def assert_put_if_absent_concurrency_safe(
         if delay:
             await asyncio.sleep(delay)  # 後発をわずかに遅らせて先行/後発の重なりを作る
         try:
-            await store.put_if_absent(key, value)
+            await store.put(key, value, if_match=ABSENT)
             return value  # この writer が作成に成功（＝勝者の内容）
         except ConflictError:
             return None  # 既に作られていた（敗者）
@@ -222,16 +222,62 @@ async def assert_put_if_absent_concurrency_safe(
     winners = [v for v in results if v is not None]
     if len(winners) != 1:
         raise AssertionError(
-            f"put_if_absent 並行安全性違反: 同時 2 本で成功 {len(winners)} 件"
+            f"put(if_match=ABSENT) 並行安全性違反: 同時 2 本で成功 {len(winners)} 件"
+            f"（期待＝ちょうど 1・他方は ConflictError／両方成功なら二重作成）"
+        )
+    stored = await store.get_or_raise(key)
+    if stored != winners[0]:
+        raise AssertionError(
+            "put(if_match=ABSENT) 並行安全性違反: 保存値が勝者の内容と不一致"
+            "（敗者に上書きされた＝torn write か取り違え）"
+        )
+    return winners[0]  # 勝者の content（＝どちらが優先されたかを観測できる）
+
+
+async def assert_put_if_match_concurrency_safe(
+    store: object, *, size: int = 1 << 20, stagger: float = 0.001
+) -> bytes:
+    """**update CAS**（`put(key, value, if_match=<head の FileInfo>)`）の並行安全性を検査する。
+
+    既存値を 1 つ作り、2 writer が **同じ base version**（`head` の FileInfo）を読んでから内容を
+    変えて同時に update CAS する。後発を `stagger` 秒遅らせ、大きめ `size` で窓を広げる。不変条件:
+
+    1. **ちょうど一方だけ成功**し、他方は `ConflictError`（lost-update を黙って通さない）。
+    2. **保存値が成功した側の内容と完全一致**（敗者に上書きされない）。
+
+    ユーザー原体験（既存値の並行上書きで先勝ち）を conformance で機械検証する核。違反は誤り。
+    """
+    key = f"_conformance/cc/{uuid.uuid4().hex}"
+    with contextlib.suppress(Exception):
+        await store.delete(key)
+    await store.put(key, b"seed")  # base を作る（両 writer が同じ版を読む）
+    base = await store.head(key)
+    first, second = b"A" * size, b"B" * size
+
+    async def _writer(value: bytes, delay: float) -> bytes | None:
+        if delay:
+            await asyncio.sleep(delay)
+        try:
+            await store.put(key, value, if_match=base)
+            return value  # base 版から原子的に更新できた（＝勝者）
+        except ConflictError:
+            return None  # 版が既に進んでいた（敗者＝lost-update を検出）
+
+    results = await asyncio.gather(_writer(first, 0.0), _writer(second, stagger))
+    winners = [v for v in results if v is not None]
+    if len(winners) != 1:
+        raise AssertionError(
+            f"put(if_match=<version>) 並行安全性違反: 同時 2 本で成功 {len(winners)} 件"
             f"（期待＝ちょうど 1・他方は ConflictError／両方成功なら lost-update）"
         )
     stored = await store.get_or_raise(key)
     if stored != winners[0]:
         raise AssertionError(
-            "put_if_absent 並行安全性違反: 保存値が勝者の内容と不一致"
-            "（敗者に上書きされた＝lost-update か torn write）"
+            "put(if_match=<version>) 並行安全性違反: 保存値が勝者と不一致（敗者に上書きされた）"
         )
-    return winners[0]  # 勝者の content（＝どちらが優先されたかを観測できる）
+    with contextlib.suppress(Exception):
+        await store.delete(key)
+    return winners[0]
 
 
 def assert_key_value_store(obj: object) -> None:

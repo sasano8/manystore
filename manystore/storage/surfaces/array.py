@@ -17,6 +17,7 @@ from pathlib import Path
 from ...protocols import (
     AsyncKeyValueStore,
     FileInfo,
+    IfMatch,
     KeyValueStoreBase,
     _atomic_write_bytes,
     _kv_copy,
@@ -68,11 +69,16 @@ class ArrayKeyValueStore(KeyValueStoreBase):
             raise KeyError(f"no mount named {name!r}")
         return store, subkey
 
-    async def put(self, key: str, value: bytes) -> FileInfo:
+    async def put(self, key: str, value: bytes, *, if_match: IfMatch = None) -> FileInfo:
         store, subkey = self._route(key)
-        info = await store.put(subkey, value)
+        info = await store.put(subkey, value, if_match=if_match)
         # iter_all と同じく論理名で prefix し直して外向きキーで返す（subkey ではなく key）。
         return {"filename": key, "size": info["size"]}
+
+    async def head(self, key: str) -> FileInfo:
+        store, subkey = self._route(key)  # 不明な mount は KeyError（欠損ではない）
+        info = await store.head(subkey)
+        return {**info, "filename": key}  # version トークン（etag/modified_at）は下層のまま透過
 
     async def get_or_raise(self, key: str) -> bytes:
         store, subkey = self._route(key)  # 不明な mount は KeyError（欠損ではない）
@@ -166,8 +172,11 @@ class DownloadCache(KeyValueStoreBase):
         base = Path(cache_dir).expanduser() if cache_dir is not None else DEFAULT_CACHE_DIR
         self._cache_dir = base.resolve()
 
-    async def put(self, key: str, value: bytes) -> FileInfo:
-        return await self._store.put(key, value)
+    async def put(self, key: str, value: bytes, *, if_match: IfMatch = None) -> FileInfo:
+        return await self._store.put(key, value, if_match=if_match)
+
+    async def head(self, key: str) -> FileInfo:
+        return await self._store.head(key)
 
     async def get_or_raise(self, key: str) -> bytes:
         return await self._store.get_or_raise(key)

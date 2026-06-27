@@ -10,6 +10,7 @@ from ...exceptions import NotFoundError
 from ...protocols import (
     AsyncFileObject,
     FileInfo,
+    IfMatch,
     KeyValueStoreBase,
     _kv_copy,
     _kv_move,
@@ -52,10 +53,31 @@ class _NatsBase:
 
 
 class NatsObjectKeyValueStore(_NatsBase, KeyValueStoreBase):
-    async def put(self, key: str, value: bytes) -> FileInfo:
+    async def put(self, key: str, value: bytes, *, if_match: IfMatch = None) -> FileInfo:
+        if if_match is not None:
+            # M046 P2: revision/digest ベースの CAS は native 範囲を要調査＝今は fail-loud
+            # （黙って last-writer-wins に落とさない＝要求7）。
+            raise NotImplementedError(
+                "nats backend: conditional put (if_match) は未実装"
+                "（M046 P2・revision CAS は要調査）"
+            )
         obs = await self._get_obs()
         await obs.put(key, value)
         return {"filename": key, "size": len(value)}
+
+    async def head(self, key: str) -> FileInfo:
+        from nats.js.errors import NotFoundError as NatsNotFound
+
+        obs = await self._get_obs()
+        try:
+            info = await obs.get_info(key)
+        except NatsNotFound as e:
+            raise NotFoundError(key) from e
+        if info.deleted:
+            raise NotFoundError(key)
+        # version は digest/nuid を不透明トークンに。mtime は版差があるため modified_at は None。
+        etag = str(getattr(info, "digest", "") or getattr(info, "nuid", "") or "") or None
+        return {"filename": key, "size": info.size or 0, "modified_at": None, "etag": etag}
 
     async def get_or_raise(self, key: str) -> bytes:
         obs = await self._get_obs()
