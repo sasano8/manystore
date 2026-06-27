@@ -38,7 +38,7 @@ import inspect
 import json
 import typing
 import uuid
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass, fields
 from pathlib import Path
 
 from ...exceptions import ConflictError
@@ -421,7 +421,9 @@ class FileStoreTester:
         step = StepResult(
             aspect, op, dict(args), expected, actual, expected_state, actual_state, passed
         )
-        report.append(asdict(step))
+        # 浅い field 展開で記録する（`asdict` は再帰時に dict サブクラスの [FileInfo] を
+        # `type(obj)(genexpr)` で再構築しようとして壊れる）。値は dict/list でそのまま JSON 化可。
+        report.append({f.name: getattr(step, f.name) for f in fields(step)})
 
     async def run_light(self, report: list) -> None:
         """light: open_reader/open_writer/exists/list_all/iter_all（欠損含む）を report に追記。"""
