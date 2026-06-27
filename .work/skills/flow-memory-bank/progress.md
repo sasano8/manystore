@@ -79,6 +79,16 @@
   concurrency_safe`（update CAS）。テストは **実ストア経由**（Dict/Local）＝旧 `_ConditionalDict` フェイクを
   廃し、否定テストだけ故意 TOCTOU の `_RacyCreateDict` を残置（チェッカの牙を担保）。put 戻りは安価な
   `{filename,size}` 据置。残＝M046残（NATS CAS / serving 配線 / remote）。fast 139 passed・`make check` 緑。
+- **M046残 remote 署名検証（2026-06-28・案B step1・ユーザー対話）**: 「HTTP 越し conformance」の前段＝
+  `RemoteKeyValueStore` が `AsyncKeyValueStore` を**署名レベル**で満たすかの機械ガードを追加。conformancer に
+  再利用ヘルパ `concrete_store_signature_errors`/`assert_concrete_store_signatures` 新設＝**メンバ存在＋
+  パラメータ署名の一致**を見て **戻り注釈の narrowing は許容**（`iter_all` が Protocol の `AsyncIterable`→
+  部分型 `AsyncIterator`＝全 9 backend/surface 共通の house convention・LSP 安全な共変）。strict な
+  `base_protocol_parity_errors` は concrete store でこの narrowing を誤検出＝**base↔Protocol lockstep 専用**と
+  棲み分け（concrete store 用の新ヘルパが正本）。remote は put の `if_match`・`head`・`create` まで param drift
+  ゼロを確認。test=`test_remote_kvs_signature_parity`＋ヘルパ健全性 `test_concrete_store_signatures_tolerate_return_narrowing`
+  （narrowing 許容／param drift 検出の二面）。**スコープ確定＝今回は署名検証のみ**（CAS の HTTP 越し
+  conformance は serving 配線が前提＝M046残に保持）。`make check` 緑（142）。
 - **M053（2026-06-27・完了）**: 「欠損」を例外ファミリへ昇格＝**`NotFoundError(FileNotFoundError, ManystoreError)`**
   （status=404・title="Not Found"）を新設（ユーザー指摘＝tests が exceptions.py 定義でない生 `FileNotFoundError`
   を想定していた）。stdlib を先頭に残すので既存 `except FileNotFoundError`/`pytest.raises(FileNotFoundError)` は

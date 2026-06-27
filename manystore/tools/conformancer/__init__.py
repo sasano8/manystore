@@ -114,6 +114,58 @@ def assert_base_protocol_parity(base: type, protocol: type) -> None:
         )
 
 
+def _params_only(member: object) -> str:
+    """メンバの署名から**戻り注釈を落とした**パラメータ部の文字列（並び・名前・既定値・種別）。"""
+    sig = inspect.signature(member)
+    return str(sig.replace(return_annotation=inspect.Signature.empty))
+
+
+def concrete_store_signature_errors(impl: type, protocol: type) -> list[str]:
+    """concrete 実装 `impl` が `protocol` を網羅し、各メンバのパラメータ署名が一致するか検査する。
+
+    `base_protocol_parity_errors` は基底↔Protocol の完全一致（戻り注釈含む）を見る lockstep 用。
+    concrete 実装は戻り注釈を narrowing するのが house convention＝全 backend が `iter_all` を
+    `AsyncIterable`（Protocol）でなく部分型 `AsyncIterator` で返す（LSP 的に安全な共変 narrowing）。
+    よって concrete store の署名検証は メンバ存在＋パラメータ部（名前・既定値・並び・種別）を見、
+    戻り注釈の narrowing は許容する。引数 drift（`if_match` 欠落など caller を壊す実害）は loud に
+    捕える。`RemoteKeyValueStore`↔`AsyncKeyValueStore` 等、HTTP 越し含む concrete store 用。
+    違反メッセージ list（空＝OK）。
+    """
+    errors: list[str] = []
+    for name in sorted(required_members(protocol)):
+        impl_member = getattr(impl, name, None)
+        proto_member = getattr(protocol, name, None)
+        if not callable(impl_member):
+            errors.append(
+                f"{impl.__name__} は {protocol.__name__}.{name} を実装していない（メンバ網羅漏れ）"
+            )
+            continue
+        try:
+            impl_params = _params_only(impl_member)
+            proto_params = _params_only(proto_member)
+        except Exception:  # noqa: BLE001  署名を取れないメンバは存在チェックに留める
+            continue
+        if impl_params != proto_params:
+            errors.append(
+                f"{impl.__name__}.{name} のパラメータ署名が {protocol.__name__} と不一致: "
+                f"実装 {impl_params} ≠ Protocol {proto_params}"
+            )
+    return errors
+
+
+def assert_concrete_store_signatures(impl: type, protocol: type) -> None:
+    """`impl` が `protocol` を網羅しパラメータ署名も一致することを表明（concrete store 署名検証）。
+
+    違反は `AssertionError`（網羅漏れ・引数 drift を列挙）。戻り注釈の narrowing は許容。
+    """
+    errors = concrete_store_signature_errors(impl, protocol)
+    if errors:
+        raise AssertionError(
+            f"concrete store 署名違反（{impl.__name__} ↔ {protocol.__name__}）:\n  "
+            + "\n  ".join(errors)
+        )
+
+
 def signature_drift(protocol: type, expected: dict[str, str]) -> list[str]:
     """`protocol` の各メンバの現シグネチャが `expected`（写し）と一致するか検査する汎用ヘルパ。
 

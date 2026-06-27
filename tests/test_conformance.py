@@ -29,12 +29,14 @@ from manystore.storage.kv import AsyncKeyValueStore
 from manystore.tools.conformancer import (
     FileStoreTester,
     assert_base_protocol_parity,
+    assert_concrete_store_signatures,
     assert_conformancer_protocol_current,
     assert_file_store,
     assert_key_value_store,
     assert_put_if_absent_concurrency_safe,
     assert_put_if_match_concurrency_safe,
     base_protocol_parity_errors,
+    concrete_store_signature_errors,
     conformancer_protocol_drift,
     missing_members,
     required_members,
@@ -265,6 +267,36 @@ def test_parity_detects_missing_and_signature_drift() -> None:
 
     drift = base_protocol_parity_errors(_SigDrift, AsyncKeyValueStore)
     assert any("exists" in e and "シグネチャ" in e for e in drift)
+
+
+def test_concrete_store_signatures_tolerate_return_narrowing() -> None:
+    # ツール自体の健全性: concrete 実装の署名検証は **戻り注釈の narrowing を許容**しつつ
+    # **パラメータ drift は捕える**。KeyValueStoreBase は戻り注釈まで一致＝当然 OK。
+    assert concrete_store_signature_errors(KeyValueStoreBase, AsyncKeyValueStore) == []
+    assert_concrete_store_signatures(KeyValueStoreBase, AsyncKeyValueStore)
+
+    from collections.abc import AsyncIterable, AsyncIterator
+
+    from manystore.protocols import FileInfo
+
+    class _NarrowedReturn(
+        KeyValueStoreBase
+    ):  # 戻り注釈だけ narrowing（AsyncIterable→AsyncIterator）
+        async def iter_all(  # type: ignore[override]
+            self, limit: int | None = None, prefix: str = ""
+        ) -> AsyncIterator[FileInfo]:
+            yield FileInfo(filename="x", size=0)
+
+    # 全 backend と同じ narrowing は許容＝違反ゼロ（strict base parity ならここを誤検出する）。
+    assert concrete_store_signature_errors(_NarrowedReturn, AsyncKeyValueStore) == []
+
+    class _ParamDrift(KeyValueStoreBase):  # put の if_match キーワードを落とす（実害ある drift）
+        async def put(self, key: str, value: bytes) -> FileInfo:  # type: ignore[override]
+            return FileInfo(filename=key, size=len(value))
+
+    errors = concrete_store_signature_errors(_ParamDrift, AsyncKeyValueStore)
+    assert any("put" in e for e in errors)  # パラメータ drift は loud に捕える
+    assert AsyncIterable is not AsyncIterator  # narrowing は型として別物（共変・LSP 安全）
 
 
 # ── 並行安全性（M046: put を持つストアの必須挙動を conformance で機械検証） ──

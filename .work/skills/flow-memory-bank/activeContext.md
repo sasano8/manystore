@@ -15,6 +15,11 @@ OS 生 FNF・s3 native streaming の NoSuchKey も含む／tests を NotFoundErr
 （派生メソッドなし）。None=LWW／ABSENT=create CAS／FileInfo=update CAS（不一致 `ConflictError`）。`head` 新設・
 dict メタストア・local os.link/flock・全 wrapper 委譲・M043 parity 緑。conformancer が実ストア経由で並行安全性を強制。
 詳細は progress 完了マイルストーン。残＝M046残（NATS CAS / serving 配線 / remote）。
+**M046残 remote 署名検証 完了**（2026-06-28・案B「HTTP 越し conformance」step1・ユーザー対話＝**今回は署名検証のみ**に
+スコープ確定）＝conformancer に concrete store 用署名ヘルパ `concrete_store_signature_errors`/
+`assert_concrete_store_signatures`（メンバ存在＋param 署名一致・戻り narrowing は許容＝base↔Protocol lockstep の
+strict parity と棲み分け）を新設し、`RemoteKeyValueStore`↔`AsyncKeyValueStore` の param drift ゼロを test で固定。
+CAS の HTTP 越し conformance（step2/3）は serving 配線が前提ゆえ M046残に保持。`make check` 緑（142）。詳細 progress。
 **M046 設計確定**（2026-06-28・ユーザー対話）＝**派生メソッド撤回**。`put_if_absent`/`put_if_match` は作らず、
 **put 1 本＋任意 `if_match: FileInfo|None`** に集約。`if_match` 省略＝原子＋直列化の **LWW（失敗しない）**／
 `if_match=<head の FileInfo>`＝**update CAS**（不一致 `ConflictError`）。**opaque `version:str` 引数は出さず**、比較トークンは

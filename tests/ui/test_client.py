@@ -11,10 +11,27 @@ import pytest
 
 from manystore.client import RemoteKeyValueStore
 from manystore.exceptions import NotFoundError
+from manystore.protocols import AsyncKeyValueStore
 from manystore.serving.server.app import create_app
 from manystore.serving.server.routes import KV_RAW_PREFIX  # native NS prefix の単一正本
 from manystore.serving.services.config import parse_config
 from manystore.serving.services.service import StorageService
+from manystore.tools.conformancer import (
+    assert_concrete_store_signatures,
+    concrete_store_signature_errors,
+)
+
+
+def test_remote_kvs_signature_parity() -> None:
+    """RemoteKeyValueStore が KeyValueStore Protocol を署名レベルで満たすこと（HTTP 越し前提）。
+
+    挙動（roundtrip）の前に「remote が KeyValueStore の顔を被れているか」を機械検証する。
+    存在＋パラメータ署名の一致を見る（`put` の `if_match` や `head`/`create` の drift を検出）。
+    戻り注釈の narrowing（`iter_all` の AsyncIterable→AsyncIterator）は全 backend 共通の慣習ゆえ
+    許容＝`concrete_store_signature_errors` の方針。strict な base↔Protocol parity は誤検出する。
+    """
+    assert concrete_store_signature_errors(RemoteKeyValueStore, AsyncKeyValueStore) == []
+    assert_concrete_store_signatures(RemoteKeyValueStore, AsyncKeyValueStore)
 
 
 async def test_remote_kvs_roundtrip(tmp_path: Path) -> None:
