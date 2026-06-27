@@ -11,6 +11,7 @@ HTTP には一切依存しない＝この層だけで単体テストできる。
 """
 
 from ...exceptions import ContextNotFound, ReadOnlyContext  # 集約先（後方互換で再エクスポート）
+from ...protocols import FileInfo, IfMatch
 from ...storage.backends import create_unsafe_key_value_store
 from ...storage.surfaces.array import ArrayKeyValueStore
 from ...storage.surfaces.safe import SafeKeyValueStore
@@ -124,9 +125,36 @@ class StorageService:
     async def exists(self, context: str, key: str) -> bool:
         return await self._array.exists(self._key(context, key))
 
-    async def put(self, context: str, key: str, value: bytes) -> None:
+    async def head(self, context: str, key: str) -> FileInfo:
+        """メタ情報（size/modified_at/etag）を返す。欠損は `NotFoundError`（CAS の version 読口）。
+
+        filename は外向きの bare key に直す（合成キー `<context>/<key>` は隠す）。etag は下層の
+        不透明トークンを透過＝client がそのまま `put(if_match=...)` 相当の条件ヘッダに使える。
+        """
+        info = await self._array.head(self._key(context, key))
+        return FileInfo(
+            filename=key,
+            size=info.get("size"),
+            modified_at=info.get("modified_at"),
+            etag=info.get("etag"),
+        )
+
+    async def head_or_absent(self, context: str, key: str) -> FileInfo:
+        """`head`（存在）か 不在 [FileInfo]（size=None）を返す＝HEAD 応答の 200/404 判定に使う。"""
+        try:
+            return await self.head(context, key)
+        except FileNotFoundError:
+            return FileInfo.absent(key)
+
+    async def put(
+        self, context: str, key: str, value: bytes, *, if_match: IfMatch = None
+    ) -> FileInfo:
+        """値を書く。`if_match` で conditional put（None=LWW／不在=create-only／FileInfo=CAS）。
+
+        条件不一致は backend が `ConflictError` を上げ、route が problem(409) に写す（fail-loud）。
+        """
         self._require_writable(context)
-        await self._array.put(self._key(context, key), value)
+        return await self._array.put(self._key(context, key), value, if_match=if_match)
 
     async def delete(self, context: str, key: str) -> None:
         self._require_writable(context)

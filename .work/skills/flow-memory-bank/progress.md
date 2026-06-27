@@ -39,7 +39,7 @@
 
 | ID | タスク | 優先 | 備考 |
 |----|--------|------|------|
-| M046残 | conditional put の残（NATS CAS / serving 配線） | low | **MVP 完了（2026-06-28）＝完了マイルストーン参照**。残＝① NATS の revision/digest CAS（`put(if_match)` は現状 loud `NotImplementedError`・head は digest を etag に）② serving 層（native REST・S3 GW）への If-Match 配線 ③ remote backend の条件 put（native REST に条件ヘッダ無し＝現状 loud）。設計 `plans/m046-conditional-put-plan.md` |
+| M046残 | conditional put の残（NATS CAS / S3 GW If-Match） | low | **MVP＋native REST/remote 配線 完了（2026-06-28）＝完了マイルストーン参照**。残＝① NATS の revision/digest CAS（`put(if_match)` は現状 loud `NotImplementedError`・head は digest を etag に・要 nats-py API 調査＋実 NATS で conformance）② S3 ゲートウェイ（S3 互換 XML 面）への If-Match/If-None-Match 配線（native REST は配線済）。**native REST＋remote の条件 put は配線済**＝RemoteKeyValueStore 経由で create/update CAS を HTTP 越し conformance で機械検証。設計 `plans/m046-conditional-put-plan.md` |
 | M051 | kubernetes backend（M050 の具体 sink） | 相談 | ユーザー要望（2026-06-27・討議中・doc-first）＝put=server-side apply / get=補完済み live（put≠get）。キー=`namespace/resource_type/name`（`.yml` 含めず・group/version は discovery 補完・衝突時 `type.group`）。**FileInfo に世代情報**（resourceVersion/generation/uid/creationTimestamp）。**resourceVersion CAS を M046 の参照実装**に（`if_version` 不一致は ConflictError）。ローカル側=`KubeManifestStore` ラッパ（パス↔内容の同一性検証＝Safe 風 1 枚）。依存=`kubernetes-asyncio` を extra `[k8s]`（遅延 import）。cluster-scoped は後回し。詳細は interrupt |
 | M012 | `list(prefix=...)` / pagination | 中 | prefix は core `iter_all(prefix=…)` 引数化済（M030 capability は 2026-06-26 廃止）。**pagination 未対応**。設計案（2026-06-26 対話・要 doc-first）＝(a) `iter_all`/`list_all` に **offset+limit** を足す（単純・全 backend で scan 可だが大 offset は O(n)）／(b) **cursor/continuation-token** 形式（S3 ContinuationToken・NATS 等の native と整合・M021 の continuation と同一機構）。加えて **返り値を range メタ付きの独自型**にする案＝iter は「何件目〜何件目」を、list は from/to 件数属性を持つ（pagination メタ＝**file/value パラダイム内**。却下した transport の request/response 封筒とは別物）。未確定＝offset/limit vs cursor の二択と、独自結果型を入れるか。M021（S3 GW continuation）・M044（limit 既定の定数化）と連動 |
 | M013 | メタデータ / content-type | 中 | S3・NATS は native 対応だが共通 IF に無い |
@@ -89,6 +89,20 @@
   ゼロを確認。test=`test_remote_kvs_signature_parity`＋ヘルパ健全性 `test_concrete_store_signatures_tolerate_return_narrowing`
   （narrowing 許容／param drift 検出の二面）。**スコープ確定＝今回は署名検証のみ**（CAS の HTTP 越し
   conformance は serving 配線が前提＝M046残に保持）。`make check` 緑（142）。
+- **M046残 serving 配線＋remote 条件 put（2026-06-28・案B step2/3・ユーザー指示で実装）**: conditional put を
+  **native REST と remote クライアントに end-to-end 配線**し、**CAS の並行安全性を HTTP 越し conformance で機械検証**。
+  - **serving/server/routes.py**: PUT が条件ヘッダを `if_match` に解く＝`If-None-Match: *`→`FileInfo.absent()`
+    （create-only）／`If-Match: "<etag>"`→`FileInfo(etag=...)`（update CAS）／無し→None（LWW）。HEAD が
+    メタを露出＝`ETag`（CAS トークン quote）＋独自 `X-Manystore-Size`/`X-Manystore-Modified-At`（標準 HTTP-date は
+    秒精度で lossy）。条件不一致は backend の `ConflictError`→既存 `_on_error`/`to_problem` が problem(409)。
+  - **serving/services/service.py**: `head`/`head_or_absent` 新設（合成キーを bare key へ・etag 透過）＋
+    `put(..., if_match=None)` に拡張（`_array` へ委譲）。
+  - **client/remote.py**: `RemoteKeyValueStore.put` が if_match を条件ヘッダへ写し、`head` を override（HEAD の
+    ETag/size/modified_at から version 付き FileInfo を組む＝既定 head は get で etag=None ゆえ CAS 不可）。
+    `ManystoreClient.put` は 409→`ConflictError` に戻す＋`head_meta` 追加。
+  - **tests/ui/test_client.py +4**: HEAD の version 露出／単発の create-only・update CAS の Conflict／
+    **conformancer の `assert_put_if_absent/if_match_concurrency_safe` を HTTP 越し**（client→server→local）に回す。
+  - 残＝M046残（① NATS revision CAS〔要 nats-py 調査＋実 NATS〕② S3 GW の If-Match）。`make check` 緑（146）。
 - **M053（2026-06-27・完了）**: 「欠損」を例外ファミリへ昇格＝**`NotFoundError(FileNotFoundError, ManystoreError)`**
   （status=404・title="Not Found"）を新設（ユーザー指摘＝tests が exceptions.py 定義でない生 `FileNotFoundError`
   を想定していた）。stdlib を先頭に残すので既存 `except FileNotFoundError`/`pytest.raises(FileNotFoundError)` は

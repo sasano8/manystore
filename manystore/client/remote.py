@@ -16,9 +16,13 @@ httpx を遅延 import する。
 from collections.abc import AsyncIterator
 from urllib.parse import quote
 
-from ..exceptions import NotFoundError
+from ..exceptions import ConflictError, NotFoundError
 from ..protocols import FileInfo, IfMatch, KeyValueStoreBase, _kv_copy, _kv_move
 from ..serving.services.protocol import ContextInfo, EntryInfo
+
+# server 側 routes.py と対の独自メタヘッダ（size/modified_at）。ETag は標準ヘッダ。
+_SIZE_HEADER = "X-Manystore-Size"
+_MODIFIED_AT_HEADER = "X-Manystore-Modified-At"
 
 
 def _quote_key(key: str) -> str:
@@ -74,8 +78,27 @@ class ManystoreClient:
         r = await self._client.head(f"{context}/{_quote_key(key)}")
         return r.status_code == 200
 
-    async def put(self, context: str, key: str, value: bytes) -> None:
-        r = await self._client.put(f"{context}/{_quote_key(key)}", content=value)
+    async def head_meta(self, context: str, key: str) -> dict | None:
+        """HEAD でメタ（etag/size/modified_at）を読む。欠損（404）は None。"""
+        r = await self._client.head(f"{context}/{_quote_key(key)}")
+        if r.status_code == 404:
+            return None
+        r.raise_for_status()
+        etag = r.headers.get("etag")
+        size = r.headers.get(_SIZE_HEADER)
+        modified_at = r.headers.get(_MODIFIED_AT_HEADER)
+        return {
+            "etag": etag.strip('"') if etag is not None else None,
+            "size": int(size) if size is not None else None,
+            "modified_at": float(modified_at) if modified_at is not None else None,
+        }
+
+    async def put(
+        self, context: str, key: str, value: bytes, *, headers: dict[str, str] | None = None
+    ) -> None:
+        r = await self._client.put(f"{context}/{_quote_key(key)}", content=value, headers=headers)
+        if r.status_code == 409:
+            raise ConflictError(key)  # conditional put の条件不一致（server の problem 409 を戻す）
         r.raise_for_status()
 
     async def delete(self, context: str, key: str) -> None:
@@ -105,14 +128,26 @@ class RemoteKeyValueStore(KeyValueStoreBase):
         self._context = context
 
     async def put(self, key: str, value: bytes, *, if_match: IfMatch = None) -> FileInfo:
+        # conditional put を条件ヘッダに写す（None=LWW／不在=create-only／FileInfo=update CAS）。
+        # 不一致は server problem(409)＝ManystoreClient.put が ConflictError に戻す（fail-loud）。
+        headers: dict[str, str] | None = None
         if if_match is not None:
-            # native REST に条件ヘッダが無い＝conditional put は未対応（黙って LWW に落とさない）。
-            raise NotImplementedError(
-                "remote backend: conditional put (if_match) は未対応"
-                "（native REST に条件ヘッダが無い）"
-            )
-        await self._client.put(self._context, key, value)
+            if if_match.is_absent():
+                headers = {"If-None-Match": "*"}  # create-only（不在を要求）
+            else:
+                headers = {"If-Match": f'"{if_match.get("etag")}"'}  # update CAS（etag 一致）
+        await self._client.put(self._context, key, value, headers=headers)
         return FileInfo(filename=key, size=len(value))
+
+    async def head(self, key: str) -> FileInfo:
+        # HEAD のメタ（etag/size/modified_at）から version 付き FileInfo を組む。欠損は NotFound。
+        # 既定 [KeyValueStoreBase].head は get で全 body を読み etag=None＝CAS 不可ゆえ override。
+        meta = await self._client.head_meta(self._context, key)
+        if meta is None:
+            raise NotFoundError(key)
+        return FileInfo(
+            filename=key, size=meta["size"], modified_at=meta["modified_at"], etag=meta["etag"]
+        )
 
     async def get_or_raise(self, key: str) -> bytes:
         return await self._client.get_or_raise(self._context, key)
