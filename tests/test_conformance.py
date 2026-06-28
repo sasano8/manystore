@@ -40,7 +40,6 @@ from manystore.tools.conformancer import (
     assert_file_store,
     assert_key_value_store,
     assert_put_if_absent_concurrency_safe,
-    assert_put_if_match_concurrency_safe,
     assert_writer_aborts_on_error,
     base_protocol_parity_errors,
     concrete_store_signature_errors,
@@ -185,11 +184,8 @@ async def test_run_middle_dict_self_consistent() -> None:
     assert all(s["passed"] for s in report)
 
 
-@pytest.mark.parametrize("make_store", [lambda p: DictFileStore(), lambda p: LocalFileStore(p)])
-async def test_writer_aborts_on_error_contract(make_store, tmp_path) -> None:
-    # 絶対契約: writer のコンテキスト内で例外が起きたら中途バッファを確定しない（M058）。
-    # KVS バッファ writer（dict）も atomic writer（local）も all-or-nothing を満たすこと。
-    await assert_writer_aborts_on_error(make_store(tmp_path))
+# writer all-or-nothing の Dict/Local/Remote/実 backend 横断検証は集約ハーネス
+# （test_conformance_matrix.test_writer_aborts_on_error）に移設。ここはツールの牙のみ残す。
 
 
 async def test_writer_abort_contract_catches_committing_writer(tmp_path) -> None:
@@ -494,23 +490,9 @@ async def test_concurrency_checker_fails_on_collision() -> None:
         await assert_put_if_absent_concurrency_safe(_RacyCreateDict(), size=256, stagger=0.0)
 
 
-# ── 実 backend の必須挙動（ストア経由）: create 競合 ＋ 更新 lost-update を実ストアで検証 ──
-
-
-async def test_dict_put_if_absent_concurrent_winner_is_intact() -> None:
-    await assert_put_if_absent_concurrency_safe(DictKeyValueStore())
-
-
-async def test_local_put_if_absent_concurrent_winner_is_intact(tmp_path) -> None:
-    await assert_put_if_absent_concurrency_safe(LocalKeyValueStore(tmp_path))
-
-
-async def test_dict_put_if_match_concurrent_winner_is_intact() -> None:
-    await assert_put_if_match_concurrency_safe(DictKeyValueStore())
-
-
-async def test_local_put_if_match_concurrent_winner_is_intact(tmp_path) -> None:
-    await assert_put_if_match_concurrency_safe(LocalKeyValueStore(tmp_path))
+# 並行 CAS（create-only / update）の Dict/Local/Remote/実 backend 横断検証は集約ハーネス
+# （test_conformance_matrix.test_put_if_absent_concurrency / test_put_if_match_concurrency）に移設。
+# ここはチェッカ自身の健全性（winner 識別・衝突で落ちる牙）だけを残す（上記 2 テスト）。
 
 
 # ── conditional put の単体挙動（実ストア経由） ──
