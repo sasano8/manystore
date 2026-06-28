@@ -866,6 +866,33 @@ async def test_array_kvs_cp_mv_across_mounts(tmp_path: Path) -> None:
     assert await arr.get("b/z") == b"data"
 
 
+async def test_array_kvs_cp_native_within_mount_else_get_put(tmp_path: Path) -> None:
+    # M064: 同一ストアオブジェクト（=同一 mount）なら native cp/mv へ委譲、跨ぎは get→put。
+    native_calls: list[tuple[str, str, str]] = []
+
+    class _NativeSpy(LocalKeyValueStore):
+        async def cp(self, src: str, dst: str) -> None:
+            native_calls.append(("cp", src, dst))
+            await super().cp(src, dst)
+
+        async def mv(self, src: str, dst: str) -> None:
+            native_calls.append(("mv", src, dst))
+            await super().mv(src, dst)
+
+    arr = ArrayKeyValueStore()
+    await arr.mount("m", _NativeSpy(tmp_path / "m"))  # 同一 mount は同一ストアオブジェクト
+    await arr.mount("other", LocalKeyValueStore(tmp_path / "other"))
+    await arr.put("m/x", b"data")
+
+    await arr.cp("m/x", "m/y")  # 同一 mount → native（subkey で委譲）
+    assert native_calls == [("cp", "x", "y")]  # 論理名を剥がした subkey で native cp
+    assert await arr.get("m/y") == b"data"
+
+    await arr.cp("m/x", "other/z")  # 跨ぎ → get→put（native は呼ばれない）
+    assert native_calls == [("cp", "x", "y")]  # 増えていない
+    assert await arr.get("other/z") == b"data"
+
+
 class _LifecycleRecorder:
     """connect/aclose の呼び出しを記録する最小スタブ（mount の責務分離を検証する用）。"""
 

@@ -141,21 +141,29 @@ class ArrayKeyValueStore(KeyValueStoreBase):
         store, subkey = self._route(key)
         await store.delete(subkey)
 
+    # cp/mv の「同一 backend」判定は store オブジェクトの identity（`is`）で行う（M064）。
+    # 「同一 mount／同一ストアを別名で 2 度 mount」のときだけ native（S3 copy_object・local 原子
+    # rename 等）を使い、それ以外は get→put に落とす**保守的**な設計。同一物理 backend を別ラッパ
+    # （別 SafeKeyValueStore 等）で 2 度包んだ別 mount どうしは `is`=False で native を取りこぼすが
+    # 意図的: 別 mount は論理的に別コンテキストで subkey 名前空間の一致を Array は保証できず、native
+    # cp は意味論的に危険ゆえ安全側に倒す。物理同一性判定を IF に足すのは最小原則に反する（YAGNI）。
+    # 確実に native にしたいなら同一ストアオブジェクトを 2 名で mount する。
+
     async def cp(self, src: str, dst: str) -> None:
         s_store, s_key = self._route(src)
         d_store, d_key = self._route(dst)
         if s_store is d_store:
-            await s_store.cp(s_key, d_key)  # 同一 backend は native（S3 copy_object 等）
+            await s_store.cp(s_key, d_key)  # 同一ストアオブジェクト＝native（S3 copy_object 等）
         else:
-            await _kv_copy(self, src, dst)  # mount 跨ぎは get→put
+            await _kv_copy(self, src, dst)  # mount 跨ぎは get→put（上記の保守設計）
 
     async def mv(self, src: str, dst: str) -> None:
         s_store, s_key = self._route(src)
         d_store, d_key = self._route(dst)
         if s_store is d_store:
-            await s_store.mv(s_key, d_key)  # 同一 backend は native（local は原子的 rename）
+            await s_store.mv(s_key, d_key)  # 同一ストアオブジェクト＝native（local は原子 rename）
         else:
-            await _kv_move(self, src, dst)  # mount 跨ぎは copy→delete
+            await _kv_move(self, src, dst)  # mount 跨ぎは copy→delete（上記の保守設計）
 
     async def connect(self) -> None:
         # 途中失敗で確立済み mount を巻き戻す（部分接続を残さない・M057）。

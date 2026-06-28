@@ -32,12 +32,12 @@ TODO＋配線手順を出力（契約一覧＝実装の TODO・matrix の provid
 ＝fail-loud を transport 越しでも契約化**＝契約を「型問わず raise／NotFound・正常終了に化けさせない」へ精緻化し
 `assert_fail_loud_over_transport` を新設。500 fault transport の RemoteKeyValueStore に当て全 op の非握り潰しを
 契約化（M054/M055 を HTTP 越しでも横断検知）。**北極星①〜④＋fail-loud（in-process/transport）完備**。
-**M056/M057 完了（2026-06-28）**＝M056: `_NatsBase._get_obs` を `asyncio.Lock` で double-checked init に
-（並行二重接続＝リーク防止・fake nats で検証）。M057: 共有ヘルパ `_connect_all`（途中失敗で確立済みを巻き戻し）／
-`_aclose_all`（全件試行）を protocols.py に新設し Array/loadbalancer/StorageService の connect/aclose に適用
-（部分起動リーク・1つの失敗での閉じ漏らしを防止・test +2）。
-最優先 = **M062**（list_all 12箇所コピーの基底集約）/**M063**（DownloadCache 同期IO offload）/**M064**（array cp/mv 判定）。
-M065 残＝leaf backend の transport fault・非 CAS 並行・run_heavy。詳細は progress「品質強化」。
+**品質監査 Tier A〜C 完走（2026-06-28）**＝M054/M055（fail-loud）・M056（nats lock）・M057（lifecycle ロールバック）・
+M058（writer all-or-nothing）・M059（pytest-cov）・M062（list_all 基底集約・47行減）・M063（同期FS の非同期ヘルパ化）・
+M064（cp/mv identity 判定＝保守設計を明記＋テスト固定）。加えて M060/M061（crypto pytest 化・実 backend e2e 強化）は
+未着手で残（test 強化）。M065（conformance を仕様の単一源泉に＝北極星①〜④＋fail-loud transport）完了。
+**次サイクル候補**＝M060/M061（テスト強化）／M013・M012・M021残・M025残 等（機能・完成度）／progress 肥大化につき
+`memory clean` 提言。**拡張（M051/M039/M040/M026/M045）は方針どおり後回し**。詳細は progress「品質強化」。
 
 **M044 完了**（2026-06-28・ユーザー対話で着手）＝spec/既定値の定数集約。**専用 `specs.py` は作らず
 `protocols.py` 冒頭に「spec/既定値」節**を新設（ユーザー確定＝定数の正本をインターフェースと同居・データ専用・
