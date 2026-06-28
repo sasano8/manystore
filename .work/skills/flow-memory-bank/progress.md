@@ -37,6 +37,33 @@
 
 優先度順。着手時は activeContext.md「現在のフォーカス」に展開する。
 
+> **方針（2026-06-28・ユーザー指示）＝品質優先・拡張後回し**。現プロダクトの品質を高める作業（下記
+> 「品質強化」＝correctness バグ修正・lifecycle 健全化・テスト/カバレッジ強化・DRY/cleanup）を最優先で消化する。
+> **拡張的タスク（新 surface/backend/IF）は後回し**＝`M051`(k8s)/`M039`(IPFS)/`M040`(LB)/`M026`(stream)/
+> `M045`(put2)/`M028b`(動的 mount) は品質強化が一段落するまで着手しない（下表に残すが優先度は最下）。
+> 品質強化タスク（M054〜M064）は 2026-06-28 の 4 観点コード監査（error handling / lifecycle・並行 / test
+> coverage / DRY・API 一貫性）で抽出。high 指摘は実コードで裏取り済。
+
+### 品質強化（最優先・2026-06-28 監査で抽出）
+
+| ID | タスク | 優先 | 備考（根拠 file:line） |
+|----|--------|------|------|
+| M054 | nats `get_or_raise` の fail-loud 化 | **high** | `except Exception → NotFoundError(404)` があらゆる障害（接続断/認証/timeout）を「欠損」に化けさせる＝要求7違反。`get(key,default)` 経由で静かに default 返却。欠損専用例外（`ObjectNotFound` 等）だけ catch し他は再送出。手本＝`s3.py`。`backends/nats.py:202` |
+| M055 | remote `exists` の fail-loud 化 | **high** | `return r.status_code == 200` が 5xx/認証エラーを False（＝「無い」）に握り潰す。直下 `head_meta` は 404→None・他 raise で正しい＝非対称。404 のみ False、他は `raise_for_status`。`client/remote.py:85` |
+| M056 | nats `_get_obs` の無ロック lazy connect | **high** | 複数コルーチンが同時に `_obs is None` を通過し `nats.connect` を二重に張る＝接続リーク（`aclose` は1本しか閉じない）。`asyncio.Lock` で double-checked init に。`backends/nats.py:42` |
+| M057 | connect/aclose のロールバック・全件クローズ保証 | high | `StorageService.connect` が途中失敗で確立済みストア/watcher task をリーク（`service.py:37`）。`ArrayKeyValueStore`/`loadbalancer` の connect も途中失敗を巻き戻さず、aclose も逐次 await で1本の例外が残りを閉じ漏らす（`array.py:159`）。connect=部分確立を巻き戻し／aclose=全件 try-finally（or `gather(return_exceptions=True)`） |
+| M058 | writer の例外時 all-or-nothing 統一 | med | `_KvWriteFileObject.__aexit__` が例外経路でも `close()→put` し中途バッファを確定（memory/nats/http/KeyValueFileStore）。`local` の `_LocalAtomicWriter` は例外時 `_abort`＝backend 間で書込契約が食い違う。`exc[0] is not None` 時は put せず破棄。`protocols.py:429` |
+| M059 | カバレッジ計測導入（pytest-cov） | high | cov ツール未導入＝happy-path 偏重（M016）を定量把握できない。`pytest-cov` を dev group＋`make cov`（`--cov=manystore --cov-report=term-missing`）で未到達行を可視化。穴の優先順位付けの土台 |
+| M060 | crypto.py を pytest 化 | high | `XorStreamCipher`/`CipherReader`/`CipherWriter` が pytest 外（inline `_selftest`＝`__main__` でしか走らず CI 収集対象外）。round-trip・チャンク境界非依存・read-only/write-only 拒否（`UnsupportedOperation`）・空鍵 `ValueError` を `tests/test_crypto.py` へ |
+| M061 | 実 backend e2e を CI で gated 実走 | med | `test_e2e_backends.py` は nats/s3 未到達→`pytest.skip`＝CI は local のみ実走で CAS/エラーパスが緑のまま未検証。minio+nats service container を CI ジョブに起こし「skip 許容」をやめる。`assert_put_if_*_concurrency_safe` を s3/nats e2e にも適用 |
+| M062 | `list_all` 重複の基底集約＋小掃除 | med | `_StoreBase.list_all` の既定があるのに 12 箇所が同一本体 `[info async for info in self.iter_all(...)]` をコピー（local/s3/nats/memory/ipfs/loadbalancer/array/remote/http＋アダプタ2）。基底へ一本化＝数十行削減。併せて http の `list_all`/`iter_all` 二系統メッセージ解消・アダプタ素通し iter_all 簡素化（孤児 TODO `protocols.py:527`）・`_S3StreamReader` のデッド `client` 引数削除（`s3.py:160,292`） |
+| M063 | `DownloadCache.download` の同期 IO offload | med | async 内で `is_file()`/`mkdir`/`_atomic_write_bytes` を直接実行＝local 以外で唯一の event loop 塞ぎ。`anyio.to_thread.run_sync` でオフロード。`surfaces/array.py:219` |
+| M064 | array cp/mv の同一 backend 判定 | med | `s_store is d_store`（identity）判定が、同一物理 backend を別 `SafeKeyValueStore` で2回包む（`service.py:42`）と False になり native cp を取りこぼし get→put へ落ちる。等価キー判定にするか制約を docstring 明記。`surfaces/array.py:143` |
+
+> M016（既存・下表）も本監査で具体化＝CAS 以外の並行操作（並行 delete/get・Mirror 実行中の source 変更）／大容量・チャンク境界／backend エラーパスの fail-loud 検証が手薄。M059 で可視化 → M016 で穴埋め。
+
+### 機能・完成度（品質強化の後）
+
 | ID | タスク | 優先 | 備考 |
 |----|--------|------|------|
 | ~~M046残~~ | ~~conditional put の残~~ → **完了（2026-06-28）** | done | **全面完了**。コア backend（local/dict/S3/NATS）＋ native REST＋remote＋**S3 ゲートウェイ**まで conditional put/CAS を配線。conformancer で create/update CAS の並行安全性を機械検証（local/nats は実 backend e2e でも緑）。設計 plan は完了につき GC 済（設計詳細は下記完了マイルストーン群＋git 履歴に保持） |

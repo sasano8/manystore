@@ -5,6 +5,13 @@
 
 ## 現在のフォーカス
 
+**品質優先・拡張後回しへ方針転換**（2026-06-28・ユーザー指示）＝現プロダクトの品質を高めるタスクを最優先で
+消化する。4 観点のコード監査（error handling / lifecycle・並行 / test coverage / DRY・API 一貫性）を実施し
+**品質強化タスク M054〜M064 を抽出・登録**（high 指摘は実コードで裏取り済）。拡張的タスク（M051/M039/M040/
+M026/M045/M028b＝新 surface/backend/IF）は品質強化が一段落するまで着手しない。最優先 = correctness バグ
+**M054**（nats get_or_raise が全障害を 404 に化け）/**M055**（remote exists が 5xx を False に握り潰し）/
+**M056**（nats _get_obs 無ロック lazy connect で接続二重張り）。詳細は progress「品質強化」。
+
 **M044 完了**（2026-06-28・ユーザー対話で着手）＝spec/既定値の定数集約。**専用 `specs.py` は作らず
 `protocols.py` 冒頭に「spec/既定値」節**を新設（ユーザー確定＝定数の正本をインターフェースと同居・データ専用・
 ロジックは寄せない）。core 共有値のみ正本化＝`DEFAULT_LIST_LIMIT=1000`（service/server routes/remote client/
