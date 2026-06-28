@@ -30,8 +30,11 @@ import io
 import os
 import tempfile
 from collections.abc import AsyncIterable, AsyncIterator, Iterable, Iterator
+from functools import partial
 from pathlib import Path
 from typing import Protocol
+
+import anyio.to_thread
 
 from .exceptions import ConflictError, NotFoundError, UnsupportedOperation
 
@@ -368,6 +371,25 @@ def _atomic_write_bytes(path: Path, data: bytes) -> None:
         with contextlib.suppress(OSError):
             os.unlink(tmp)
         raise
+
+
+# 同期 FS 操作の非同期版（syscall をワーカースレッドへオフロード＝event loop を塞がない）。
+# local backend の `_offload` と同流儀。真の async disk IO は不採用（移植性・最小優先・M010）。
+
+
+async def _is_file_async(path: Path) -> bool:
+    """`path.is_file()`（stat）をスレッドへオフロードする。"""
+    return await anyio.to_thread.run_sync(path.is_file)
+
+
+async def _ensure_parent_async(path: Path) -> None:
+    """`path` の親ディレクトリを作る（`mkdir(parents=True, exist_ok=True)` をオフロード）。"""
+    await anyio.to_thread.run_sync(partial(path.parent.mkdir, parents=True, exist_ok=True))
+
+
+async def _atomic_write_bytes_async(path: Path, data: bytes) -> None:
+    """[_atomic_write_bytes] の非同期版（temp+replace の同期 IO をスレッドへオフロード）。"""
+    await anyio.to_thread.run_sync(_atomic_write_bytes, path, data)
 
 
 async def _kv_copy(store: AsyncKeyValueStore, src: str, dst: str) -> None:
