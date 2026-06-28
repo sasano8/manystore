@@ -30,10 +30,12 @@ from manystore.protocols import FileInfo, FileStoreBase, KeyValueStoreBase
 from manystore.storage.file import AsyncFileStore
 from manystore.storage.kv import AsyncKeyValueStore
 from manystore.tools.conformancer import (
+    ABSOLUTE_CONTRACTS,
     FileStoreTester,
     assert_base_protocol_parity,
     assert_concrete_store_signatures,
     assert_conformancer_protocol_current,
+    assert_contract_catalog_current,
     assert_fail_loud_propagation,
     assert_file_store,
     assert_key_value_store,
@@ -43,6 +45,7 @@ from manystore.tools.conformancer import (
     base_protocol_parity_errors,
     concrete_store_signature_errors,
     conformancer_protocol_drift,
+    differential_contract_aspects,
     missing_members,
     required_members,
     save_report,
@@ -267,6 +270,34 @@ async def test_fail_loud_contract_catches_swallowing_wrapper() -> None:
 
     with pytest.raises(AssertionError, match="exists"):
         await assert_fail_loud_propagation(lambda inner: _SwallowExists(inner))
+
+
+# ── 挙動契約カタログ（仕様書の正本・M065 step3） ──
+
+
+def test_contract_catalog_is_current() -> None:
+    # カタログ（仕様書の正本）の各絶対契約が実在の assert 関数を指す（仕様だけでテスト無しを防ぐ）。
+    assert_contract_catalog_current()
+
+
+def test_contract_catalog_has_expected_absolute_contracts() -> None:
+    # 監査由来の絶対契約が漏れなくカタログに載っていること（新規追加時の登録漏れ検知）。
+    ids = {c.id for c in ABSOLUTE_CONTRACTS}
+    assert {
+        "writer.all_or_nothing",
+        "put.create_only.concurrency",
+        "put.update_cas.concurrency",
+        "errors.fail_loud",
+    } <= ids
+
+
+async def test_differential_aspects_derived_from_runs() -> None:
+    # 差分観点は run_light/run_middle の実行から導出される（doc が実態と乖離しない）。
+    pairs = await differential_contract_aspects()
+    levels = {lv for lv, _ in pairs}
+    assert levels == {"light", "middle"}
+    aspects = {a for _, a in pairs}
+    assert {"exists:missing", "delete:missing_idempotent", "overwrite:shrink"} <= aspects
 
 
 async def test_run_light_report_is_external_and_saves(tmp_path) -> None:

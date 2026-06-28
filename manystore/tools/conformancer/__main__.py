@@ -1,21 +1,29 @@
-"""conformance 結果を docs の spec 表へ出力する CLI 入口。
+"""conformance 結果を docs の spec へ出力する CLI 入口。
 
-`python -m manystore.tools.conformancer [--out-dir docs]` で、各 backend 実装が Protocol の
-メソッドを満たすか（Implemented / Not）を **メソッド × 実装** の表にして
-`docs/kv_spec.md`（KeyValueStore）/ `docs/file_storage_spec.md`（FileStore）へ書き出す。
+`python -m manystore.tools.conformancer [--out-dir docs]` で 3 つの spec を生成する:
 
-メソッド存在チェック（接続不要・決定的）を正本にする＝実 backend なしで CI からも回せる。
-挙動契約テスト（[FileStoreTester]）は実 backend を要するため、ここでは扱わない。
+1. `docs/kv_spec.md` / `docs/file_storage_spec.md`＝各 backend が Protocol の**メソッドを満たすか**
+   （Implemented / Not）を **メソッド × 実装** の表に（接続不要・決定的）。
+2. `docs/conformance_spec.md`＝ストア実装が満たすべき**挙動契約のカタログ**（絶対契約＋差分観点）。
+   絶対契約は [ABSOLUTE_CONTRACTS] の宣言から、差分観点は run_* の**実行から導出**する
+   （宣言を二重持ちしない＝仕様書が実態と乖離しない）。
 
-Makefile から `make conformance-docs` でキックする。
+これにより「契約を書く＝テストが生まれ・カバレッジに出て・仕様書化され・新 backend の TODO になる」
+（北極星＝conformance を仕様の単一源泉に）。Makefile から `make conformance-docs` でキックする。
 """
 
 import argparse
+import asyncio
 import tempfile
 from pathlib import Path
 
 from ...protocols import AsyncFileStore, AsyncKeyValueStore
-from . import missing_members, required_members
+from . import (
+    ABSOLUTE_CONTRACTS,
+    differential_contract_aspects,
+    missing_members,
+    required_members,
+)
 
 
 def _kv_instances(tmp_path: str) -> list:
@@ -83,6 +91,57 @@ def _render(protocol: type, title: str, stores: list) -> str:
     )
 
 
+def _render_behavioral(absolute: list, differential: list) -> str:
+    """挙動契約カタログ（絶対契約＋差分観点）を 1 ファイルの Markdown にする。
+
+    `absolute`＝[ContractSpec] の list（宣言）。`differential`＝`(level, aspect)` の list（run_* の
+    実行から導出）。両者を「ストア実装が満たすべき契約一覧」として出力する。
+    """
+    out = [
+        "# 挙動契約 — behavioral conformance spec",
+        "",
+        "> 自動生成: `make conformance-docs`。手で編集しない。manystore のストア実装が満たすべき",
+        "> **挙動契約**の一覧。各契約は conformancer がテストとして実行し（① テスト可能）、",
+        "> pytest-cov に現れ（② 網羅可視）、この表に出力され（③ 仕様書）、",
+        "> 新 backend 実装の TODO になる（④ scaffold）。",
+        "",
+        "## 絶対契約（オラクル非依存・全実装が満たす製品必須挙動）",
+        "",
+        "`manystore.tools.conformancer` の各 assert 関数で検査する。新 backend は接続済みストアを",
+        "渡してこれらを呼べば、実装漏れが loud に落ちる。",
+        "",
+        "| 契約ID | 内容 | 実装する検査 |",
+        "|---|---|---|",
+    ]
+    for c in absolute:
+        out.append(f"| `{c.id}` | {c.summary} | `{c.check}` |")
+    out += [
+        "",
+        "## 差分契約（辞書ストアをオラクルに観測一致を検査）",
+        "",
+        "`FileStoreTester` が辞書ストア（正）と対象に同じ操作を適用し、返り値と適用後状態の一致を",
+        "観点ごとに検証する。下記の観点一覧は **run_* の実行から導出**（実態が正）。",
+        "",
+    ]
+    for level in ("light", "middle"):
+        aspects = [a for lv, a in differential if lv == level]
+        out.append(f"### run_{level}")
+        out.append("")
+        out += [f"- `{a}`" for a in aspects]
+        out.append("")
+    out += [
+        "## 新しい backend の作り方（scaffold の出発点）",
+        "",
+        "1. `KeyValueStore` / `FileStore` の Protocol メソッドを実装（`kv_spec.md` /",
+        "   `file_storage_spec.md` の ✅ を埋める）。`assert_key_value_store` 等で存在チェック。",
+        "2. 上記**絶対契約**の assert を接続済みストアに対して呼び、全て緑にする。",
+        "3. `FileStoreTester(DictFileStore(), <your_store>)` の `run_light`/`run_middle` を回し、",
+        "   差分観点をオラクルに一致させる。",
+        "",
+    ]
+    return "\n".join(out) + "\n"
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(prog="manystore.tools.conformancer")
     parser.add_argument(
@@ -106,6 +165,12 @@ def main() -> None:
         for path, protocol, title, stores in targets:
             path.write_text(_render(protocol, title, stores), encoding="utf-8")
             print(f"wrote {path}")
+
+    # 挙動契約カタログ（絶対契約は宣言から・差分観点は run_* の実行から導出）。
+    differential = asyncio.run(differential_contract_aspects())
+    behavioral = out_dir / "conformance_spec.md"
+    behavioral.write_text(_render_behavioral(ABSOLUTE_CONTRACTS, differential), encoding="utf-8")
+    print(f"wrote {behavioral}")
 
 
 if __name__ == "__main__":

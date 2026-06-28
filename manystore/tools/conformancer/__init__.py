@@ -455,6 +455,112 @@ async def assert_fail_loud_propagation(make_store: object, *, key: str = "faultl
             )
 
 
+# ── 挙動契約カタログ（北極星: conformance を仕様の単一源泉に・M065 step3） ──
+#
+# 「ストア実装が満たすべき挙動契約」を 1 か所のカタログに宣言し、ここから 4 つの価値を同時に得る:
+#   ① テスト可能（各契約は assert_*／run_* として実行）／② pytest-cov に現れる（網羅の可視化）／
+#   ③ 仕様書として出力（`python -m manystore.tools.conformancer` が conformance_spec.md を生成）／
+#   ④ 新 backend のスキャフォールド材料（契約一覧＝実装の TODO）。
+# 絶対契約（オラクル非依存）はここに宣言＝`check` で実装する assert 関数名を指す（drift ガード付）。
+# 差分契約（run_light/middle の観点）は **実行から導出**するので、ここには宣言しない（実態が正）。
+
+
+@dataclass(frozen=True)
+class ContractSpec:
+    """1 つの挙動契約の宣言（spec 文書・scaffold が参照する安定 ID 付き）。
+
+    `level`＝"absolute"（オラクル非依存の製品必須挙動）。`check`＝それを実装する assert 関数名
+    （本モジュール内・drift ガードが実在を検査）。差分契約（light/middle）は実行から導出するため
+    このカタログには載せない。
+    """
+
+    id: str  # 安定した契約 ID（例 "writer.all_or_nothing"）
+    title: str  # 一行タイトル
+    level: str  # "absolute"（差分は run_* から導出するのでここは absolute のみ）
+    summary: str  # 何を保証するか（1〜2 行）
+    check: str  # 実装する assert 関数名（本モジュール内の callable）
+
+
+ABSOLUTE_CONTRACTS: list[ContractSpec] = [
+    ContractSpec(
+        id="writer.all_or_nothing",
+        title="writer の all-or-nothing",
+        level="absolute",
+        summary="writer 内で例外が起きたら中途バッファを確定しない（キー不作成）。",
+        check="assert_writer_aborts_on_error",
+    ),
+    ContractSpec(
+        id="put.create_only.concurrency",
+        title="create-only put の並行安全性",
+        level="absolute",
+        summary="並行 create-only put は一方だけ成功・他方は ConflictError（二重作成なし）。",
+        check="assert_put_if_absent_concurrency_safe",
+    ),
+    ContractSpec(
+        id="put.update_cas.concurrency",
+        title="update CAS の並行安全性",
+        level="absolute",
+        summary="同一 base 版からの並行更新は一方だけ成功し lost-update を ConflictError で拒否。",
+        check="assert_put_if_match_concurrency_safe",
+    ),
+    ContractSpec(
+        id="errors.fail_loud",
+        title="fail-loud（障害を欠損に化けさせない）",
+        level="absolute",
+        summary="下層障害を None/False/default/NotFound に化けさせず伝播（欠損のみ NotFound）。",
+        check="assert_fail_loud_propagation",
+    ),
+]
+
+
+def contract_catalog_drift() -> list[str]:
+    """`ABSOLUTE_CONTRACTS` の各 `check` が本モジュールに callable で在るか（doc↔実装 drift 検知）。
+
+    カタログ（仕様書の正本）が、実際の検査関数とずれていないかを機械チェックする。違反メッセージ
+    list（空＝一致）。`assert_conformancer_protocol_current` と同じ「正本と実装の同期」ガードの系。
+    """
+    errors: list[str] = []
+    here = globals()
+    seen: set[str] = set()
+    for c in ABSOLUTE_CONTRACTS:
+        if c.id in seen:
+            errors.append(f"契約 ID が重複: {c.id}")
+        seen.add(c.id)
+        if not callable(here.get(c.check)):
+            errors.append(
+                f"契約 {c.id} の check `{c.check}` が conformancer に無い（カタログと実装が drift）"
+            )
+    return errors
+
+
+def assert_contract_catalog_current() -> None:
+    """挙動契約カタログが実装と一致することを表明する（不一致は `AssertionError`）。
+
+    カタログに宣言した絶対契約の `check` が実在の assert 関数を指しているか＝仕様書の各項目に
+    対応するテストが存在するか（「仕様だけあってテストが無い」を防ぐ）。
+    """
+    errors = contract_catalog_drift()
+    if errors:
+        raise AssertionError("挙動契約カタログが実装と drift:\n  " + "\n  ".join(errors))
+
+
+async def differential_contract_aspects() -> list[tuple[str, str]]:
+    """run_light/run_middle が検査する観点を `(level, aspect)` で返す（doc の正＝実行から導出）。
+
+    差分契約は「辞書ストアをオラクルに観測一致を見る観点」で、一覧は run_* の実行で確定する。
+    宣言を二重持ちしない＝カタログ（仕様書）が実態と乖離しない。spec 文書生成（`__main__`）が呼ぶ。
+    """
+    from manystore import DictFileStore  # 遅延 import（manystore __init__ の循環を避ける）
+
+    out: list[tuple[str, str]] = []
+    for level in ("light", "middle"):
+        tester = FileStoreTester(DictFileStore(), DictFileStore())
+        report: list = []
+        await getattr(tester, f"run_{level}")(report)
+        out.extend((level, step["aspect"]) for step in report)
+    return out
+
+
 def assert_key_value_store(obj: object) -> None:
     """`obj` が [KeyValueStore] の全メソッドを持つことを表明する。"""
     assert_implements(obj, AsyncKeyValueStore)

@@ -29,8 +29,9 @@ nav:
   - はじめに: index.md
   - アーキテクチャ: architecture.md
   - Conformance spec:
-      - KeyValueStore: kv_spec.md
-      - FileStore: file_storage_spec.md
+      - 挙動契約 (behavioral): conformance_spec.md
+      - KeyValueStore (メソッド): kv_spec.md
+      - FileStore (メソッド): file_storage_spec.md
 
 markdown_extensions:
   - admonition

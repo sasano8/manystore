@@ -15,9 +15,12 @@ projectbrief「北極星」）。**M065 step1+step2 完了**（2026-06-28）＝s
 `assert_writer_aborts_on_error` で M058 を契約先行修正。step2: **fault-injection で fail-loud を契約化**＝
 番兵 `InjectedFault`＋`FaultInjectingKeyValueStore`＋`assert_fail_loud_propagation`（wrapper が下層障害を
 None/False/default/NotFoundError に化けさせず伝播するかを横断検査＝M054/M055 クラス）。base/Safe/
-KeyValueFileStore/DownloadCache を契約ロック＋牙テスト。conformance 25→35。最優先 = **M065 step3**
-（Array 適用・leaf backend の transport fault・契約カタログ→spec 文書/scaffold 化）/**M056**（nats 無ロック）/
-**M057**（lifecycle）。詳細は progress「品質強化」。
+KeyValueFileStore/DownloadCache を契約ロック＋牙テスト。**step3 完了（2026-06-28）＝契約カタログ→spec 文書
+生成**（北極星③④）＝`ContractSpec`/`ABSOLUTE_CONTRACTS`（絶対契約宣言）＋drift ガード
+`assert_contract_catalog_current`（カタログ↔実装の同期＝仕様だけでテスト無しを防ぐ）＋`differential_contract_aspects`
+（差分観点を run_* 実行から導出）＋`__main__` が `docs/conformance_spec.md` 生成（mkdocs nav 追加・--strict 緑）。
+conformance 25→38。最優先 = **M065 step4**（カタログから backend 雛形を実生成＝scaffold 自動化／leaf backend の
+transport fault）/**M056**（nats 無ロック）/**M057**（lifecycle）。詳細は progress「品質強化」。
 
 **M044 完了**（2026-06-28・ユーザー対話で着手）＝spec/既定値の定数集約。**専用 `specs.py` は作らず
 `protocols.py` 冒頭に「spec/既定値」節**を新設（ユーザー確定＝定数の正本をインターフェースと同居・データ専用・
