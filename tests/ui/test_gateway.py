@@ -238,3 +238,60 @@ def test_multipart_upload_part_invalid_part_number(tmp_path: Path) -> None:
         )
         assert r.status_code == 400
         assert fromstring(r.content).findtext("Code") == "InvalidArgument"
+
+
+# ── conditional write（S3 conditional PUT・M046）＝If-None-Match: * / If-Match: <etag|*> ──
+
+
+def test_put_if_none_match_star_create_only(tmp_path: Path) -> None:
+    with _client(tmp_path) as client:
+        # 1 回目＝不在なので作成され 200。2 回目＝既存ゆえ 412 PreconditionFailed。
+        r = client.put("/work/c.txt", content=b"v1", headers={"If-None-Match": "*"})
+        assert r.status_code == 200
+        r = client.put("/work/c.txt", content=b"v2", headers={"If-None-Match": "*"})
+        assert r.status_code == 412
+        assert fromstring(r.content).findtext("Code") == "PreconditionFailed"
+        assert client.get("/work/c.txt").content == b"v1"  # 敗者に上書きされない
+
+
+def test_put_if_match_etag_update_cas(tmp_path: Path) -> None:
+    with _client(tmp_path) as client:
+        client.put("/work/u.txt", content=b"v1")
+        etag = client.head("/work/u.txt").headers["ETag"]  # 現 ETag（本体 MD5）
+        # 一致する ETag での更新は 200。
+        r = client.put("/work/u.txt", content=b"v2", headers={"If-Match": etag})
+        assert r.status_code == 200
+        assert client.get("/work/u.txt").content == b"v2"
+        # 版が進んだので**古い** ETag での再更新は 412（lost-update を拒否）。
+        r = client.put("/work/u.txt", content=b"v3", headers={"If-Match": etag})
+        assert r.status_code == 412
+        assert fromstring(r.content).findtext("Code") == "PreconditionFailed"
+        assert client.get("/work/u.txt").content == b"v2"
+
+
+def test_put_if_match_on_absent_is_precondition_failed(tmp_path: Path) -> None:
+    with _client(tmp_path) as client:
+        # 対象が無いのに If-Match＝precondition 不成立（412）。
+        r = client.put("/work/none.txt", content=b"x", headers={"If-Match": '"deadbeef"'})
+        assert r.status_code == 412
+        assert fromstring(r.content).findtext("Code") == "PreconditionFailed"
+        assert client.get("/work/none.txt").status_code == 404  # 書かれていない
+
+
+def test_put_if_match_star_requires_existence(tmp_path: Path) -> None:
+    with _client(tmp_path) as client:
+        # If-Match: * は「存在すれば更新」。不在なら 412、存在すれば 200。
+        r = client.put("/work/s.txt", content=b"x", headers={"If-Match": "*"})
+        assert r.status_code == 412
+        client.put("/work/s.txt", content=b"v1")
+        r = client.put("/work/s.txt", content=b"v2", headers={"If-Match": "*"})
+        assert r.status_code == 200
+        assert client.get("/work/s.txt").content == b"v2"
+
+
+def test_put_if_none_match_non_star_is_not_implemented(tmp_path: Path) -> None:
+    with _client(tmp_path) as client:
+        # S3 PutObject の If-None-Match は `*` のみ＝具体 etag は 501 NotImplemented（fail-loud）。
+        r = client.put("/work/n.txt", content=b"x", headers={"If-None-Match": '"abc"'})
+        assert r.status_code == 501
+        assert fromstring(r.content).findtext("Code") == "NotImplemented"
