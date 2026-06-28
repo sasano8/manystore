@@ -54,6 +54,8 @@
 
 ## 新しい backend の作り方（scaffold の出発点）
 
+0. 雛形生成: `python -m manystore.tools.conformancer --scaffold MyStore --kind kv|file`
+   ＝未実装メソッド（`raise NotImplementedError`）＋満たすべき契約 TODO＋配線手順が出る。
 1. `KeyValueStore` / `FileStore` の Protocol メソッドを実装（`kv_spec.md` /
    `file_storage_spec.md` の ✅ を埋める）。`assert_key_value_store` 等で存在チェック。
 2. 上記**絶対契約**の assert を接続済みストアに対して呼び、全て緑にする。

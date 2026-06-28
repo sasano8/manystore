@@ -25,8 +25,12 @@ conformance 25→38。
 ＋`tests/test_conformance_matrix.py` が全契約を流す（非破壊＝全 provider／破壊的差分 run_light・middle＝
 isolated のみ）。重複を集約先へ移し `test_e2e_backends.py` 廃止・test_conformance/test_client の重複削除。
 fast 176・gated 12 skip。残＝実 backend run_*（delete_all 回避設計）・fail-loud transport fault（M065 step4）・
-native writer 直接検証。最優先 = **M065 step4**（scaffold 自動化／transport fault で Remote fail-loud も閉じる）/
-**M056**（nats 無ロック）/**M057**（lifecycle）。詳細は progress「品質強化」。
+native writer 直接検証。**M065 step4 完了（2026-06-28・北極星④）＝scaffold 自動生成**＝`scaffold_backend(class, kind)`＋CLI
+`--scaffold MyStore --kind kv|file`＝基底の `__abstractmethods__` を Protocol 署名で stub し満たすべき契約
+TODO＋配線手順を出力（契約一覧＝実装の TODO・matrix の provider に通すだけで実装漏れが loud）。test +4。
+これで北極星①〜④が一通り実装（①テスト②cov③spec 文書④scaffold）。最優先 = **M065 step5**（transport-level
+fault で Remote/leaf の fail-loud を契約化＝M066 step3 連動）/**M056**（nats 無ロック）/**M057**（lifecycle）。
+詳細は progress「品質強化」。
 
 **M044 完了**（2026-06-28・ユーザー対話で着手）＝spec/既定値の定数集約。**専用 `specs.py` は作らず
 `protocols.py` 冒頭に「spec/既定値」節**を新設（ユーザー確定＝定数の正本をインターフェースと同居・データ専用・

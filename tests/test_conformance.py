@@ -48,6 +48,7 @@ from manystore.tools.conformancer import (
     missing_members,
     required_members,
     save_report,
+    scaffold_backend,
     signature_drift,
 )
 
@@ -294,6 +295,35 @@ async def test_differential_aspects_derived_from_runs() -> None:
     assert levels == {"light", "middle"}
     aspects = {a for _, a in pairs}
     assert {"exists:missing", "delete:missing_idempotent", "overwrite:shrink"} <= aspects
+
+
+# ── 契約カタログ→backend 雛形の生成（北極星④・M065 step4） ──
+
+
+@pytest.mark.parametrize(
+    ("kind", "base_name"), [("file", "FileStoreBase"), ("kv", "KeyValueStoreBase")]
+)
+async def test_scaffold_compiles_and_stubs_raise(kind: str, base_name: str) -> None:
+    # 雛形は compile でき、未実装 primitive を呼ぶと NotImplementedError（＝実装の TODO が loud）。
+    code = scaffold_backend("MyStore", kind=kind)
+    assert f"class MyStore({base_name})" in code
+    ns: dict = {}
+    exec(compile(code, "<scaffold>", "exec"), ns)  # noqa: S102  生成コードの健全性検査
+    store = ns["MyStore"]()  # 全 abstract が stub 済＝インスタンス化できる
+    with pytest.raises(NotImplementedError):
+        await store.exists("k")
+
+
+def test_scaffold_lists_absolute_contracts() -> None:
+    # 雛形ヘッダに「満たすべき絶対契約」が列挙される（契約一覧＝実装の TODO）。
+    code = scaffold_backend("X", kind="file")
+    for c in ABSOLUTE_CONTRACTS:
+        assert c.id in code
+
+
+def test_scaffold_rejects_unknown_kind() -> None:
+    with pytest.raises(ValueError, match="unknown kind"):
+        scaffold_backend("X", kind="bogus")
 
 
 async def test_run_light_report_is_external_and_saves(tmp_path) -> None:

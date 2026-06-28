@@ -23,6 +23,7 @@ from . import (
     differential_contract_aspects,
     missing_members,
     required_members,
+    scaffold_backend,
 )
 
 
@@ -132,6 +133,8 @@ def _render_behavioral(absolute: list, differential: list) -> str:
     out += [
         "## 新しい backend の作り方（scaffold の出発点）",
         "",
+        "0. 雛形生成: `python -m manystore.tools.conformancer --scaffold MyStore --kind kv|file`",
+        "   ＝未実装メソッド（`raise NotImplementedError`）＋満たすべき契約 TODO＋配線手順が出る。",
         "1. `KeyValueStore` / `FileStore` の Protocol メソッドを実装（`kv_spec.md` /",
         "   `file_storage_spec.md` の ✅ を埋める）。`assert_key_value_store` 等で存在チェック。",
         "2. 上記**絶対契約**の assert を接続済みストアに対して呼び、全て緑にする。",
@@ -147,7 +150,26 @@ def main() -> None:
     parser.add_argument(
         "--out-dir", default="docs", help="spec 表の出力先ディレクトリ（既定: docs）"
     )
+    parser.add_argument(
+        "--scaffold",
+        metavar="CLASS",
+        help="新 backend 実装の雛形を生成して出力（spec は生成しない）。例: --scaffold MyStore",
+    )
+    parser.add_argument(
+        "--kind", choices=["kv", "file"], default="file", help="--scaffold の種別（既定: file）"
+    )
+    parser.add_argument("--out", help="--scaffold の出力ファイル（既定: 標準出力）")
     ns = parser.parse_args()
+
+    # 雛形生成モード（北極星④＝契約一覧が実装の TODO になる）。spec 生成とは排他。
+    if ns.scaffold:
+        code = scaffold_backend(ns.scaffold, kind=ns.kind)
+        if ns.out:
+            Path(ns.out).write_text(code, encoding="utf-8")
+            print(f"wrote {ns.out}")
+        else:
+            print(code, end="")
+        return
 
     out_dir = Path(ns.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)

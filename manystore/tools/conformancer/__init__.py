@@ -49,6 +49,7 @@ from ...protocols import (
     AsyncFileStore,
     AsyncKeyValueStore,
     FileInfo,
+    FileStoreBase,
     KeyValueStoreBase,
 )
 
@@ -559,6 +560,75 @@ async def differential_contract_aspects() -> list[tuple[str, str]]:
         await getattr(tester, f"run_{level}")(report)
         out.extend((level, step["aspect"]) for step in report)
     return out
+
+
+def _stub_signature(member: object) -> str:
+    """メンバの署名を注釈を全て落として雛形用に整形（`(self, key, value, *, if_match=None)`）。
+
+    注釈を残すと生成ファイルに manystore 型の import が要る。雛形は読みやすさ優先で名前・既定値・
+    並び・種別だけを写し、中身は著者が埋める（conformancer の呼び出し方とは一致する）。
+    """
+    sig = inspect.signature(member)
+    params = [p.replace(annotation=inspect.Parameter.empty) for p in sig.parameters.values()]
+    return str(sig.replace(parameters=params, return_annotation=inspect.Signature.empty))
+
+
+def scaffold_backend(class_name: str, *, kind: str = "file") -> str:
+    """契約カタログ＋基底から新 backend 実装の**雛形**（未実装メソッド＋契約 TODO）を生成する。
+
+    北極星④＝「契約一覧が実装の TODO になる」。基底（`FileStoreBase`/`KeyValueStoreBase`）の
+    `__abstractmethods__`（=著者が必ず実装すべき primitive）だけを `raise NotImplementedError` で
+    stub し、`get`/`list_all`/`cp`/`mv`/`head` 等の既定実装は基底から継承する。ヘッダに満たすべき
+    絶対契約（[ABSOLUTE_CONTRACTS]）と配線手順を書く。`kind`＝"file"（FileStore）/"kv"（KeyValueStore）。
+    生成物を conformancer（matrix の provider）に通すだけで実装漏れが loud に落ちる状態が出発点。
+    """
+    if kind == "file":
+        base, base_name, protocol = FileStoreBase, "FileStoreBase", AsyncFileStore
+    elif kind == "kv":
+        base, base_name, protocol = KeyValueStoreBase, "KeyValueStoreBase", AsyncKeyValueStore
+    else:
+        raise ValueError(f"unknown kind: {kind!r}（kv | file）")
+
+    abstracts = sorted(base.__abstractmethods__)
+    head = [
+        '"""自動生成スキャフォールド（`python -m manystore.tools.conformancer --scaffold`）。',
+        "",
+        f"{class_name}（{base_name} 派生）の未実装メソッドを埋め conformancer の契約を満たすこと。",
+        "満たすべき絶対契約（conformancer の各 assert で機械検証）:",
+    ]
+    head += [f"  - {c.id}: {c.summary}" for c in ABSOLUTE_CONTRACTS]
+    head += [
+        "差分契約は FileStoreTester(DictFileStore(), <store>) の run_light/run_middle で。",
+        '"""',
+        "",
+        f"from manystore.protocols import {base_name}",
+        "",
+        "",
+        f"class {class_name}({base_name}):",
+        f'    """TODO: {class_name} の概要（どの保存先を {base_name} に被せるか）。"""',
+        "",
+    ]
+    body: list[str] = []
+    for name in abstracts:
+        body.append(f"    async def {name}{_stub_signature(getattr(protocol, name))}:")
+        body.append(f'        raise NotImplementedError("{name}")')
+        body.append("")
+
+    footer = [
+        "",
+        "# conformancer への配線（tests/conformance_providers.py の all_providers に 1 行追加）:",
+        "#   from contextlib import asynccontextmanager",
+        "#   @asynccontextmanager",
+        "#   async def _open_mystore():",
+        f"#       store = {class_name}(...)",
+        "#       await store.connect()",
+        "#       try:",
+        "#           yield store",
+        "#       finally:",
+        "#           await store.aclose()",
+        '#   Provider("mystore", _open_mystore, gated=True, isolated=False)  # 実 backend は gated',
+    ]
+    return "\n".join(head + body + footer) + "\n"
 
 
 def assert_key_value_store(obj: object) -> None:
