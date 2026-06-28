@@ -572,7 +572,7 @@ async def differential_contract_aspects() -> list[tuple[str, str]]:
     from manystore import DictFileStore  # 遅延 import（manystore __init__ の循環を避ける）
 
     out: list[tuple[str, str]] = []
-    for level in ("light", "middle"):
+    for level in ("light", "middle", "heavy"):
         tester = FileStoreTester(DictFileStore(), DictFileStore())
         report: list = []
         await getattr(tester, f"run_{level}")(report)
@@ -704,6 +704,17 @@ async def _op_open_reader_read(store: object, args: dict) -> object:
         return await r.read(args.get("n", -1))
 
 
+async def _op_open_reader_read_segments(store: object, args: dict) -> object:
+    # seg バイトずつ繰り返し read して連結（チャンク境界非依存・部分 read の累積を観測）。
+    # 1 回ごとに全体を返すような壊れた reader や境界でバイトを落とす実装はオラクルと食い違う。
+    seg = args.get("seg", 7)
+    out = bytearray()
+    async with await store.open_reader(args["key"]) as r:
+        while chunk := await r.read(seg):
+            out.extend(chunk)
+    return bytes(out)
+
+
 async def _op_list_all(store: object, args: dict) -> object:
     # prefix に閉じて観測（共有 backend の既存キーを無視＝run_* を非破壊にする・M066①）。
     return await store.list_all(args.get("limit", DEFAULT_LIST_LIMIT), args.get("prefix", ""))
@@ -730,6 +741,7 @@ _OPS = {
     "delete": _op_delete,
     "open_writer_write": _op_open_writer_write,
     "open_reader_read": _op_open_reader_read,
+    "open_reader_read_segments": _op_open_reader_read_segments,
     "list_all": _op_list_all,
     "iter_all": _op_iter_all,
 }
@@ -921,7 +933,83 @@ class FileStoreTester:
             await self._cleanup_ns(ns)
 
     async def run_heavy(self, report: list) -> None:
-        raise NotImplementedError("run_heavy は未実装（M022b）")
+        """heavy: **規模・境界**の挙動契約を差分検証する（多チャンク・分割 read・多キー）。
+
+        light/middle は小さな単一/少数キー。heavy は chunk 化・streaming・列挙規模で漏れが出る所:
+        **大容量 round-trip**（多チャンクをまたぐ write→read・全 256 バイト値でバイナリ完全性も）、
+        **チャンク境界非依存の分割 read**（小片を繰り返し read して連結＝オラクル一致か）、
+        **多キーの列挙順序**（昇順）、**grow→shrink→grow の連続 overwrite**（残骸が残らない）。
+        run_light/run_middle と同じく**非破壊**＝uuid 名前空間 `ns` 内だけで操作し後始末する。
+        """
+        ns = f"_conformance/{uuid.uuid4().hex}"
+        key = f"{ns}/big"
+        big = bytes(range(256)) * 512  # 128 KiB・全バイト値（多チャンク＋バイナリ完全性）
+        big_b64 = base64.b64encode(big).decode("ascii")
+        grow = base64.b64encode(b"A" * 4096).decode("ascii")
+        shrink = base64.b64encode(b"bb").decode("ascii")
+        regrow = base64.b64encode(b"C" * 9000).decode("ascii")
+        try:
+            await self._check(
+                report,
+                "heavy:write_large",
+                "open_writer_write",
+                {"key": key, "data_b64": big_b64},
+                ns,
+            )
+            await self._check(
+                report, "heavy:read_large_full", "open_reader_read", {"key": key, "n": -1}, ns
+            )
+            await self._check(
+                report,
+                "heavy:read_segments",
+                "open_reader_read_segments",
+                {"key": key, "seg": 7},
+                ns,
+            )
+            # 多キーの列挙順序（多数キー昇順）。
+            for i in range(12):
+                await self._check(
+                    report,
+                    f"heavy:write_k{i:02d}",
+                    "open_writer_write",
+                    {"key": f"{ns}/k{i:02d}", "data_b64": shrink},
+                    ns,
+                )
+            await self._check(report, "heavy:list_many", "list_all", {}, ns)
+            await self._check(report, "heavy:iter_many", "iter_all", {}, ns)
+            # grow→shrink→grow の連続 overwrite（毎回 read で残骸が無いことを確認）。
+            await self._check(
+                report,
+                "heavy:overwrite_grow",
+                "open_writer_write",
+                {"key": key, "data_b64": grow},
+                ns,
+            )
+            await self._check(
+                report, "heavy:read_after_grow", "open_reader_read", {"key": key, "n": -1}, ns
+            )
+            await self._check(
+                report,
+                "heavy:overwrite_shrink",
+                "open_writer_write",
+                {"key": key, "data_b64": shrink},
+                ns,
+            )
+            await self._check(
+                report, "heavy:read_after_shrink", "open_reader_read", {"key": key, "n": -1}, ns
+            )
+            await self._check(
+                report,
+                "heavy:overwrite_regrow",
+                "open_writer_write",
+                {"key": key, "data_b64": regrow},
+                ns,
+            )
+            await self._check(
+                report, "heavy:read_after_regrow", "open_reader_read", {"key": key, "n": -1}, ns
+            )
+        finally:
+            await self._cleanup_ns(ns)
 
     async def run_full(self, report: list) -> None:
         raise NotImplementedError("run_full は未実装（M022b）")

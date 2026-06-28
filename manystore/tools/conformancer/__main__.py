@@ -124,7 +124,7 @@ def _render_behavioral(absolute: list, differential: list) -> str:
         "観点ごとに検証する。下記の観点一覧は **run_* の実行から導出**（実態が正）。",
         "",
     ]
-    for level in ("light", "middle"):
+    for level in ("light", "middle", "heavy"):
         aspects = [a for lv, a in differential if lv == level]
         out.append(f"### run_{level}")
         out.append("")
@@ -138,8 +138,8 @@ def _render_behavioral(absolute: list, differential: list) -> str:
         "1. `KeyValueStore` / `FileStore` の Protocol メソッドを実装（`kv_spec.md` /",
         "   `file_storage_spec.md` の ✅ を埋める）。`assert_key_value_store` 等で存在チェック。",
         "2. 上記**絶対契約**の assert を接続済みストアに対して呼び、全て緑にする。",
-        "3. `FileStoreTester(DictFileStore(), <your_store>)` の `run_light`/`run_middle` を回し、",
-        "   差分観点をオラクルに一致させる。",
+        "3. `FileStoreTester(DictFileStore(), <your_store>)` の `run_light`/`run_middle`/",
+        "   `run_heavy` を回し差分観点をオラクルに一致させる（run_* は非破壊）。",
         "",
     ]
     return "\n".join(out) + "\n"

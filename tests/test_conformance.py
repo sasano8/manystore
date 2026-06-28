@@ -185,6 +185,58 @@ async def test_run_middle_dict_self_consistent() -> None:
     assert all(s["passed"] for s in report)
 
 
+# ── run_heavy（規模・境界の挙動契約・差分検証・M065） ──
+
+
+async def test_run_heavy_local_file_store_matches_oracle(tmp_path) -> None:
+    # 辞書ストアを正に LocalFileStore の大容量/分割 read/多キー/連続 overwrite を差分検証。
+    tester = FileStoreTester(DictFileStore(), LocalFileStore(tmp_path))
+    report: list = []
+    await tester.run_heavy(report)
+    assert all(s["passed"] for s in report), report
+    aspects = {s["aspect"] for s in report}
+    assert {"heavy:read_large_full", "heavy:read_segments", "heavy:read_after_regrow"} <= aspects
+
+
+async def test_run_heavy_dict_self_consistent() -> None:
+    # 正=対象=辞書ストアなら run_heavy も全観点一致（ツールの健全性）。
+    tester = FileStoreTester(DictFileStore(), DictFileStore())
+    report: list = []
+    await tester.run_heavy(report)
+    assert all(s["passed"] for s in report)
+
+
+async def test_run_heavy_detects_truncating_reader(tmp_path) -> None:
+    # 大容量を 1 チャンクに切り詰める壊れた reader は heavy（分割 read/全長 read）で発覚する。
+    class _TruncReader:
+        def __init__(self, data: bytes) -> None:
+            self._data = data
+
+        async def read(self, n: int = -1) -> bytes:
+            chunk, self._data = self._data[:64], b""  # 64 バイトで頭打ち（残りを落とす）
+            return chunk[:n] if n is not None and n >= 0 else chunk
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *exc): ...
+
+    broken = LocalFileStore(tmp_path)
+    inner_open_reader = broken.open_reader
+
+    async def open_reader(filename):  # noqa: ANN001  実 reader の中身を 64B 截断で包む
+        r = await inner_open_reader(filename)
+        async with r:
+            data = await r.read(-1)
+        return _TruncReader(data)
+
+    broken.open_reader = open_reader
+    tester = FileStoreTester(DictFileStore(), broken)
+    report: list = []
+    await tester.run_heavy(report)
+    assert any(not s["passed"] for s in report)  # 大容量 read がオラクルと食い違う
+
+
 # writer all-or-nothing の Dict/Local/Remote/実 backend 横断検証は集約ハーネス
 # （test_conformance_matrix.test_writer_aborts_on_error）に移設。ここはツールの牙のみ残す。
 
@@ -292,9 +344,14 @@ async def test_differential_aspects_derived_from_runs() -> None:
     # 差分観点は run_light/run_middle の実行から導出される（doc が実態と乖離しない）。
     pairs = await differential_contract_aspects()
     levels = {lv for lv, _ in pairs}
-    assert levels == {"light", "middle"}
+    assert levels == {"light", "middle", "heavy"}
     aspects = {a for _, a in pairs}
-    assert {"exists:missing", "delete:missing_idempotent", "overwrite:shrink"} <= aspects
+    assert {
+        "exists:missing",
+        "delete:missing_idempotent",
+        "overwrite:shrink",
+        "heavy:read_segments",
+    } <= aspects
 
 
 # ── 契約カタログ→backend 雛形の生成（北極星④・M065 step4） ──

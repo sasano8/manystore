@@ -33,6 +33,10 @@ TODO＋配線手順を出力（契約一覧＝実装の TODO・matrix の provid
 ＝fail-loud を transport 越しでも契約化**＝契約を「型問わず raise／NotFound・正常終了に化けさせない」へ精緻化し
 `assert_fail_loud_over_transport` を新設。500 fault transport の RemoteKeyValueStore に当て全 op の非握り潰しを
 契約化（M054/M055 を HTTP 越しでも横断検知）。**北極星①〜④＋fail-loud（in-process/transport）完備**。
+**M065 step6 完了（2026-06-28・本サイクル）＝run_heavy 本実装**＝規模・境界の差分契約（128 KiB 多チャンク
+round-trip／チャンク境界非依存の分割 read〔新 op `open_reader_read_segments`〕／多キー昇順／grow→shrink→regrow
+連続 overwrite）。非破壊（M066① の ns スコープに乗る）＝全 provider（実 nats/s3 含む）で実行。spec 文書生成に
+heavy を追加（北極星③）。test +3＋matrix +1。実 nats・実 s3-path で緑。`make check` 緑（191）・mkdocs --strict 緑。
 **品質監査 Tier A〜C 完走（2026-06-28）**＝M054/M055（fail-loud）・M056（nats lock）・M057（lifecycle ロールバック）・
 M058（writer all-or-nothing）・M059（pytest-cov）・M062（list_all 基底集約・47行減）・M063（同期FS の非同期ヘルパ化）・
 M064（cp/mv identity 判定＝保守設計を明記＋テスト固定）。加えて M060/M061（crypto pytest 化・実 backend e2e 強化）は

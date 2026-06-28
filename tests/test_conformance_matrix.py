@@ -116,3 +116,13 @@ async def test_run_middle_matches_oracle(provider: Provider) -> None:
         report: list = []
         await tester.run_middle(report)
         assert all(s["passed"] for s in report), report
+
+
+@pytest.mark.parametrize("provider", _params(_ALL))
+async def test_run_heavy_matches_oracle(provider: Provider) -> None:
+    # 多チャンク大容量/分割 read/多キー/連続 overwrite の規模・境界契約を差分検証。
+    async with _store(provider) as fs:
+        tester = FileStoreTester(DictFileStore(), fs)
+        report: list = []
+        await tester.run_heavy(report)
+        assert all(s["passed"] for s in report), report
