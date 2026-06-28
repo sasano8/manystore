@@ -255,8 +255,13 @@ class NatsObjectKeyValueStore(_NatsBase, KeyValueStoreBase):
         return not info.deleted
 
     async def delete(self, key: str) -> None:
+        from nats.js.errors import NotFoundError as JSNotFound
+
         obs = await self._get_obs()
-        with contextlib.suppress(Exception):
+        # 欠損/削除済み（ObjectNotFoundError/ObjectDeletedError は JSNotFound 派生）のみ冪等 no-op。
+        # 接続断・認証・timeout 等の本物の障害は握り潰さず伝播させる（fail-loud・要求7）。
+        # 単一クラス catch（tuple 形 `except (A, B):` は py2 書き戻し既知異常を避けるため）。
+        with contextlib.suppress(JSNotFound):
             await obs.delete(key)
 
     async def cp(self, src: str, dst: str) -> None:

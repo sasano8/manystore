@@ -38,6 +38,7 @@ from manystore.serving.server.app import create_app
 from manystore.serving.server.routes import KV_RAW_PREFIX
 from manystore.serving.services.config import parse_config
 from manystore.serving.services.service import StorageService
+from manystore.tools.conformancer import InjectedFault
 
 # ── 実 backend の接続情報（`make e2e-up` の dev 既定。別サーバは env で上書き）。 ──
 S3_HOST, S3_PORT = "localhost", 8333
@@ -145,6 +146,89 @@ def _open_s3(addressing_style: str) -> Callable[[], object]:
     return opener
 
 
+# ── leaf backend の「障害を返す transport」（fail-loud 契約を実 backend へ・M065 step5 / M066②） ──
+#
+# `assert_fail_loud_over_transport` は「既に壊れた下層に繋がった store」が全 op で握り潰さず loud に
+# 失敗するかを見る（現状 HTTP 越しの Remote のみ）。leaf backend（nats/s3）は backend 固有の低レベル
+# クライアントを **接続後に故障プロキシへ差し替える**ことで、backend 自身のエラー処理（except 節）を
+# 実際に通しつつ、欠損（NotFoundError）と区別できない握り潰し（M054/M055 クラス）を炙り出す。
+
+
+class _FaultObjStore:
+    """全メソッドが `InjectedFault` を投げる NATS object store プロキシ（壊れた下層）。"""
+
+    def __getattr__(self, name: str) -> Callable:
+        async def _boom(*_a: object, **_k: object) -> object:
+            raise InjectedFault(f"nats.obs.{name}")
+
+        return _boom
+
+
+def _open_nats_faulty() -> Callable[[], object]:
+    @asynccontextmanager
+    async def opener() -> AsyncIterator[object]:
+        async with connect_key_value_store(
+            "nats",
+            nats_url=NATS_URL,
+            nats_bucket="manystore_e2e",
+            policy=ConnectPolicy.fail_fast(),
+        ) as store:
+            store._obs = _FaultObjStore()  # 接続済みの下層 obs を故障プロキシへ差し替える
+            yield store
+
+    return opener
+
+
+class _FaultS3Client:
+    """全メソッドが `InjectedFault` を投げる S3 クライアント（壊れた下層）。
+
+    backend の `except client.exceptions.NoSuchKey` 評価のため `.exceptions.NoSuchKey` を備える
+    （`InjectedFault` はこれに該当しない＝get_or_raise の欠損偽装に化けず伝播することを見られる）。
+    """
+
+    class exceptions:  # noqa: N801  botocore の client.exceptions 名前空間に合わせる
+        class NoSuchKey(Exception): ...
+
+    async def get_object(self, **_k: object) -> object:
+        raise InjectedFault("s3.get_object")
+
+    async def head_object(self, **_k: object) -> object:
+        raise InjectedFault("s3.head_object")
+
+    async def put_object(self, **_k: object) -> object:
+        raise InjectedFault("s3.put_object")
+
+    async def delete_object(self, **_k: object) -> object:
+        raise InjectedFault("s3.delete_object")
+
+    def get_paginator(self, *_a: object, **_k: object) -> object:
+        raise InjectedFault("s3.get_paginator")
+
+
+@asynccontextmanager
+async def _fault_s3_session() -> AsyncIterator[object]:
+    yield _FaultS3Client()
+
+
+def _open_s3_faulty(addressing_style: str) -> Callable[[], object]:
+    @asynccontextmanager
+    async def opener() -> AsyncIterator[object]:
+        await _s3_ensure_bucket(addressing_style)
+        async with connect_key_value_store(
+            "s3",
+            s3_bucket=S3_BUCKET,
+            s3_endpoint=S3_ENDPOINT,
+            s3_access_key=S3_ACCESS_KEY,
+            s3_secret_key=S3_SECRET_KEY,
+            s3_addressing_style=addressing_style,
+            policy=ConnectPolicy.fail_fast(),
+        ) as store:
+            store._session = _fault_s3_session  # 接続後に毎オペのクライアントを故障版へ差し替える
+            yield store
+
+    return opener
+
+
 @dataclass
 class Provider:
     """1 つの被テスト実装。`open()` が接続済み FileStore を yield する async CM を返す。"""
@@ -164,4 +248,16 @@ def all_providers() -> list[Provider]:
         Provider("nats", _open_nats, gated=True, reachable=_nats_up),
         Provider("s3-virtual", _open_s3("virtual"), gated=True, reachable=_s3_virtual_up),
         Provider("s3-path", _open_s3("path"), gated=True, reachable=_s3_up),
+    ]
+
+
+def leaf_fault_providers() -> list[Provider]:
+    """leaf backend を**故障 transport に繋いだ** provider（fail-loud over transport 用・M066②）。
+
+    `open()` は接続済みだが下層クライアントを故障プロキシへ差し替えた leaf store を yield する。
+    `assert_fail_loud_over_transport` を当て、全 op が障害を握り潰さず loud に失敗するかを検査する。
+    """
+    return [
+        Provider("nats-fault", _open_nats_faulty(), gated=True, reachable=_nats_up),
+        Provider("s3-path-fault", _open_s3_faulty("path"), gated=True, reachable=_s3_up),
     ]

@@ -15,17 +15,19 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
 import pytest
-from conformance_providers import Provider, all_providers
+from conformance_providers import Provider, all_providers, leaf_fault_providers
 
 from manystore import DictFileStore
 from manystore.tools.conformancer import (
     FileStoreTester,
+    assert_fail_loud_over_transport,
     assert_put_if_absent_concurrency_safe,
     assert_put_if_match_concurrency_safe,
     assert_writer_aborts_on_error,
 )
 
 _ALL = all_providers()
+_LEAF_FAULT = leaf_fault_providers()
 
 
 def _params(providers: list[Provider]) -> list:
@@ -93,6 +95,14 @@ async def test_put_if_match_concurrency(provider: Provider) -> None:
     # update CAS の並行安全性（lost-update を ConflictError で拒否）。uuid キーのみ（非破壊）。
     async with _store(provider) as fs:
         await assert_put_if_match_concurrency_safe(fs, size=4096)
+
+
+@pytest.mark.parametrize("provider", _params(_LEAF_FAULT))
+async def test_fail_loud_over_transport(provider: Provider) -> None:
+    # leaf backend（nats/s3）を故障 transport に繋ぎ、全 op が障害を握り潰さず loud に失敗するか。
+    # 欠損/False/default/正常終了に化けさせない＝M054/M055 クラスを実 backend で検出する。
+    async with _store(provider) as store:
+        await assert_fail_loud_over_transport(store)
 
 
 # ── 差分契約（run_light / run_middle ＝非破壊なので全 provider） ──

@@ -37,6 +37,12 @@ TODO＋配線手順を出力（契約一覧＝実装の TODO・matrix の provid
 round-trip／チャンク境界非依存の分割 read〔新 op `open_reader_read_segments`〕／多キー昇順／grow→shrink→regrow
 連続 overwrite）。非破壊（M066① の ns スコープに乗る）＝全 provider（実 nats/s3 含む）で実行。spec 文書生成に
 heavy を追加（北極星③）。test +3＋matrix +1。実 nats・実 s3-path で緑。`make check` 緑（191）・mkdocs --strict 緑。
+**M065 step7 / M066② 完了（2026-06-28・本サイクル）＝leaf fault transport**＝fail-loud over transport を **実 leaf
+backend（nats/s3）へ**拡張（従来は HTTP 越し Remote のみ）。接続後に下層クライアントを故障プロキシへ差し替える
+opener（nats=`store._obs`→`_FaultObjStore`／s3=`store._session`→`_FaultS3Client` を yield する CM）＋
+`leaf_fault_providers()`＋matrix `test_fail_loud_over_transport`（gated）で `assert_fail_loud_over_transport` を
+当てる。**この契約が nats `delete` の M054 級握り潰しバグ（`suppress(Exception)`）を炙り出し `except JSNotFound`
+へ narrowing で是正**。実 nats-fault・実 s3-path-fault で緑＋crud/run_middle も緑。残＝③ native writer 直接検証。
 **品質監査 Tier A〜C 完走（2026-06-28）**＝M054/M055（fail-loud）・M056（nats lock）・M057（lifecycle ロールバック）・
 M058（writer all-or-nothing）・M059（pytest-cov）・M062（list_all 基底集約・47行減）・M063（同期FS の非同期ヘルパ化）・
 M064（cp/mv identity 判定＝保守設計を明記＋テスト固定）。加えて M060/M061（crypto pytest 化・実 backend e2e 強化）は
