@@ -26,7 +26,14 @@
 from collections.abc import AsyncIterator
 from typing import Protocol, TypedDict, runtime_checkable
 
-from ...protocols import AsyncKeyValueStore, FileInfo, IfMatch, KeyValueStoreBase
+from ...protocols import (
+    AsyncKeyValueStore,
+    FileInfo,
+    IfMatch,
+    KeyValueStoreBase,
+    _aclose_all,
+    _connect_all,
+)
 
 
 # ── ネタ①: 負荷メトリクスの capability（backend が任意で報告する） ──
@@ -154,9 +161,7 @@ class LoadBalancedKeyValueStore(KeyValueStoreBase):
         raise NotImplementedError("loadbalancer scaffold: mv")
 
     async def connect(self) -> None:
-        for store in self._members:
-            await store.connect()
+        await _connect_all(self._members)  # 途中失敗で確立済みを巻き戻す（M057）
 
     async def aclose(self) -> None:
-        for store in self._members:
-            await store.aclose()
+        await _aclose_all(self._members)  # 全件閉じ切る（1 つの失敗で残りを漏らさない・M057）

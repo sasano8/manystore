@@ -1261,3 +1261,88 @@ async def test_storage_mirror_sync_prune_removes_orphans() -> None:
     assert result.deleted == ["orphan"]
     assert "orphan" not in sink_data
     assert sink_data["keep"] == b"v"
+
+
+# ── connect/aclose のロールバック・全件クローズ（M057）＋ nats lazy connect の直列化（M056） ──
+
+
+class _LifecycleSpy:
+    """connect/aclose だけを持つ最小ストア（_connect_all/_aclose_all は両者しか呼ばない）。"""
+
+    def __init__(self, *, fail_connect: bool = False, fail_close: bool = False) -> None:
+        self.connected = False
+        self.closed = False
+        self._fail_connect = fail_connect
+        self._fail_close = fail_close
+
+    async def connect(self) -> None:
+        if self._fail_connect:
+            raise RuntimeError("connect boom")
+        self.connected = True
+
+    async def aclose(self) -> None:
+        if self._fail_close:
+            raise RuntimeError("close boom")
+        self.closed = True
+
+
+async def test_connect_all_rolls_back_established_on_failure() -> None:
+    # M057: N 番目の connect 失敗で、確立済み（1..N-1）を巻き戻してから元の例外を再送出する。
+    from manystore.protocols import _connect_all
+
+    ok1, ok2, boom = _LifecycleSpy(), _LifecycleSpy(), _LifecycleSpy(fail_connect=True)
+    with pytest.raises(RuntimeError, match="connect boom"):
+        await _connect_all([ok1, ok2, boom])
+    assert ok1.connected and ok1.closed  # 確立済みは巻き戻しで閉じられる
+    assert ok2.connected and ok2.closed
+
+
+async def test_aclose_all_closes_every_store_despite_failure() -> None:
+    # M057: 途中の aclose 失敗で残りを閉じ漏らさない（全件試行し最初の例外を送出）。
+    from manystore.protocols import _aclose_all
+
+    a, bad, c = _LifecycleSpy(), _LifecycleSpy(fail_close=True), _LifecycleSpy()
+    with pytest.raises(RuntimeError, match="close boom"):
+        await _aclose_all([a, bad, c])
+    assert a.closed and c.closed  # bad の失敗に関わらず前後とも閉じられる
+
+
+async def test_nats_get_obs_connects_once_under_concurrency(monkeypatch) -> None:
+    # M056: 並行 _get_obs が nats.connect を二重に張らない（lazy connect を Lock で直列化）。
+    import sys
+    import types
+
+    from manystore import NatsObjectKeyValueStore
+
+    connects = 0
+
+    class _FakeObs: ...
+
+    class _FakeJs:
+        async def object_store(self, bucket):
+            return _FakeObs()
+
+    class _FakeNc:
+        def jetstream(self):
+            return _FakeJs()
+
+        async def close(self): ...
+
+    async def _connect(url):
+        nonlocal connects
+        connects += 1
+        await asyncio.sleep(0.01)  # 接続の窓を作り、ロック無しなら二重接続が起きるようにする
+        return _FakeNc()
+
+    fake_nats = types.ModuleType("nats")
+    fake_nats.connect = _connect
+    fake_errors = types.ModuleType("nats.js.errors")
+    fake_errors.BucketNotFoundError = type("BucketNotFoundError", (Exception,), {})
+    monkeypatch.setitem(sys.modules, "nats", fake_nats)
+    monkeypatch.setitem(sys.modules, "nats.js", types.ModuleType("nats.js"))
+    monkeypatch.setitem(sys.modules, "nats.js.errors", fake_errors)
+
+    store = NatsObjectKeyValueStore(url="nats://x", bucket="b")
+    results = await asyncio.gather(*[store._get_obs() for _ in range(10)])
+    assert connects == 1  # 10 並行でも接続は 1 回だけ
+    assert all(r is results[0] for r in results)  # 全員が同じ obs を得る

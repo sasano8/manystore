@@ -29,7 +29,7 @@ import contextlib
 import io
 import os
 import tempfile
-from collections.abc import AsyncIterable, AsyncIterator, Iterator
+from collections.abc import AsyncIterable, AsyncIterator, Iterable, Iterator
 from pathlib import Path
 from typing import Protocol
 
@@ -382,6 +382,40 @@ async def _kv_move(store: AsyncKeyValueStore, src: str, dst: str) -> None:
     """copy→delete で src を dst へ移動する汎用実装（原子的ではない）。"""
     await _kv_copy(store, src, dst)
     await store.delete(src)
+
+
+async def _connect_all(stores: Iterable[AsyncKeyValueStore]) -> None:
+    """複数ストアを順に connect する。**途中失敗で確立済みを巻き戻して**から再送出する（M057）。
+
+    合成ストア（Array/loadbalancer）や service の connect が、N 番目で失敗したときに 1..N-1 を
+    接続したまま放置するとリーク（aclose は呼ばれない）。確立済みを best-effort で閉じてから元の
+    例外を伝播させる（巻き戻し中の aclose 失敗は元の失敗を優先して握り潰す）。
+    """
+    connected: list[AsyncKeyValueStore] = []
+    try:
+        for store in stores:
+            await store.connect()
+            connected.append(store)
+    except Exception:
+        with contextlib.suppress(Exception):
+            await _aclose_all(reversed(connected))  # 巻き戻しは best-effort（元の例外を優先）
+        raise
+
+
+async def _aclose_all(stores: Iterable[AsyncKeyValueStore]) -> None:
+    """複数ストアを**全て** aclose する。1 つの失敗で残りを閉じ漏らさない（M057）。
+
+    逐次 await だと先頭の aclose が例外を投げた時点で残りが閉じられずリークする。全件を試し、
+    最初に起きた例外だけを最後に送出する（fail-loud は保ちつつ全部閉じる）。
+    """
+    first_error: Exception | None = None
+    for store in stores:
+        try:
+            await store.aclose()
+        except Exception as e:  # noqa: BLE001  全件閉じ切ってから最初の例外を送出（リーク防止）
+            first_error = first_error or e
+    if first_error is not None:
+        raise first_error
 
 
 # ════════════════════════════════════════════════════════════════════════════

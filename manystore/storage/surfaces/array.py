@@ -19,7 +19,9 @@ from ...protocols import (
     FileInfo,
     IfMatch,
     KeyValueStoreBase,
+    _aclose_all,
     _atomic_write_bytes,
+    _connect_all,
     _kv_copy,
     _kv_move,
 )
@@ -157,12 +159,12 @@ class ArrayKeyValueStore(KeyValueStoreBase):
             await _kv_move(self, src, dst)  # mount 跨ぎは copy→delete
 
     async def connect(self) -> None:
-        for store in self._mounts.values():
-            await store.connect()
+        # 途中失敗で確立済み mount を巻き戻す（部分接続を残さない・M057）。
+        await _connect_all(self._mounts.values())
 
     async def aclose(self) -> None:
-        for store in self._mounts.values():
-            await store.aclose()
+        # 1 つの aclose 失敗で残り mount を閉じ漏らさない（全件試行・M057）。
+        await _aclose_all(self._mounts.values())
 
 
 class DownloadCache(KeyValueStoreBase):
