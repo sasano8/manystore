@@ -18,6 +18,7 @@ from manystore.serving.services.config import parse_config
 from manystore.serving.services.service import StorageService
 from manystore.tools.conformancer import (
     assert_concrete_store_signatures,
+    assert_fail_loud_over_transport,
     concrete_store_signature_errors,
 )
 
@@ -184,3 +185,24 @@ async def test_remote_exists_is_fail_loud_on_server_error() -> None:
             await client.exists("work", "k")
     finally:
         await client.aclose()
+
+
+async def test_remote_is_fail_loud_over_transport_fault() -> None:
+    """M065 step5 / M066 step3: server/backend 障害（500）を client が**全 op で**握り潰さず raise。
+
+    server 越し（transport-level fault）の fail-loud を契約化＝conformancer の
+    `assert_fail_loud_over_transport` を 500 を返す transport の `RemoteKeyValueStore` に当てる。
+    get/get(default)/exists/delete/put/list/iter のどれも障害を None/False/default/NotFound に
+    化けさせず loud に失敗（M054〔欠損偽装〕/M055〔False 偽装〕のクラスを HTTP 越しで横断検知）。
+    """
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(500, json={"detail": "injected backend fault"})
+
+    store = RemoteKeyValueStore(
+        "http://test/kv/raw", "work", transport=httpx.MockTransport(handler)
+    )
+    try:
+        await assert_fail_loud_over_transport(store)
+    finally:
+        await store.aclose()

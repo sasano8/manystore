@@ -42,7 +42,7 @@ from collections.abc import AsyncIterator
 from dataclasses import dataclass, fields
 from pathlib import Path
 
-from ...exceptions import ConflictError
+from ...exceptions import ConflictError, NotFoundError
 from ...protocols import (
     DEFAULT_LIST_LIMIT,
     AsyncFileObject,
@@ -412,48 +412,66 @@ class FaultInjectingKeyValueStore(KeyValueStoreBase):
         yield  # 到達しない（この関数を async generator にするための yield）
 
 
-async def assert_fail_loud_propagation(make_store: object, *, key: str = "faultloud/x") -> None:
-    """`make_store(inner)`（inner=[FaultInjectingKeyValueStore]）の返すストアが、下層の
-    `InjectedFault` を握り潰さず**伝播**するかを fail-loud 感応 op で検査（M054/M055 を契約化）。
+async def _drain(aiter: object) -> list:
+    return [x async for x in aiter]
 
-    encode する契約（製品必須挙動）:
-    - `get(key, default)` は **NotFoundError 以外**の障害を default に化けさせない（欠損だけ）。
-    - `exists(key)` は障害を False（＝「無い」）に化けさせない。
-    - `get_or_raise`/`delete`/`put`/`list_all`/`iter_all` も障害を別例外・正常終了に化けさせない。
 
-    各 op ごとに新しい inner で wrapper を組み直す（前段の副作用を持ち込まない）。`make_store` は
-    `lambda inner: SafeKeyValueStore(inner)` 等。`lambda inner: inner` で基底 duality を検査できる。
-    違反は `AssertionError`。read-only で put が `UnsupportedOperation` なら put を除いて呼ぶ。
+# fail-loud 感応 op（下層障害時に握り潰してはならない読み書き）。`(名前, store→coro)`。
+_FAIL_LOUD_PROBES = (
+    ("get_or_raise", lambda s, k: s.get_or_raise(k)),
+    ("get(default)", lambda s, k: s.get(k, b"DEFAULT")),  # default に化けてはならない
+    ("exists", lambda s, k: s.exists(k)),  # False に化けてはならない
+    ("delete", lambda s, k: s.delete(k)),
+    ("put", lambda s, k: s.put(k, b"v")),
+    ("list_all", lambda s, k: s.list_all()),
+    ("iter_all", lambda s, k: _drain(s.iter_all())),
+)
+
+
+async def _assert_op_fail_loud(name: str, call: object, store: object, key: str) -> None:
+    """1 op が**障害を握り潰さず loud に失敗**するか検査する。
+
+    違反＝(a) 正常終了（None/False/default に化けた）／(b) `NotFoundError`（=欠損）に化けた。
+    **それ以外の例外は OK**（InjectedFault でも HTTP の `HTTPStatusError` でも「伝播＝loud」）。
+    これで in-process も transport 越しも同一契約で扱える。
     """
-
-    async def _drain(aiter: object) -> list:
-        return [x async for x in aiter]
-
-    probes = (
-        ("get_or_raise", lambda s: s.get_or_raise(key)),
-        ("get(default)", lambda s: s.get(key, b"DEFAULT")),  # default に化けてはならない
-        ("exists", lambda s: s.exists(key)),  # False に化けてはならない
-        ("delete", lambda s: s.delete(key)),
-        ("put", lambda s: s.put(key, b"v")),
-        ("list_all", lambda s: s.list_all()),
-        ("iter_all", lambda s: _drain(s.iter_all())),
+    try:
+        await call(store, key)
+    except NotFoundError as e:
+        raise AssertionError(
+            f"fail-loud 違反: {name} が障害を NotFoundError（=欠損）に化けさせた"
+            "（インフラ障害を『無い』に偽装＝M054 クラス）"
+        ) from e
+    except Exception:  # noqa: BLE001  何らかの例外で loud に失敗＝伝播できている（型は問わない）
+        return
+    raise AssertionError(
+        f"fail-loud 違反: {name} が障害を握り潰した（正常終了＝None/False/default に化けた）"
     )
-    for name, call in probes:
-        store = make_store(FaultInjectingKeyValueStore())
-        try:
-            await call(store)
-        except InjectedFault:
-            continue  # 期待どおり下層障害が伝播した
-        except Exception as e:  # noqa: BLE001  別例外への「化け」も fail-loud 違反として報告する
-            raise AssertionError(
-                f"fail-loud 違反: {name} が下層の InjectedFault を別例外 "
-                f"{type(e).__name__} に化けさせた（欠損でない障害を握り潰している）"
-            ) from e
-        else:
-            raise AssertionError(
-                f"fail-loud 違反: {name} が下層の InjectedFault を握り潰した"
-                "（伝播せず正常終了＝障害が None/False/default に化けた）"
-            )
+
+
+async def assert_fail_loud_propagation(make_store: object, *, key: str = "faultloud/x") -> None:
+    """`make_store(inner)`（inner=[FaultInjectingKeyValueStore]）の返すストアが、下層障害を握り潰さず
+    loud に失敗するかを検査する（**in-process の wrapper/基底向け**・M054/M055 を契約化）。
+
+    契約: `get(key,default)` は欠損以外を default に化けさせない／`exists` は障害を False に
+    化けさせない／いずれの op も障害を NotFoundError（欠損）や正常終了に化けさせない。
+
+    各 op ごとに新しい inner で wrapper を組み直す。`lambda inner: inner` で基底 duality も検査。
+    """
+    for name, call in _FAIL_LOUD_PROBES:
+        await _assert_op_fail_loud(name, call, make_store(FaultInjectingKeyValueStore()), key)
+
+
+async def assert_fail_loud_over_transport(store: object, *, key: str = "faultloud/x") -> None:
+    """**既に「壊れた下層」に繋がった** store が fail-loud 感応 op で握り潰さず loud に失敗するか。
+
+    [assert_fail_loud_propagation] の transport 版＝HTTP 越し（500 を返す transport の
+    `RemoteKeyValueStore`）や leaf backend（障害を返す transport を仕込んだ実 backend）に当てる。
+    障害の型は HTTP で変わる（`InjectedFault`→`HTTPStatusError`）ので**型は問わず**、raise したか・
+    NotFound/正常終了に化けてないかだけ見る。store は常に障害を返す前提（probe ごと作り直さない）。
+    """
+    for name, call in _FAIL_LOUD_PROBES:
+        await _assert_op_fail_loud(name, call, store, key)
 
 
 # ── 挙動契約カタログ（北極星: conformance を仕様の単一源泉に・M065 step3） ──
