@@ -35,6 +35,10 @@ from pathlib import Path
 import pytest
 
 from manystore import ConnectPolicy, connect_key_value_store
+from manystore.tools.conformancer import (
+    assert_put_if_absent_concurrency_safe,
+    assert_put_if_match_concurrency_safe,
+)
 
 S3_HOST, S3_PORT = "localhost", 8333
 NATS_HOST, NATS_PORT = "localhost", 4222
@@ -182,6 +186,28 @@ async def test_backend_crud(case: _Case) -> None:
         pytest.skip(f"{case.id}: backend 未到達")
     try:
         await _run(case.opener)
+    except Exception as e:
+        if case.skip_on_error:
+            pytest.skip(f"{case.id}: 環境/認証 未整備 → {type(e).__name__}: {e}")
+        raise
+
+
+@pytest.mark.parametrize(
+    "case",
+    [pytest.param(c, id=c.id, marks=[pytest.mark.slow] if c.skip_on_error else []) for c in CASES],
+)
+async def test_backend_conditional_put_cas(case: _Case) -> None:
+    """conditional put（CAS）の並行安全性を **実 backend** で機械検証（create-only + update CAS）。
+
+    conformancer の並行チェッカ（一方だけ成功・他方 `ConflictError`・保存値=勝者）を実ストアに当てる
+    （local=os.link/flock・S3=IfNoneMatch/IfMatch・NATS=expected-last-subject-seq・M046）。
+    """
+    if not case.reachable():
+        pytest.skip(f"{case.id}: backend 未到達")
+    try:
+        async with case.opener() as store:
+            await assert_put_if_absent_concurrency_safe(store, size=4096)
+            await assert_put_if_match_concurrency_safe(store, size=4096)
     except Exception as e:
         if case.skip_on_error:
             pytest.skip(f"{case.id}: 環境/認証 未整備 → {type(e).__name__}: {e}")

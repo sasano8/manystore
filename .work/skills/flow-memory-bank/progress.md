@@ -39,7 +39,7 @@
 
 | ID | タスク | 優先 | 備考 |
 |----|--------|------|------|
-| M046残 | conditional put の残（NATS CAS / S3 GW If-Match） | low | **MVP＋native REST/remote 配線 完了（2026-06-28）＝完了マイルストーン参照**。残＝① NATS の revision/digest CAS（`put(if_match)` は現状 loud `NotImplementedError`・head は digest を etag に・要 nats-py API 調査＋実 NATS で conformance）② S3 ゲートウェイ（S3 互換 XML 面）への If-Match/If-None-Match 配線（native REST は配線済）。**native REST＋remote の条件 put は配線済**＝RemoteKeyValueStore 経由で create/update CAS を HTTP 越し conformance で機械検証。設計 `plans/m046-conditional-put-plan.md` |
+| M046残 | conditional put の残（S3 GW If-Match のみ） | low | **MVP＋native REST/remote 配線＋NATS CAS 完了（2026-06-28）＝完了マイルストーン参照**。残＝**S3 ゲートウェイ（S3 互換 XML 面）への If-Match/If-None-Match 配線のみ**（native REST は配線済・S3 backend 自体は CAS 済）。コア backend（local/dict/S3/**NATS**）＋ native REST＋remote はすべて条件 put 配線済＝conformancer で create/update CAS の並行安全性を機械検証（local/nats は実 backend e2e でも緑）。設計 `plans/m046-conditional-put-plan.md` |
 | M051 | kubernetes backend（M050 の具体 sink） | 相談 | ユーザー要望（2026-06-27・討議中・doc-first）＝put=server-side apply / get=補完済み live（put≠get）。キー=`namespace/resource_type/name`（`.yml` 含めず・group/version は discovery 補完・衝突時 `type.group`）。**FileInfo に世代情報**（resourceVersion/generation/uid/creationTimestamp）。**resourceVersion CAS を M046 の参照実装**に（`if_version` 不一致は ConflictError）。ローカル側=`KubeManifestStore` ラッパ（パス↔内容の同一性検証＝Safe 風 1 枚）。依存=`kubernetes-asyncio` を extra `[k8s]`（遅延 import）。cluster-scoped は後回し。詳細は interrupt |
 | M012 | `list(prefix=...)` / pagination | 中 | prefix は core `iter_all(prefix=…)` 引数化済（M030 capability は 2026-06-26 廃止）。**pagination 未対応**。設計案（2026-06-26 対話・要 doc-first）＝(a) `iter_all`/`list_all` に **offset+limit** を足す（単純・全 backend で scan 可だが大 offset は O(n)）／(b) **cursor/continuation-token** 形式（S3 ContinuationToken・NATS 等の native と整合・M021 の continuation と同一機構）。加えて **返り値を range メタ付きの独自型**にする案＝iter は「何件目〜何件目」を、list は from/to 件数属性を持つ（pagination メタ＝**file/value パラダイム内**。却下した transport の request/response 封筒とは別物）。未確定＝offset/limit vs cursor の二択と、独自結果型を入れるか。M021（S3 GW continuation）・M044（limit 既定の定数化）と連動 |
 | M013 | メタデータ / content-type | 中 | S3・NATS は native 対応だが共通 IF に無い |
@@ -89,6 +89,17 @@
   ゼロを確認。test=`test_remote_kvs_signature_parity`＋ヘルパ健全性 `test_concrete_store_signatures_tolerate_return_narrowing`
   （narrowing 許容／param drift 検出の二面）。**スコープ確定＝今回は署名検証のみ**（CAS の HTTP 越し
   conformance は serving 配線が前提＝M046残に保持）。`make check` 緑（142）。
+- **M046残 NATS revision CAS（2026-06-28・ユーザー指示「NATS revision CAS を実装」・実 NATS で検証）**: NATS
+  Object Store の条件 put を実装。高レベル `obs.put` は OCC を露出しないため、**version トークン＝オブジェクトの
+  メタ subject（`$O.<bucket>.M.<b64(name)>`）の最終ストリーム seq** を採り、メタ publish に JetStream の
+  `Nats-Expected-Last-Subject-Sequence` を付けて**サーバ側で原子 CAS**（不一致は err_code 10071→`ConflictError`）。
+  create-only=baseline seq（不在=0／tombstone=その seq）／update CAS=etag(=seq) を期待値に。`head` は seq を etag に
+  返すよう変更（旧 digest/nuid は OCC 不可だった）。`_put_with_occ` は bytes 値をチャンク＋メタ publish で最小再実装
+  （object store 内部ワイヤ形式に依存＝nats-py 仕様変更に弱いが object store で原子 CAS を得る唯一経路）。
+  **実 NATS（docker compose）で検証**＝conformancer の create-only/update CAS 並行チェッカ＋多チャンク roundtrip 緑。
+  e2e に `test_backend_conditional_put_cas`（全 backend 共通・local 常時／nats・s3 は gate）を追加＝local/nats 緑。
+  ⚠️作業環境異常が再発＝`except (A, B):` を py2 構文へ書き戻された→**単一クラス catch**（`except JSNotFound:`）で回避。
+  `uv run pytest` 全緑（158 passed・4 skip=s3 のみ）。残＝S3 GW の If-Match のみ。
 - **M046残 serving 配線＋remote 条件 put（2026-06-28・案B step2/3・ユーザー指示で実装）**: conditional put を
   **native REST と remote クライアントに end-to-end 配線**し、**CAS の並行安全性を HTTP 越し conformance で機械検証**。
   - **serving/server/routes.py**: PUT が条件ヘッダを `if_match` に解く＝`If-None-Match: *`→`FileInfo.absent()`
