@@ -114,9 +114,6 @@ class S3KeyValueStore(_S3Base, KeyValueStoreBase):
         for o in objects[:limit]:  # prefix はサーバ側で済＝先頭 N 件スライス（limit=None は全件）
             yield FileInfo(filename=o["Key"], size=o["Size"])
 
-    async def list_all(self, limit: int | None = None, prefix: str = "") -> list[FileInfo]:
-        return [info async for info in self.iter_all(limit, prefix)]
-
     async def exists(self, key: str) -> bool:
         from botocore.exceptions import ClientError
 
@@ -157,7 +154,7 @@ class _S3StreamReader:
     body / client の接続は close まで開いたままにする（ストリームを跨いで読むため）。
     """
 
-    def __init__(self, client_cm, client, body) -> None:
+    def __init__(self, client_cm, body) -> None:
         self._client_cm = client_cm
         self._body = body
 
@@ -289,7 +286,7 @@ class S3FileStore(S3KeyValueStore):
         except client.exceptions.NoSuchKey as e:
             await cm.__aexit__(type(e), e, e.__traceback__)  # 開いた session を後始末
             raise NotFoundError(filename) from e  # 欠損は NotFoundError に正規化（streaming 経路）
-        return _S3StreamReader(cm, client, resp["Body"])
+        return _S3StreamReader(cm, resp["Body"])
 
     async def open_writer(self, filename: str) -> AsyncFileObject:
         return _S3MultipartWriter(self, filename, self._part_size)

@@ -181,9 +181,6 @@ class RemoteKeyValueStore(KeyValueStoreBase):
             yield FileInfo(filename=e.key, size=e.size)
             count += 1
 
-    async def list_all(self, limit: int | None = None, prefix: str = "") -> list[FileInfo]:
-        return [info async for info in self.iter_all(limit, prefix)]
-
     async def exists(self, key: str) -> bool:
         return await self._client.exists(self._context, key)
 

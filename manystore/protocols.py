@@ -516,9 +516,6 @@ class KeyValueFileStore(KeyValueStoreBase):
         async for info in self._store.iter_all(limit, prefix):  # limit/prefix ごと下層へ素通し
             yield info
 
-    async def list_all(self, limit: int | None = None, prefix: str = "") -> list[FileInfo]:
-        return await self._store.list_all(limit, prefix)
-
     async def exists(self, key: str) -> bool:
         return await self._store.exists(key)
 
@@ -563,14 +560,8 @@ class KeyValueFromFileStore(KeyValueStoreBase):
         return await self._store.get_or_raise(key)
 
     async def iter_all(self, limit: int | None = None, prefix: str = "") -> AsyncIterator[FileInfo]:
-        # TODO: self._store.iter_all(limit, prefix) をそのまま返しループを１つ減らせない？
-        async for info in self._store.iter_all(
-            limit, prefix
-        ):  # 下層 FileStore へ limit/prefix 素通し
+        async for info in self._store.iter_all(limit, prefix):  # 下層 FileStore へ素通し
             yield info
-
-    async def list_all(self, limit: int | None = None, prefix: str = "") -> list[FileInfo]:
-        return await self._store.list_all(limit, prefix)
 
     async def exists(self, key: str) -> bool:
         return await self._store.exists(key)

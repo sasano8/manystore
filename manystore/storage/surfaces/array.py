@@ -125,9 +125,6 @@ class ArrayKeyValueStore(KeyValueStoreBase):
                 yield info
                 count += 1
 
-    async def list_all(self, limit: int | None = None, prefix: str = "") -> list[FileInfo]:
-        return [info async for info in self.iter_all(limit, prefix)]
-
     async def exists(self, key: str) -> bool:
         # 論理名そのもの（ディレクトリ扱い）はマウントされていれば存在とみなす。
         if key in self._mounts:
@@ -192,9 +189,6 @@ class DownloadCache(KeyValueStoreBase):
     async def iter_all(self, limit: int | None = None, prefix: str = "") -> AsyncIterator[FileInfo]:
         async for info in self._store.iter_all(limit, prefix):  # limit/prefix ごと下層へ素通し
             yield info
-
-    async def list_all(self, limit: int | None = None, prefix: str = "") -> list[FileInfo]:
-        return await self._store.list_all(limit, prefix)
 
     async def exists(self, key: str) -> bool:
         return await self._store.exists(key)

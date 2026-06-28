@@ -87,9 +87,6 @@ class DictKeyValueStore(KeyValueStoreBase):
             yield FileInfo(filename=key, size=len(self._data[key]))
             count += 1
 
-    async def list_all(self, limit: int | None = None, prefix: str = "") -> list[FileInfo]:
-        return [info async for info in self.iter_all(limit, prefix)]
-
     async def exists(self, key: str) -> bool:
         return key in self._data
 

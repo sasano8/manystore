@@ -62,11 +62,6 @@ class SafeKeyValueStore(KeyValueStoreBase):
         async for info in self._store.iter_all(limit, prefix):
             yield info
 
-    async def list_all(self, limit: int | None = None, prefix: str = "") -> list[FileInfo]:
-        if prefix:
-            validate_safe_path(prefix)
-        return await self._store.list_all(limit, prefix)
-
     async def exists(self, key: str) -> bool:
         return await self._store.exists(validate_safe_path(key))
 

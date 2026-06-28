@@ -258,9 +258,6 @@ class LocalFileStore(FileStoreBase):
         for info in await _offload(_scan):
             yield info
 
-    async def list_all(self, limit: int | None = None, prefix: str = "") -> list[FileInfo]:
-        return [info async for info in self.iter_all(limit, prefix)]
-
     async def exists(self, filename: str) -> bool:
         return await _offload((self._dir / filename).is_file)
 

@@ -145,9 +145,6 @@ class LoadBalancedKeyValueStore(KeyValueStoreBase):
         raise NotImplementedError("loadbalancer scaffold: iter_all")
         yield  # 未到達（async generator 化のため）
 
-    async def list_all(self, limit: int | None = None, prefix: str = "") -> list[FileInfo]:
-        return [info async for info in self.iter_all(limit, prefix)]
-
     async def exists(self, key: str) -> bool:
         raise NotImplementedError("loadbalancer scaffold: exists")  # probe-all
 

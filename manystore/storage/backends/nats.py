@@ -241,9 +241,6 @@ class NatsObjectKeyValueStore(_NatsBase, KeyValueStoreBase):
             yield FileInfo(filename=e.name, size=e.size or 0)
             count += 1
 
-    async def list_all(self, limit: int | None = None, prefix: str = "") -> list[FileInfo]:
-        return [info async for info in self.iter_all(limit, prefix)]
-
     async def exists(self, key: str) -> bool:
         from nats.js.errors import NotFoundError
 
