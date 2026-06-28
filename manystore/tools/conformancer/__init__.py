@@ -338,6 +338,38 @@ async def assert_put_if_match_concurrency_safe(
     return winners[0]
 
 
+class _ConformanceProbeError(Exception):
+    """conformance が**意図的に注入する故障**用の番兵例外（本物の障害と区別するための専用型）。"""
+
+
+async def assert_writer_aborts_on_error(store: object) -> None:
+    """**writer の all-or-nothing**: open_writer のコンテキスト内で例外が起きたら、中途まで書いた
+    バッファをストアへ確定してはならない（キーは作られないまま＝書き込みは「全部 or 何もなし」）。
+
+    local の atomic writer（temp+replace）は満たすが、KVS バッファ writer は `__aexit__` が無条件に
+    close→put すると中途確定する（M058）。これは **オラクル（dict）でも表現できない**＝dict 自身が
+    同じバッファ writer を共有しうるため差分比較では捕まらない。よって**絶対契約**として検査する
+    （`assert_put_if_*_concurrency_safe` と同じ「製品必須挙動の機械検証」レイヤ）。read-only は
+    open_writer が `UnsupportedOperation`＝呼ばない（writable 専用）。違反は `AssertionError`。
+    """
+    key = f"_conformance/abort/{uuid.uuid4().hex}"
+    with contextlib.suppress(Exception):
+        await store.delete(key)  # クリーン初期状態（既存だと「作られた」判定が曖昧になる）
+    try:
+        async with await store.open_writer(key) as w:
+            await w.write(b"partial-should-not-commit")
+            raise _ConformanceProbeError  # コンテキスト内で異常終了させる
+    except _ConformanceProbeError:
+        pass
+    if await store.exists(key):
+        with contextlib.suppress(Exception):
+            await store.delete(key)
+        raise AssertionError(
+            "writer all-or-nothing 違反: コンテキスト内の例外後にキーが存在する"
+            "（中途バッファが確定された＝__aexit__ が例外経路でも put している）"
+        )
+
+
 def assert_key_value_store(obj: object) -> None:
     """`obj` が [KeyValueStore] の全メソッドを持つことを表明する。"""
     assert_implements(obj, AsyncKeyValueStore)
@@ -376,6 +408,11 @@ async def _op_exists(store: object, args: dict) -> object:
     return await store.exists(args["key"])
 
 
+async def _op_delete(store: object, args: dict) -> object:
+    await store.delete(args["key"])
+    return None  # 観測は「成功/例外」だけ（効果は後続 exists/iter_all で観る）
+
+
 async def _op_open_writer_write(store: object, args: dict) -> object:
     data = base64.b64decode(args["data_b64"])
     async with await store.open_writer(args["key"]) as w:
@@ -411,6 +448,7 @@ async def _state(store: object) -> list:
 
 _OPS = {
     "exists": _op_exists,
+    "delete": _op_delete,
     "open_writer_write": _op_open_writer_write,
     "open_reader_read": _op_open_reader_read,
     "list_all": _op_list_all,
@@ -449,11 +487,13 @@ class FileStoreTester:
     **ツール自身はレポートを保持しない**（呼び出し側が所有し、`save_report(report, path)` で JSON
     保存できる。各エントリは返り値（`expected`/`actual`）と **op 適用後の状態**
     （`expected_state`/`actual_state`＝iter_all ファイル名・昇順）を含み将来リプレイに使える）。
-    段階実行 run_light < middle < heavy < full。**まず run_light**＝
-    open_reader/open_writer/exists/list_all/iter_all を検証する。
+    段階実行 run_light < middle < heavy < full。**run_light**＝open_reader/open_writer/exists/
+    list_all/iter_all の基本。**run_middle**＝delete・欠損 delete 冪等・複数キー列挙順・read 境界・
+    overwrite 縮小の細かい契約（実装漏れが出やすい所）。オラクルで表せない絶対契約（writer の
+    all-or-nothing・並行 CAS）は別途 `assert_writer_aborts_on_error`／`assert_put_if_*` が担う。
 
     `delete_all` はクリーンな初期状態を作る基盤操作（ジェネシス＝検証困難なので light 対象外）。
-    spec（file/kv 寄り 等）の自動検出は別タスク（M022b）。
+    run_heavy/full と spec（file/kv 寄り 等）の自動検出は別タスク（M022b）。
     """
 
     def __init__(self, reference: object, target: object) -> None:
@@ -515,7 +555,43 @@ class FileStoreTester:
         )
 
     async def run_middle(self, report: list) -> None:
-        raise NotImplementedError("run_middle は未実装（M022b）")
+        """middle: light より**細かい挙動契約**を差分検証する（delete・冪等・複数キー・read 境界）。
+
+        light は単一キーの write/read/exists/list が中心。middle は実装漏れが出やすい以下を足す:
+        delete の効果と**欠損キー delete の冪等**（NotFoundError を出さず no-op か＝オラクル一致）、
+        **複数キーの列挙順序**（iter_all/list_all 昇順）、**read 境界**（全長 size 指定の read）、
+        **overwrite で縮む**ケース。`writer の all-or-nothing` 等オラクルで表せない絶対契約は別途
+        `assert_writer_aborts_on_error`／`assert_put_if_*_concurrency_safe` が担う。
+        """
+        await self.delete_all(self._reference)
+        await self.delete_all(self._target)
+
+        ns = f"_conformance/{uuid.uuid4().hex}"
+        a, b, c = f"{ns}/a", f"{ns}/b", f"{ns}/c"
+        big = base64.b64encode(b"0123456789").decode("ascii")
+        small = base64.b64encode(b"xy").decode("ascii")
+
+        # delete: 欠損キー delete は冪等（オラクル＝no-op）か。NotFoundError を上げる実装は発覚。
+        await self._check(report, "delete:missing_idempotent", "delete", {"key": a})
+        # 複数キーを書いて列挙順序（昇順）を比較する。
+        await self._check(report, "write:a", "open_writer_write", {"key": a, "data_b64": big})
+        await self._check(report, "write:b", "open_writer_write", {"key": b, "data_b64": small})
+        await self._check(report, "write:c", "open_writer_write", {"key": c, "data_b64": small})
+        await self._check(report, "list_all:multi_key", "list_all", {})
+        await self._check(report, "iter_all:multi_key", "iter_all", {})
+        # read 境界: ちょうど全長 size を指定した read（過不足なく全体が返る）。
+        await self._check(report, "open_reader:exact", "open_reader_read", {"key": a, "n": 10})
+        # overwrite で短い値に縮む（残骸が残らない＝torn でない）。
+        await self._check(
+            report, "overwrite:shrink", "open_writer_write", {"key": a, "data_b64": small}
+        )
+        await self._check(
+            report, "open_reader:after_shrink", "open_reader_read", {"key": a, "n": -1}
+        )
+        # delete の効果: 1 キー消して存在と列挙から消える。
+        await self._check(report, "delete:b", "delete", {"key": b})
+        await self._check(report, "exists:after_delete", "exists", {"key": b})
+        await self._check(report, "list_all:after_delete", "list_all", {})
 
     async def run_heavy(self, report: list) -> None:
         raise NotImplementedError("run_heavy は未実装（M022b）")

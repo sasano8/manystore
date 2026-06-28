@@ -10,10 +10,12 @@
 **品質強化タスク M054〜M064 を抽出・登録**（high 指摘は実コードで裏取り済）。拡張的タスク（M051/M039/M040/
 M026/M045/M028b＝新 surface/backend/IF）は品質強化が一段落するまで着手しない。**M054/M055/M059 完了**（2026-06-28）＝fail-loud バグ修正（nats get_or_raise の narrowing／remote exists の
 5xx 伝播・test +3）＋**pytest-cov 導入**（`make cov`・ベースライン TOTAL 77%）。
-**方針追加（ユーザー指示）＝実装漏れは conformancer に契約として実装し横断検知する**。run_middle を立ち上げ
-細かい契約を積む方針を **M065** として登録（次の主戦場）。最優先 = **M065**（conformancer run_middle で
-writer all-or-nothing〔M058 が違反〕等を横断検知）/**M056**（nats 無ロック lazy connect）/**M057**（lifecycle）。
-詳細は progress「品質強化」。
+**方針追加（ユーザー指示）＝実装漏れは conformancer に契約として実装し横断検知する**。**M065 step1 完了**
+（2026-06-28）＝`run_middle` 本実装（delete/冪等/複数キー/read 境界/overwrite 縮小の差分観点）＋オラクルで
+表せない絶対契約 `assert_writer_aborts_on_error`（writer all-or-nothing）を新設し、それで **M058 を契約先行で
+修正・緑化**（conformance 25→30）。**M065 残（step2+）**＝get_or_raise の欠損限定契約／fault-injecting ラッパで
+5xx 伝播（M054/M055 クラス）を横断検証／非 CAS 並行／run_heavy。最優先 = **M065 step2**（fault-injecting で
+fail-loud を契約化）/**M056**（nats 無ロック lazy connect）/**M057**（lifecycle）。詳細は progress「品質強化」。
 
 **M044 完了**（2026-06-28・ユーザー対話で着手）＝spec/既定値の定数集約。**専用 `specs.py` は作らず
 `protocols.py` 冒頭に「spec/既定値」節**を新設（ユーザー確定＝定数の正本をインターフェースと同居・データ専用・

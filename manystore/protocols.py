@@ -437,6 +437,11 @@ class _KvWriteFileObject:
         return self
 
     async def __aexit__(self, *exc: object) -> None:
+        if exc[0] is not None:
+            # 例外経路は中途バッファを確定しない（all-or-nothing＝local atomic writer と同契約）。
+            self._closed = True
+            self._buf.close()
+            return
         await self.close()
 
 

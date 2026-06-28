@@ -35,6 +35,7 @@ from manystore.tools.conformancer import (
     assert_key_value_store,
     assert_put_if_absent_concurrency_safe,
     assert_put_if_match_concurrency_safe,
+    assert_writer_aborts_on_error,
     base_protocol_parity_errors,
     concrete_store_signature_errors,
     conformancer_protocol_drift,
@@ -154,6 +155,61 @@ async def test_run_light_detects_divergence(tmp_path) -> None:
     assert any(
         not s["passed"] for s in report
     )  # 書けていない→read/exists/list がオラクルと食い違う
+
+
+# ── run_middle（細かい挙動契約・差分検証）＋ writer all-or-nothing 絶対契約（M065） ──
+
+
+async def test_run_middle_local_file_store_matches_oracle(tmp_path) -> None:
+    # 辞書ストアを正に LocalFileStore の delete/冪等/複数キー/read 境界/overwrite 縮小を差分検証。
+    tester = FileStoreTester(DictFileStore(), LocalFileStore(tmp_path))
+    report: list = []
+    await tester.run_middle(report)
+    assert all(s["passed"] for s in report), report
+    aspects = {s["aspect"] for s in report}
+    assert {"delete:missing_idempotent", "list_all:multi_key", "overwrite:shrink"} <= aspects
+
+
+async def test_run_middle_dict_self_consistent() -> None:
+    # 正=対象=辞書ストアなら run_middle も全観点一致（ツールの健全性）。
+    tester = FileStoreTester(DictFileStore(), DictFileStore())
+    report: list = []
+    await tester.run_middle(report)
+    assert all(s["passed"] for s in report)
+
+
+@pytest.mark.parametrize("make_store", [lambda p: DictFileStore(), lambda p: LocalFileStore(p)])
+async def test_writer_aborts_on_error_contract(make_store, tmp_path) -> None:
+    # 絶対契約: writer のコンテキスト内で例外が起きたら中途バッファを確定しない（M058）。
+    # KVS バッファ writer（dict）も atomic writer（local）も all-or-nothing を満たすこと。
+    await assert_writer_aborts_on_error(make_store(tmp_path))
+
+
+async def test_writer_abort_contract_catches_committing_writer(tmp_path) -> None:
+    # 契約の牙: 例外経路でも put する壊れた writer は assert_writer_aborts_on_error で落ちる。
+    class _CommitOnExitWriter:
+        def __init__(self, store, key):
+            self._store, self._key, self._buf = store, key, b""
+
+        async def write(self, data):
+            self._buf += data
+            return len(data)
+
+        async def close(self): ...
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *exc):
+            await self._store.put(self._key, self._buf)  # 例外経路でも確定＝契約違反
+
+    broken = LocalFileStore(tmp_path)
+
+    async def open_writer(filename):
+        return _CommitOnExitWriter(broken, filename)
+
+    broken.open_writer = open_writer
+    with pytest.raises(AssertionError, match="all-or-nothing"):
+        await assert_writer_aborts_on_error(broken)
 
 
 async def test_run_light_report_is_external_and_saves(tmp_path) -> None:
