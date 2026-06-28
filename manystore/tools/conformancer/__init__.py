@@ -705,23 +705,23 @@ async def _op_open_reader_read(store: object, args: dict) -> object:
 
 
 async def _op_list_all(store: object, args: dict) -> object:
-    return await store.list_all(
-        args.get("limit", DEFAULT_LIST_LIMIT)
-    )  # 全キー平坦（filename 列で観測）
+    # prefix に閉じて観測（共有 backend の既存キーを無視＝run_* を非破壊にする・M066①）。
+    return await store.list_all(args.get("limit", DEFAULT_LIST_LIMIT), args.get("prefix", ""))
 
 
 async def _op_iter_all(store: object, args: dict) -> object:
-    return [info async for info in store.iter_all()]  # 全キー平坦を materialize して観測
+    return [info async for info in store.iter_all(prefix=args.get("prefix", ""))]  # materialize
 
 
-async def _state(store: object) -> list:
-    """op 適用後の**状態** = `iter_all` で得たファイル名一覧の昇順（JSON 可能）。
+async def _state(store: object, prefix: str = "") -> list:
+    """op 適用後の**状態** = `iter_all(prefix)` で得たファイル名一覧の昇順（JSON 可能）。
 
     各 op は「返り値」を観測するが、それとは別に「適用後にストアがどんな状態になったか」も
     重要（例: write が値を返さなくても、その後 iter_all にキーが現れるべき）。返り値の一致だけでは
     副作用を見落とすので、**op ごとに状態スナップショットを取り**返り値とあわせて検証する。
+    `prefix` に閉じることで、共有 backend に既存キーが在っても run の名前空間だけを観測できる。
     """
-    names = [info["filename"] async for info in store.iter_all()]
+    names = [info["filename"] async for info in store.iter_all(prefix=prefix)]
     return sorted(names)
 
 
@@ -771,8 +771,9 @@ class FileStoreTester:
     overwrite 縮小の細かい契約（実装漏れが出やすい所）。オラクルで表せない絶対契約（writer の
     all-or-nothing・並行 CAS）は別途 `assert_writer_aborts_on_error`／`assert_put_if_*` が担う。
 
-    `delete_all` はクリーンな初期状態を作る基盤操作（ジェネシス＝検証困難なので light 対象外）。
-    run_heavy/full と spec（file/kv 寄り 等）の自動検出は別タスク（M022b）。
+    run_light/run_middle は **非破壊**（M066①）＝全消去（`delete_all`）はせず uuid 名前空間に閉じて
+    操作し最後に `_cleanup_ns` で後始末する（共有 backend にも安全に流せる）。`delete_all`（全消去）
+    はジェネシス用途に残置。run_heavy/full と spec（file/kv 寄り）自動検出は別タスク（M022b）。
     """
 
     def __init__(self, reference: object, target: object) -> None:
@@ -786,16 +787,34 @@ class FileStoreTester:
             with contextlib.suppress(Exception):
                 await store.delete(key)
 
-    async def _check(self, report: list, aspect: str, op: str, args: dict) -> None:
+    async def _cleanup_ns(self, ns: str) -> None:
+        """この run が触れた名前空間 `ns` のキーだけを両ストアから best-effort で消す。
+
+        run_* を非破壊にするための後始末（共有 backend では既存キーを残し、自分が書いた ns 配下だけ
+        掃除する）。`delete_all`（全消去）の代替＝isolated 専用でなく全 provider で安全に流せる。
+        """
+        for store in (self._reference, self._target):
+            keys = [info["filename"] async for info in store.iter_all(prefix=ns)]
+            for key in keys:
+                with contextlib.suppress(Exception):
+                    await store.delete(key)
+
+    async def _check(
+        self, report: list, aspect: str, op: str, args: dict, prefix: str = ""
+    ) -> None:
         """同一操作を reference / target に適用し、1 観点として report に追記する。
 
         **返り値の観測**（expected/actual）に加え、**op 適用後の状態**（`_state`＝iter_all の
         ファイル名昇順）も両ストアで取り、返り値と状態の両方が一致したときだけ `passed` を真にする。
+        列挙系（list_all/iter_all）と状態スナップショットは `prefix`（run の名前空間）に閉じて
+        観測する＝共有 backend に既存キーが在っても run 配下だけを差分検証できる（非破壊・M066①）。
         """
+        if op in ("list_all", "iter_all"):
+            args = {**args, "prefix": args.get("prefix", prefix)}
         expected = await _apply(self._reference, op, args)
         actual = await _apply(self._target, op, args)
-        expected_state = await _state(self._reference)
-        actual_state = await _state(self._target)
+        expected_state = await _state(self._reference, prefix)
+        actual_state = await _state(self._target, prefix)
         passed = expected == actual and expected_state == actual_state
         step = StepResult(
             aspect, op, dict(args), expected, actual, expected_state, actual_state, passed
@@ -805,33 +824,53 @@ class FileStoreTester:
         report.append({f.name: getattr(step, f.name) for f in fields(step)})
 
     async def run_light(self, report: list) -> None:
-        """light: open_reader/open_writer/exists/list_all/iter_all（欠損含む）を report に追記。"""
-        await self.delete_all(self._reference)
-        await self.delete_all(self._target)
+        """light: open_reader/open_writer/exists/list_all/iter_all（欠損含む）を report に追記。
 
-        ns = f"_conformance/{uuid.uuid4().hex}"  # 衝突回避の名前空間
+        **非破壊**（M066①）＝全消去（delete_all）はせず、衝突回避の uuid 名前空間 `ns` の中だけで
+        書き読みし、列挙・状態観測も `ns` に閉じる。共有 backend（nats/s3）でも既存データを壊さずに
+        流せる（最後に `ns` 配下だけ後始末する）。
+        """
+        ns = f"_conformance/{uuid.uuid4().hex}"  # 衝突回避＋非破壊（この名前空間にだけ触る）
         key = f"{ns}/a"
         payload = base64.b64encode(b"hello\x00\xffworld").decode("ascii")
         v2 = base64.b64encode(b"v2").decode("ascii")
-
-        await self._check(report, "exists:missing", "exists", {"key": key})
-        await self._check(report, "open_reader:missing", "open_reader_read", {"key": key, "n": -1})
-        await self._check(report, "list_all:empty", "list_all", {})  # クリーン後は空
-        await self._check(report, "iter_all:empty", "iter_all", {})
-        await self._check(
-            report, "open_writer:write", "open_writer_write", {"key": key, "data_b64": payload}
-        )
-        await self._check(report, "exists:after_write", "exists", {"key": key})
-        await self._check(report, "list_all:after_write", "list_all", {})  # 全件にキーが現れる
-        await self._check(report, "iter_all:after_write", "iter_all", {})
-        await self._check(report, "open_reader:full", "open_reader_read", {"key": key, "n": -1})
-        await self._check(report, "open_reader:partial", "open_reader_read", {"key": key, "n": 5})
-        await self._check(
-            report, "open_writer:overwrite", "open_writer_write", {"key": key, "data_b64": v2}
-        )
-        await self._check(
-            report, "open_reader:after_overwrite", "open_reader_read", {"key": key, "n": -1}
-        )
+        try:
+            await self._check(report, "exists:missing", "exists", {"key": key}, ns)
+            await self._check(
+                report, "open_reader:missing", "open_reader_read", {"key": key, "n": -1}, ns
+            )
+            await self._check(report, "list_all:empty", "list_all", {}, ns)  # ns 内は空
+            await self._check(report, "iter_all:empty", "iter_all", {}, ns)
+            await self._check(
+                report,
+                "open_writer:write",
+                "open_writer_write",
+                {"key": key, "data_b64": payload},
+                ns,
+            )
+            await self._check(report, "exists:after_write", "exists", {"key": key}, ns)
+            await self._check(
+                report, "list_all:after_write", "list_all", {}, ns
+            )  # ns にキーが現れる
+            await self._check(report, "iter_all:after_write", "iter_all", {}, ns)
+            await self._check(
+                report, "open_reader:full", "open_reader_read", {"key": key, "n": -1}, ns
+            )
+            await self._check(
+                report, "open_reader:partial", "open_reader_read", {"key": key, "n": 5}, ns
+            )
+            await self._check(
+                report,
+                "open_writer:overwrite",
+                "open_writer_write",
+                {"key": key, "data_b64": v2},
+                ns,
+            )
+            await self._check(
+                report, "open_reader:after_overwrite", "open_reader_read", {"key": key, "n": -1}, ns
+            )
+        finally:
+            await self._cleanup_ns(ns)
 
     async def run_middle(self, report: list) -> None:
         """middle: light より**細かい挙動契約**を差分検証する（delete・冪等・複数キー・read 境界）。
@@ -841,36 +880,45 @@ class FileStoreTester:
         **複数キーの列挙順序**（iter_all/list_all 昇順）、**read 境界**（全長 size 指定の read）、
         **overwrite で縮む**ケース。`writer の all-or-nothing` 等オラクルで表せない絶対契約は別途
         `assert_writer_aborts_on_error`／`assert_put_if_*_concurrency_safe` が担う。
-        """
-        await self.delete_all(self._reference)
-        await self.delete_all(self._target)
 
+        run_light と同じく**非破壊**（M066①）＝uuid 名前空間 `ns` 内だけで操作し最後に後始末する。
+        """
         ns = f"_conformance/{uuid.uuid4().hex}"
         a, b, c = f"{ns}/a", f"{ns}/b", f"{ns}/c"
         big = base64.b64encode(b"0123456789").decode("ascii")
         small = base64.b64encode(b"xy").decode("ascii")
-
-        # delete: 欠損キー delete は冪等（オラクル＝no-op）か。NotFoundError を上げる実装は発覚。
-        await self._check(report, "delete:missing_idempotent", "delete", {"key": a})
-        # 複数キーを書いて列挙順序（昇順）を比較する。
-        await self._check(report, "write:a", "open_writer_write", {"key": a, "data_b64": big})
-        await self._check(report, "write:b", "open_writer_write", {"key": b, "data_b64": small})
-        await self._check(report, "write:c", "open_writer_write", {"key": c, "data_b64": small})
-        await self._check(report, "list_all:multi_key", "list_all", {})
-        await self._check(report, "iter_all:multi_key", "iter_all", {})
-        # read 境界: ちょうど全長 size を指定した read（過不足なく全体が返る）。
-        await self._check(report, "open_reader:exact", "open_reader_read", {"key": a, "n": 10})
-        # overwrite で短い値に縮む（残骸が残らない＝torn でない）。
-        await self._check(
-            report, "overwrite:shrink", "open_writer_write", {"key": a, "data_b64": small}
-        )
-        await self._check(
-            report, "open_reader:after_shrink", "open_reader_read", {"key": a, "n": -1}
-        )
-        # delete の効果: 1 キー消して存在と列挙から消える。
-        await self._check(report, "delete:b", "delete", {"key": b})
-        await self._check(report, "exists:after_delete", "exists", {"key": b})
-        await self._check(report, "list_all:after_delete", "list_all", {})
+        try:
+            # delete: 欠損キー delete は冪等（オラクル＝no-op）か。NotFoundError を上げると発覚。
+            await self._check(report, "delete:missing_idempotent", "delete", {"key": a}, ns)
+            # 複数キーを書いて列挙順序（昇順）を比較する。
+            await self._check(
+                report, "write:a", "open_writer_write", {"key": a, "data_b64": big}, ns
+            )
+            await self._check(
+                report, "write:b", "open_writer_write", {"key": b, "data_b64": small}, ns
+            )
+            await self._check(
+                report, "write:c", "open_writer_write", {"key": c, "data_b64": small}, ns
+            )
+            await self._check(report, "list_all:multi_key", "list_all", {}, ns)
+            await self._check(report, "iter_all:multi_key", "iter_all", {}, ns)
+            # read 境界: ちょうど全長 size を指定した read（過不足なく全体が返る）。
+            await self._check(
+                report, "open_reader:exact", "open_reader_read", {"key": a, "n": 10}, ns
+            )
+            # overwrite で短い値に縮む（残骸が残らない＝torn でない）。
+            await self._check(
+                report, "overwrite:shrink", "open_writer_write", {"key": a, "data_b64": small}, ns
+            )
+            await self._check(
+                report, "open_reader:after_shrink", "open_reader_read", {"key": a, "n": -1}, ns
+            )
+            # delete の効果: 1 キー消して存在と列挙から消える。
+            await self._check(report, "delete:b", "delete", {"key": b}, ns)
+            await self._check(report, "exists:after_delete", "exists", {"key": b}, ns)
+            await self._check(report, "list_all:after_delete", "list_all", {}, ns)
+        finally:
+            await self._cleanup_ns(ns)
 
     async def run_heavy(self, report: list) -> None:
         raise NotImplementedError("run_heavy は未実装（M022b）")

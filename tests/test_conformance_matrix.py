@@ -3,9 +3,9 @@
 `conformance_providers.all_providers()` が宣言する全 provider（Dict / Local / Remote / 実 nats・s3）
 に同一の契約 body を流す。IF が揃うので「注入するストアだけ変えて全実装を確認」が 1 か所で回る。
 
-- **非破壊契約**（CRUD / writer all-or-nothing / 並行 CAS）… 自分の uuid キーのみ＝**全 provider**。
-- **破壊的差分契約**（run_light / run_middle ＝ `delete_all` で全消去）… **isolated provider のみ**
-  （Dict/Local/Remote の揮発ストア。実共有 backend は全消去を避ける）。
+全契約とも自分の uuid 名前空間にだけ触れる**非破壊**＝**全 provider**で流せる（M066①）:
+- **CRUD / writer all-or-nothing / 並行 CAS** … 自分の uuid キーのみ。
+- **run_light / run_middle**（差分検証）… uuid 名前空間に閉じて操作し後始末する（全消去しない）。
 
 実 backend（gated）は未到達なら skip・`slow` マーク・環境/認証未整備の実行時エラーも skip 扱い
 （CI など backend 無し環境で赤くしない。`make e2e-up` で起動して `make test-heavy` で実走）。
@@ -26,7 +26,6 @@ from manystore.tools.conformancer import (
 )
 
 _ALL = all_providers()
-_ISOLATED = [p for p in _ALL if p.isolated]
 
 
 def _params(providers: list[Provider]) -> list:
@@ -96,10 +95,10 @@ async def test_put_if_match_concurrency(provider: Provider) -> None:
         await assert_put_if_match_concurrency_safe(fs, size=4096)
 
 
-# ── 破壊的差分契約（isolated provider のみ＝delete_all で全消去するため） ──
+# ── 差分契約（run_light / run_middle ＝非破壊なので全 provider） ──
 
 
-@pytest.mark.parametrize("provider", _params(_ISOLATED))
+@pytest.mark.parametrize("provider", _params(_ALL))
 async def test_run_light_matches_oracle(provider: Provider) -> None:
     # 辞書ストアを正に open_reader/open_writer/exists/list_all/iter_all を差分検証。
     async with _store(provider) as fs:
@@ -109,7 +108,7 @@ async def test_run_light_matches_oracle(provider: Provider) -> None:
         assert all(s["passed"] for s in report), report
 
 
-@pytest.mark.parametrize("provider", _params(_ISOLATED))
+@pytest.mark.parametrize("provider", _params(_ALL))
 async def test_run_middle_matches_oracle(provider: Provider) -> None:
     # delete/冪等/複数キー/read 境界/overwrite 縮小の細かい契約を差分検証。
     async with _store(provider) as fs:

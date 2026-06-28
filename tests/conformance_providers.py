@@ -10,8 +10,9 @@ put(if_match)/head を下層へ委譲＝同じ契約で検査できる）。
 
 フラグ:
 - `gated` … 実 backend（未到達なら skip・`slow` マーク・環境/認証未整備の実行時エラーも skip）。
-- `isolated` … ストアがテスト専用で `delete_all`（全消去）してよい＝run_light/run_middle を流せる。
-  実共有 backend（nats/s3）は False＝全消去せず非破壊契約（writer/並行/CRUD・uuid キーのみ）に絞る。
+
+run_light/run_middle は **非破壊**（uuid 名前空間に閉じて操作し後始末する・M066①）になったので、
+実共有 backend（nats/s3）にもそのまま流せる＝`isolated` 区別は不要になり廃止した。
 """
 
 import contextlib
@@ -151,7 +152,6 @@ class Provider:
     id: str
     open: Callable[[], object]  # () -> async context manager（FileStore を yield）
     gated: bool = False  # 実 backend（未到達 skip・slow・実行時エラーも skip 扱い）
-    isolated: bool = True  # テスト専用ストア＝delete_all 可（run_light/run_middle を流せる）
     reachable: Callable[[], bool] = field(default=lambda: True)
 
 
@@ -161,9 +161,7 @@ def all_providers() -> list[Provider]:
         Provider("dict", _open_dict),
         Provider("local", _open_local),
         Provider("remote", _open_remote),
-        Provider("nats", _open_nats, gated=True, isolated=False, reachable=_nats_up),
-        Provider(
-            "s3-virtual", _open_s3("virtual"), gated=True, isolated=False, reachable=_s3_virtual_up
-        ),
-        Provider("s3-path", _open_s3("path"), gated=True, isolated=False, reachable=_s3_up),
+        Provider("nats", _open_nats, gated=True, reachable=_nats_up),
+        Provider("s3-virtual", _open_s3("virtual"), gated=True, reachable=_s3_virtual_up),
+        Provider("s3-path", _open_s3("path"), gated=True, reachable=_s3_up),
     ]
