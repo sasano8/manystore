@@ -39,13 +39,10 @@ ETag(本体 MD5)突合＋backend version トークンで原子 CAS。preconditio
 NotImplemented。gateway の ETag は MD5 のまま（既存契約）＝backend CAS トークンと別物のため MD5 突合＋head version の
 二段で橋渡し。test_gateway +5。これで **全 backend＋native REST＋remote＋S3 GW** が conditional put/CAS 配線済。
 `uv run pytest` 全緑（**163 passed**・4 skip=s3 のみ）。詳細 progress。
-**M046 設計確定**（2026-06-28・ユーザー対話）＝**派生メソッド撤回**。`put_if_absent`/`put_if_match` は作らず、
-**put 1 本＋任意 `if_match: FileInfo|None`** に集約。`if_match` 省略＝原子＋直列化の **LWW（失敗しない）**／
-`if_match=<head の FileInfo>`＝**update CAS**（不一致 `ConflictError`）。**opaque `version:str` 引数は出さず**、比較トークンは
-`FileInfo` 内に畳む（S3=ETag・local=mtime_ns+size・NATS=revision・dict=世代）。**`head(key)->FileInfo` 新設**
-（`modified_at` 追加・dict は**メタストア**併設）。put 戻りは安価な `{filename,size}` 据置。**MVP=update CAS のみ**、
-**create 競合はスコープ外（計画に保持）**。詳細・backend 表・conformancer 改修要件は `plans/m046-conditional-put-plan.md`
-の「設計改訂（2026-06-28）」。次は本実装に着手。
+**M046 設計の要点（完了済・確定事実）**＝派生メソッドは作らず **put 1 本＋任意 `if_match: FileInfo|None`**（None=LWW／
+不在 FileInfo=create-only／FileInfo=update CAS・不一致 `ConflictError`）。比較トークンは `FileInfo.etag` に畳む
+（S3=ETag・local=mtime_ns+size・dict=世代・NATS=メタ subject の最終 seq）。`head(key)->FileInfo` が version 読み口。
+設計 plan は GC 済（恒久事実は systemPatterns・経緯は git 履歴）。
 
 ## 直近の変更
 
