@@ -11,7 +11,7 @@ HTTP には一切依存しない＝この層だけで単体テストできる。
 """
 
 from ...exceptions import ContextNotFound, ReadOnlyContext  # 集約先（後方互換で再エクスポート）
-from ...protocols import FileInfo, IfMatch
+from ...protocols import DEFAULT_LIST_LIMIT, FileInfo, IfMatch
 from ...storage.backends import create_unsafe_key_value_store
 from ...storage.surfaces.array import ArrayKeyValueStore
 from ...storage.surfaces.safe import SafeKeyValueStore
@@ -96,7 +96,7 @@ class StorageService:
     # ── CRUD ──
 
     async def list_entries(
-        self, context: str, prefix: str = "", limit: int = 1000
+        self, context: str, prefix: str = "", limit: int = DEFAULT_LIST_LIMIT
     ) -> list[EntryInfo]:
         """context 内を prefix 絞りで返す。
 

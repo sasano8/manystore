@@ -17,7 +17,15 @@ from collections.abc import AsyncIterator
 from urllib.parse import quote
 
 from ..exceptions import ConflictError, NotFoundError
-from ..protocols import FileInfo, IfMatch, KeyValueStoreBase, _kv_copy, _kv_move
+from ..protocols import (
+    DEFAULT_LIST_LIMIT,
+    MAX_HTTP_LIST_FETCH,
+    FileInfo,
+    IfMatch,
+    KeyValueStoreBase,
+    _kv_copy,
+    _kv_move,
+)
 from ..serving.services.protocol import ContextInfo, EntryInfo
 
 # server 側 routes.py と対の独自メタヘッダ（size/modified_at）。ETag は標準ヘッダ。
@@ -56,7 +64,7 @@ class ManystoreClient:
             for c in r.json()["contexts"]
         ]
 
-    async def list_entries(self, context: str, limit: int = 1000) -> list[EntryInfo]:
+    async def list_entries(self, context: str, limit: int = DEFAULT_LIST_LIMIT) -> list[EntryInfo]:
         r = await self._client.get(f"{context}/", params={"limit": limit})
         r.raise_for_status()
         return [EntryInfo(key=e["key"], size=e["size"]) for e in r.json()["entries"]]
@@ -155,10 +163,11 @@ class RemoteKeyValueStore(KeyValueStoreBase):
     async def iter_all(self, limit: int | None = None, prefix: str = "") -> AsyncIterator[FileInfo]:
         # native REST API は prefix を持たない（サーバ側 prefix は S3 gateway のみ）。
         # ここは全件取得し client 側で scan+filter する（prefix 非対応 backend と同じ既定動作）。
-        # HTTP 越しは無制限不可で None は実上限 10_000 にクランプ。prefix 絞り込み時は server 側
-        # limit で取りこぼさないよう常に 10_000 取得してから絞る。
-        # TODO(M044): 10_000 を共通の名前付き既定定数へ集約（spec/既定値の正本化）
-        fetch_cap = 10_000 if prefix else (limit if limit is not None else 10_000)
+        # HTTP 越しは無制限不可で None は実上限 MAX_HTTP_LIST_FETCH にクランプ。prefix 絞り込み時は
+        # server 側 limit で取りこぼさないよう常にこの上限まで取得してから絞る。
+        fetch_cap = (
+            MAX_HTTP_LIST_FETCH if prefix else (limit if limit is not None else MAX_HTTP_LIST_FETCH)
+        )
         count = 0
         for e in await self._client.list_entries(self._context, limit=fetch_cap):
             if prefix and not e.key.startswith(prefix):

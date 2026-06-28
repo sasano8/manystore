@@ -35,6 +35,18 @@ from typing import Protocol
 
 from .exceptions import ConflictError, NotFoundError, UnsupportedOperation
 
+# ── spec / 既定値（横断する名前付き定数の正本・M044） ──
+# 複数モジュールで共有される spec 値・既定値はここ 1 か所で定義し、各所は名前で参照する
+# （直書きの重複＝drift を断つ）。S3 互換ゲートウェイの仕様由来値（max-keys/partNumber 範囲等）は
+# その所有モジュールに局所化したまま＝ここには core 共通のものだけを置く。
+
+#: list 系（`iter_all`/`list_all`・service・native REST）で limit を明示しないときの既定上限件数。
+DEFAULT_LIST_LIMIT = 1000
+
+#: HTTP 越し list の実上限。native REST は「無制限（limit=None）」を表現できないため、None 指定や
+#: prefix 絞り込み時はこの件数を取得してからクライアント側で絞る（[RemoteKeyValueStore]）。
+MAX_HTTP_LIST_FETCH = 10_000
+
 
 class FileInfo(dict):
     """ファイルのメタ情報。**dict 互換**（subscript／`.get`／`== {...}`／JSON 化）＋ `is_absent()`。

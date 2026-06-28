@@ -5,6 +5,13 @@
 
 ## 現在のフォーカス
 
+**M044 完了**（2026-06-28・ユーザー対話で着手）＝spec/既定値の定数集約。**専用 `specs.py` は作らず
+`protocols.py` 冒頭に「spec/既定値」節**を新設（ユーザー確定＝定数の正本をインターフェースと同居・データ専用・
+ロジックは寄せない）。core 共有値のみ正本化＝`DEFAULT_LIST_LIMIT=1000`（service/server routes/remote client/
+conformancer）／`MAX_HTTP_LIST_FETCH=10_000`（remote の HTTP fetch 上限）。S3 仕様由来値（`DEFAULT_MAX_KEYS`・
+partNumber 範囲）と単一使用の `DEFAULT_CACHE_DIR` は所有モジュールに据え置き（locality 優先）。`make check` 緑（152）。
+
+
 **M049/M050 完了**（2026-06-27・ユーザー対話で着手）＝① `create`（create-if-not-exists・非原子の派生／既存は
 `ConflictError`）を `_StoreBase` 既定実装に追加（lockstep 維持）／② 2 ストア片方向同期 `StorageMirror` を
 新パッケージ `storage/sync/` に新設（集合差 reconcile・source 正・prune は opt-in）。`make check` 緑。

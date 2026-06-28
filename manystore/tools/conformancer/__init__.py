@@ -42,7 +42,13 @@ from dataclasses import dataclass, fields
 from pathlib import Path
 
 from ...exceptions import ConflictError
-from ...protocols import AsyncFileObject, AsyncFileStore, AsyncKeyValueStore, FileInfo
+from ...protocols import (
+    DEFAULT_LIST_LIMIT,
+    AsyncFileObject,
+    AsyncFileStore,
+    AsyncKeyValueStore,
+    FileInfo,
+)
 
 
 def required_members(protocol: type) -> frozenset[str]:
@@ -383,7 +389,9 @@ async def _op_open_reader_read(store: object, args: dict) -> object:
 
 
 async def _op_list_all(store: object, args: dict) -> object:
-    return await store.list_all(args.get("limit", 1000))  # 全キー平坦（filename 列で観測）
+    return await store.list_all(
+        args.get("limit", DEFAULT_LIST_LIMIT)
+    )  # 全キー平坦（filename 列で観測）
 
 
 async def _op_iter_all(store: object, args: dict) -> object:
