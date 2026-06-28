@@ -14,6 +14,8 @@ connect）か、顔の入口 [open_async_array_store]（mount 群を connect す
 from collections.abc import AsyncIterator
 from pathlib import Path
 
+import anyio.to_thread
+
 from ...protocols import (
     AsyncKeyValueStore,
     FileInfo,
@@ -221,9 +223,14 @@ class DownloadCache(KeyValueStoreBase):
         """
         safe = validate_safe_path(key)
         dst = self._cache_dir / safe
-        if dst.is_file() and not force:
+        # 同期 FS 操作（stat/mkdir/write）はスレッドへオフロードし event loop を塞がない（M063）。
+        if not force and await anyio.to_thread.run_sync(dst.is_file):
             return dst  # cache hit（存在ベース）
         data = await self._store.get_or_raise(key)  # 上流に無ければ FileNotFoundError
-        dst.parent.mkdir(parents=True, exist_ok=True)
-        _atomic_write_bytes(dst, data)  # 原子的に書く
+
+        def _persist() -> None:
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            _atomic_write_bytes(dst, data)  # 原子的に書く
+
+        await anyio.to_thread.run_sync(_persist)
         return dst
