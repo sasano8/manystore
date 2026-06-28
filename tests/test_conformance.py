@@ -12,14 +12,17 @@ import pytest
 from manystore import (
     DictFileStore,
     DictKeyValueStore,
+    DownloadCache,
     HttpFileStore,
     HttpKeyValueStore,
+    KeyValueFileStore,
     LocalFileStore,
     LocalKeyValueStore,
     NatsFileStore,
     NatsObjectKeyValueStore,
     S3FileStore,
     S3KeyValueStore,
+    SafeKeyValueStore,
 )
 from manystore.client import RemoteKeyValueStore
 from manystore.exceptions import ConflictError, NotFoundError
@@ -31,6 +34,7 @@ from manystore.tools.conformancer import (
     assert_base_protocol_parity,
     assert_concrete_store_signatures,
     assert_conformancer_protocol_current,
+    assert_fail_loud_propagation,
     assert_file_store,
     assert_key_value_store,
     assert_put_if_absent_concurrency_safe,
@@ -210,6 +214,59 @@ async def test_writer_abort_contract_catches_committing_writer(tmp_path) -> None
     broken.open_writer = open_writer
     with pytest.raises(AssertionError, match="all-or-nothing"):
         await assert_writer_aborts_on_error(broken)
+
+
+# ── fail-loud 契約（fault-injection で下層障害の握り潰しを横断検知・M065 step2） ──
+
+
+@pytest.mark.parametrize(
+    "make_store",
+    [
+        pytest.param(lambda inner: inner, id="base_duality"),
+        pytest.param(lambda inner: SafeKeyValueStore(inner), id="safe"),
+        pytest.param(lambda inner: KeyValueFileStore(inner), id="kv_file_store"),
+        pytest.param(lambda inner: DownloadCache(inner), id="download_cache"),
+    ],
+)
+async def test_fail_loud_propagation_contract(make_store) -> None:
+    # 下層（FaultInjectingKeyValueStore）の InjectedFault を握り潰さず伝播すること。基底の
+    # get duality（NotFoundError 以外を default に化けさせない）も identity で同時に検証する。
+    await assert_fail_loud_propagation(make_store)
+
+
+async def test_fail_loud_contract_catches_swallowing_wrapper() -> None:
+    # 契約の牙: exists を握り潰す（M055 と同型の）壊れた wrapper は契約で落ちる。
+    class _SwallowExists(KeyValueStoreBase):
+        def __init__(self, inner):
+            self._inner = inner
+
+        async def connect(self):
+            await self._inner.connect()
+
+        async def aclose(self):
+            await self._inner.aclose()
+
+        async def put(self, key, value, *, if_match=None):
+            return await self._inner.put(key, value, if_match=if_match)
+
+        async def get_or_raise(self, key):
+            return await self._inner.get_or_raise(key)
+
+        async def exists(self, key):
+            try:
+                return await self._inner.exists(key)
+            except Exception:  # 障害を握り潰して False＝fail-loud 違反
+                return False
+
+        async def delete(self, key):
+            await self._inner.delete(key)
+
+        async def iter_all(self, limit=None, prefix=""):
+            async for x in self._inner.iter_all(limit, prefix):
+                yield x
+
+    with pytest.raises(AssertionError, match="exists"):
+        await assert_fail_loud_propagation(lambda inner: _SwallowExists(inner))
 
 
 async def test_run_light_report_is_external_and_saves(tmp_path) -> None:

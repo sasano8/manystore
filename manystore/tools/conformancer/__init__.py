@@ -38,6 +38,7 @@ import inspect
 import json
 import typing
 import uuid
+from collections.abc import AsyncIterator
 from dataclasses import dataclass, fields
 from pathlib import Path
 
@@ -48,6 +49,7 @@ from ...protocols import (
     AsyncFileStore,
     AsyncKeyValueStore,
     FileInfo,
+    KeyValueStoreBase,
 )
 
 
@@ -368,6 +370,89 @@ async def assert_writer_aborts_on_error(store: object) -> None:
             "writer all-or-nothing 違反: コンテキスト内の例外後にキーが存在する"
             "（中途バッファが確定された＝__aexit__ が例外経路でも put している）"
         )
+
+
+class InjectedFault(Exception):
+    """conformance が注入する**インフラ障害**の番兵（欠損＝NotFoundError とは別物）。
+
+    fail-loud 契約（要求7）＝下層がこの障害を投げたら、上位は None/False/default/NotFoundError に
+    **化けさせず伝播**せねばならない。監査の M054（nats が全障害を NotFoundError に潰す）／M055
+    （remote exists が 5xx を False に潰す）クラスを、この番兵で backend/wrapper 横断に契約化する。
+    """
+
+
+class FaultInjectingKeyValueStore(KeyValueStoreBase):
+    """全 primitive が `InjectedFault` を投げる KVS（fail-loud 契約のための「壊れた下層」）。
+
+    connect/aclose だけは無害（wrapper を構築・接続できるように）。Safe/Array/DownloadCache/
+    KeyValueFileStore 等の wrapper に **inner** として被せ、下層障害を握り潰さず伝播するかを
+    [assert_fail_loud_propagation] で検査する。`get`/`list_all` 等の既定実装は基底由来＝基底 duality
+    （`get` が NotFoundError 以外を default に化けさせない）もこの番兵で同時に検証できる。
+    """
+
+    async def connect(self) -> None: ...
+
+    async def aclose(self) -> None: ...
+
+    async def put(self, key: str, value: bytes, *, if_match: object = None) -> FileInfo:
+        raise InjectedFault("put")
+
+    async def get_or_raise(self, key: str) -> bytes:
+        raise InjectedFault("get_or_raise")
+
+    async def exists(self, key: str) -> bool:
+        raise InjectedFault("exists")
+
+    async def delete(self, key: str) -> None:
+        raise InjectedFault("delete")
+
+    async def iter_all(self, limit: int | None = None, prefix: str = "") -> AsyncIterator[FileInfo]:
+        raise InjectedFault("iter_all")
+        yield  # 到達しない（この関数を async generator にするための yield）
+
+
+async def assert_fail_loud_propagation(make_store: object, *, key: str = "faultloud/x") -> None:
+    """`make_store(inner)`（inner=[FaultInjectingKeyValueStore]）の返すストアが、下層の
+    `InjectedFault` を握り潰さず**伝播**するかを fail-loud 感応 op で検査（M054/M055 を契約化）。
+
+    encode する契約（製品必須挙動）:
+    - `get(key, default)` は **NotFoundError 以外**の障害を default に化けさせない（欠損だけ）。
+    - `exists(key)` は障害を False（＝「無い」）に化けさせない。
+    - `get_or_raise`/`delete`/`put`/`list_all`/`iter_all` も障害を別例外・正常終了に化けさせない。
+
+    各 op ごとに新しい inner で wrapper を組み直す（前段の副作用を持ち込まない）。`make_store` は
+    `lambda inner: SafeKeyValueStore(inner)` 等。`lambda inner: inner` で基底 duality を検査できる。
+    違反は `AssertionError`。read-only で put が `UnsupportedOperation` なら put を除いて呼ぶ。
+    """
+
+    async def _drain(aiter: object) -> list:
+        return [x async for x in aiter]
+
+    probes = (
+        ("get_or_raise", lambda s: s.get_or_raise(key)),
+        ("get(default)", lambda s: s.get(key, b"DEFAULT")),  # default に化けてはならない
+        ("exists", lambda s: s.exists(key)),  # False に化けてはならない
+        ("delete", lambda s: s.delete(key)),
+        ("put", lambda s: s.put(key, b"v")),
+        ("list_all", lambda s: s.list_all()),
+        ("iter_all", lambda s: _drain(s.iter_all())),
+    )
+    for name, call in probes:
+        store = make_store(FaultInjectingKeyValueStore())
+        try:
+            await call(store)
+        except InjectedFault:
+            continue  # 期待どおり下層障害が伝播した
+        except Exception as e:  # noqa: BLE001  別例外への「化け」も fail-loud 違反として報告する
+            raise AssertionError(
+                f"fail-loud 違反: {name} が下層の InjectedFault を別例外 "
+                f"{type(e).__name__} に化けさせた（欠損でない障害を握り潰している）"
+            ) from e
+        else:
+            raise AssertionError(
+                f"fail-loud 違反: {name} が下層の InjectedFault を握り潰した"
+                "（伝播せず正常終了＝障害が None/False/default に化けた）"
+            )
 
 
 def assert_key_value_store(obj: object) -> None:

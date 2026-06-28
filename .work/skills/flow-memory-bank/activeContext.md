@@ -10,12 +10,14 @@
 **品質強化タスク M054〜M064 を抽出・登録**（high 指摘は実コードで裏取り済）。拡張的タスク（M051/M039/M040/
 M026/M045/M028b＝新 surface/backend/IF）は品質強化が一段落するまで着手しない。**M054/M055/M059 完了**（2026-06-28）＝fail-loud バグ修正（nats get_or_raise の narrowing／remote exists の
 5xx 伝播・test +3）＋**pytest-cov 導入**（`make cov`・ベースライン TOTAL 77%）。
-**方針追加（ユーザー指示）＝実装漏れは conformancer に契約として実装し横断検知する**。**M065 step1 完了**
-（2026-06-28）＝`run_middle` 本実装（delete/冪等/複数キー/read 境界/overwrite 縮小の差分観点）＋オラクルで
-表せない絶対契約 `assert_writer_aborts_on_error`（writer all-or-nothing）を新設し、それで **M058 を契約先行で
-修正・緑化**（conformance 25→30）。**M065 残（step2+）**＝get_or_raise の欠損限定契約／fault-injecting ラッパで
-5xx 伝播（M054/M055 クラス）を横断検証／非 CAS 並行／run_heavy。最優先 = **M065 step2**（fault-injecting で
-fail-loud を契約化）/**M056**（nats 無ロック lazy connect）/**M057**（lifecycle）。詳細は progress「品質強化」。
+**方針＝実装漏れは conformancer に契約として実装し横断検知**（北極星＝conformance を仕様の単一源泉に＝
+projectbrief「北極星」）。**M065 step1+step2 完了**（2026-06-28）＝step1: run_middle 本実装＋絶対契約
+`assert_writer_aborts_on_error` で M058 を契約先行修正。step2: **fault-injection で fail-loud を契約化**＝
+番兵 `InjectedFault`＋`FaultInjectingKeyValueStore`＋`assert_fail_loud_propagation`（wrapper が下層障害を
+None/False/default/NotFoundError に化けさせず伝播するかを横断検査＝M054/M055 クラス）。base/Safe/
+KeyValueFileStore/DownloadCache を契約ロック＋牙テスト。conformance 25→35。最優先 = **M065 step3**
+（Array 適用・leaf backend の transport fault・契約カタログ→spec 文書/scaffold 化）/**M056**（nats 無ロック）/
+**M057**（lifecycle）。詳細は progress「品質強化」。
 
 **M044 完了**（2026-06-28・ユーザー対話で着手）＝spec/既定値の定数集約。**専用 `specs.py` は作らず
 `protocols.py` 冒頭に「spec/既定値」節**を新設（ユーザー確定＝定数の正本をインターフェースと同居・データ専用・
