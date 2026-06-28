@@ -8,10 +8,12 @@
 **品質優先・拡張後回しへ方針転換**（2026-06-28・ユーザー指示）＝現プロダクトの品質を高めるタスクを最優先で
 消化する。4 観点のコード監査（error handling / lifecycle・並行 / test coverage / DRY・API 一貫性）を実施し
 **品質強化タスク M054〜M064 を抽出・登録**（high 指摘は実コードで裏取り済）。拡張的タスク（M051/M039/M040/
-M026/M045/M028b＝新 surface/backend/IF）は品質強化が一段落するまで着手しない。**M054/M055 完了**（2026-06-28・fail-loud バグ修正）＝nats `get_or_raise` を `except Exception`→`JSNotFound`
-narrowing（障害を欠損に化けさせない）／remote `exists` を 404 のみ False・他 raise_for_status（5xx を「無い」に
-握り潰さない）。test +3。残の最優先 = **M056**（nats `_get_obs` 無ロック lazy connect で接続二重張り）/
-**M057**（connect/aclose ロールバック）/**M059**（pytest-cov 導入）。詳細は progress「品質強化」。
+M026/M045/M028b＝新 surface/backend/IF）は品質強化が一段落するまで着手しない。**M054/M055/M059 完了**（2026-06-28）＝fail-loud バグ修正（nats get_or_raise の narrowing／remote exists の
+5xx 伝播・test +3）＋**pytest-cov 導入**（`make cov`・ベースライン TOTAL 77%）。
+**方針追加（ユーザー指示）＝実装漏れは conformancer に契約として実装し横断検知する**。run_middle を立ち上げ
+細かい契約を積む方針を **M065** として登録（次の主戦場）。最優先 = **M065**（conformancer run_middle で
+writer all-or-nothing〔M058 が違反〕等を横断検知）/**M056**（nats 無ロック lazy connect）/**M057**（lifecycle）。
+詳細は progress「品質強化」。
 
 **M044 完了**（2026-06-28・ユーザー対話で着手）＝spec/既定値の定数集約。**専用 `specs.py` は作らず
 `protocols.py` 冒頭に「spec/既定値」節**を新設（ユーザー確定＝定数の正本をインターフェースと同居・データ専用・

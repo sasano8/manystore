@@ -12,7 +12,7 @@ SRC := manystore tests
 E2E_S3_ACCESS_KEY := manystore
 E2E_S3_SECRET_KEY := manystoresecret123
 
-.PHONY: format format-check lint pylint test test-heavy test-benchmark test-all check grep-todo ui e2e-up e2e-down conformance-docs docs docs-serve
+.PHONY: format format-check lint pylint test test-heavy test-benchmark test-all cov check grep-todo ui e2e-up e2e-down conformance-docs docs docs-serve
 
 # ストレージ UI / サーバを開発設定で起動（既定 http://127.0.0.1:8000）。
 # 既定ストレージは .cache/manystore_dev（使い捨て・起動時に自動作成）。PORT=xxxx で上書き可。
@@ -56,6 +56,10 @@ test-benchmark:
 # 全テスト（CI / 明示時。slow・benchmark も含めて回す）
 test-all:
 	uv run pytest
+
+# カバレッジ計測（fast テストで未到達行を term に出す）。happy-path 偏重の穴を定量把握する（M059）。
+cov:
+	uv run pytest -m "not slow and not benchmark" --cov=manystore --cov-report=term-missing
 
 # 一括検証（format 確認 + fast test）＝内ループの「検証緑」判定
 check: format-check test
