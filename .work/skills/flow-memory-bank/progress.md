@@ -48,8 +48,8 @@
 
 | ID | タスク | 優先 | 備考（根拠 file:line） |
 |----|--------|------|------|
-| M054 | nats `get_or_raise` の fail-loud 化 | **high** | `except Exception → NotFoundError(404)` があらゆる障害（接続断/認証/timeout）を「欠損」に化けさせる＝要求7違反。`get(key,default)` 経由で静かに default 返却。欠損専用例外（`ObjectNotFound` 等）だけ catch し他は再送出。手本＝`s3.py`。`backends/nats.py:202` |
-| M055 | remote `exists` の fail-loud 化 | **high** | `return r.status_code == 200` が 5xx/認証エラーを False（＝「無い」）に握り潰す。直下 `head_meta` は 404→None・他 raise で正しい＝非対称。404 のみ False、他は `raise_for_status`。`client/remote.py:85` |
+| ~~M054~~ | ~~nats `get_or_raise` の fail-loud 化~~ → **完了（2026-06-28）** | done | `except Exception`→`except JSNotFound`（`nats.js.errors.NotFoundError`・単一クラス catch で py2 書き戻し回避）に narrowing。欠損のみ NotFoundError、障害は伝播。実 NATS e2e（gated）で検証想定 |
+| ~~M055~~ | ~~remote `exists` の fail-loud 化~~ → **完了（2026-06-28）** | done | `return status==200`→`404→False / 他は raise_for_status / 200→True`（head_meta と同規約）。test +3（httpx.MockTransport で 200/404 マッピング＋500→`HTTPStatusError` 伝播）。`make check` 緑（155） |
 | M056 | nats `_get_obs` の無ロック lazy connect | **high** | 複数コルーチンが同時に `_obs is None` を通過し `nats.connect` を二重に張る＝接続リーク（`aclose` は1本しか閉じない）。`asyncio.Lock` で double-checked init に。`backends/nats.py:42` |
 | M057 | connect/aclose のロールバック・全件クローズ保証 | high | `StorageService.connect` が途中失敗で確立済みストア/watcher task をリーク（`service.py:37`）。`ArrayKeyValueStore`/`loadbalancer` の connect も途中失敗を巻き戻さず、aclose も逐次 await で1本の例外が残りを閉じ漏らす（`array.py:159`）。connect=部分確立を巻き戻し／aclose=全件 try-finally（or `gather(return_exceptions=True)`） |
 | M058 | writer の例外時 all-or-nothing 統一 | med | `_KvWriteFileObject.__aexit__` が例外経路でも `close()→put` し中途バッファを確定（memory/nats/http/KeyValueFileStore）。`local` の `_LocalAtomicWriter` は例外時 `_abort`＝backend 間で書込契約が食い違う。`exc[0] is not None` 時は put せず破棄。`protocols.py:429` |

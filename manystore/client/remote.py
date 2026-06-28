@@ -84,7 +84,11 @@ class ManystoreClient:
 
     async def exists(self, context: str, key: str) -> bool:
         r = await self._client.head(f"{context}/{_quote_key(key)}")
-        return r.status_code == 200
+        if r.status_code == 404:
+            return False
+        # 404 以外（5xx・認証等）は「無い」に握り潰さず伝播（fail-loud＝head_meta と同規約）。
+        r.raise_for_status()
+        return True
 
     async def head_meta(self, context: str, key: str) -> dict | None:
         """HEAD でメタ（etag/size/modified_at）を読む。欠損（404）は None。"""

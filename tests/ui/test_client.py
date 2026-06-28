@@ -9,7 +9,7 @@ from pathlib import Path
 import httpx
 import pytest
 
-from manystore.client import RemoteKeyValueStore
+from manystore.client import ManystoreClient, RemoteKeyValueStore
 from manystore.exceptions import ConflictError, NotFoundError
 from manystore.protocols import AsyncKeyValueStore, FileInfo
 from manystore.serving.server.app import create_app
@@ -169,3 +169,35 @@ async def test_remote_conformance_update_cas_concurrency(tmp_path: Path) -> None
     finally:
         await store.aclose()
         await service.aclose()
+
+
+@pytest.mark.parametrize(
+    ("status", "expected"),
+    [(200, True), (404, False)],
+)
+async def test_remote_exists_status_mapping(status: int, expected: bool) -> None:
+    """M055: exists は 200→True / 404→False。HEAD のステータスを正しく写す。"""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.method == "HEAD"
+        return httpx.Response(status)
+
+    client = ManystoreClient("http://test/kv/raw", transport=httpx.MockTransport(handler))
+    try:
+        assert await client.exists("work", "k") is expected
+    finally:
+        await client.aclose()
+
+
+async def test_remote_exists_is_fail_loud_on_server_error() -> None:
+    """M055: exists は 5xx 等の障害を False（＝「無い」）に握り潰さず loud に伝播する（要求7）。"""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(500)
+
+    client = ManystoreClient("http://test/kv/raw", transport=httpx.MockTransport(handler))
+    try:
+        with pytest.raises(httpx.HTTPStatusError):
+            await client.exists("work", "k")
+    finally:
+        await client.aclose()

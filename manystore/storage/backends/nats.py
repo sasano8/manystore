@@ -196,11 +196,15 @@ class NatsObjectKeyValueStore(_NatsBase, KeyValueStoreBase):
         return FileInfo(filename=key, size=info.get("size") or 0, modified_at=None, etag=str(seq))
 
     async def get_or_raise(self, key: str) -> bytes:
+        from nats.js.errors import NotFoundError as JSNotFound
+
         obs = await self._get_obs()
         try:
             result = await obs.get(key)
-        except Exception as e:
-            raise NotFoundError(key) from e  # 欠損は NotFoundError に正規化
+        except JSNotFound as e:
+            # 欠損のみ正規化。障害（接続断/認証/timeout）は伝播＝fail-loud（要求7）。
+            # 単一クラス catch（tuple 形 `except (A, B):` は py2 書き戻し既知異常を避けるため）。
+            raise NotFoundError(key) from e
         return result.data or b""
 
     async def iter_all(self, limit: int | None = None, prefix: str = "") -> AsyncIterator[FileInfo]:
