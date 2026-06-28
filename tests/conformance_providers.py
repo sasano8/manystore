@@ -38,6 +38,8 @@ from manystore.serving.server.app import create_app
 from manystore.serving.server.routes import KV_RAW_PREFIX
 from manystore.serving.services.config import parse_config
 from manystore.serving.services.service import StorageService
+from manystore.storage.backends import create_unsafe_file_store
+from manystore.storage.connect import connecting
 from manystore.tools.conformancer import InjectedFault
 
 # ── 実 backend の接続情報（`make e2e-up` の dev 既定。別サーバは env で上書き）。 ──
@@ -142,6 +144,33 @@ def _open_s3(addressing_style: str) -> Callable[[], object]:
             policy=ConnectPolicy.fail_fast(),
         ) as store:
             yield KeyValueFileStore(store)
+
+    return opener
+
+
+def _open_s3_native_file(addressing_style: str) -> Callable[[], object]:
+    """**native FileStore**（`S3FileStore`）を直接 yield する（M066③）。
+
+    既定の `_open_s3` は KVS を `KeyValueFileStore` で包む＝open_writer/open_reader が **バッファ
+    writer 経由**になり S3 の native streaming IO（multipart writer / range reader）を検査できない。
+    こちらは `create_unsafe_file_store` の native FileStore をそのまま接続して渡す。
+    """
+
+    @asynccontextmanager
+    async def opener() -> AsyncIterator[object]:
+        await _s3_ensure_bucket(addressing_style)
+        async with connecting(
+            lambda: create_unsafe_file_store(
+                "s3",
+                s3_bucket=S3_BUCKET,
+                s3_endpoint=S3_ENDPOINT,
+                s3_access_key=S3_ACCESS_KEY,
+                s3_secret_key=S3_SECRET_KEY,
+                s3_addressing_style=addressing_style,
+            ),
+            policy=ConnectPolicy.fail_fast(),
+        ) as fs:
+            yield fs  # native S3FileStore（multipart writer / streaming range reader）
 
     return opener
 
@@ -260,4 +289,16 @@ def leaf_fault_providers() -> list[Provider]:
     return [
         Provider("nats-fault", _open_nats_faulty(), gated=True, reachable=_nats_up),
         Provider("s3-path-fault", _open_s3_faulty("path"), gated=True, reachable=_s3_up),
+    ]
+
+
+def native_file_providers() -> list[Provider]:
+    """**native streaming IO** を持つ FileStore を直接 yield する provider（M066③）。
+
+    KVS-native backend を `KeyValueFileStore` で包むとバッファ writer 経由になるので、native の
+    open_writer/open_reader（S3=multipart/range）を直接検査するための別系統。local/dict は元々
+    matrix で native を流すのでここには入れない＝差分は S3 の native streaming IO のみ。
+    """
+    return [
+        Provider("s3-path-native", _open_s3_native_file("path"), gated=True, reachable=_s3_up),
     ]

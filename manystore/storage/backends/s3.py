@@ -3,6 +3,7 @@
 aiobotocore はメソッド内で遅延 import する（依存を __init__ 直下に持ち込まない）。
 """
 
+import contextlib
 from collections.abc import AsyncIterator
 
 from ...exceptions import ConflictError, NotFoundError, UnsupportedOperation
@@ -248,11 +249,34 @@ class _S3MultipartWriter:
         finally:
             await self._client_cm.__aexit__(None, None, None)
 
+    async def _abort(self) -> None:
+        """例外時は確定しない＝開始済み multipart を破棄しキーを作らない（all-or-nothing・M058）。
+
+        local の atomic writer（temp 破棄）と契約を揃える。abort 自体の失敗は best-effort で握り
+        （元例外を masking しない）、開いたクライアント session は必ず後始末する。
+        """
+        if self._closed:
+            return
+        self._closed = True
+        if self._upload_id is None:
+            # 書き込み前に異常＝何も開始していない（client も未取得）＝後始末不要。
+            return
+        try:
+            with contextlib.suppress(Exception):
+                await self._client.abort_multipart_upload(
+                    Bucket=self._base._bucket, Key=self._key, UploadId=self._upload_id
+                )
+        finally:
+            await self._client_cm.__aexit__(None, None, None)
+
     async def __aenter__(self) -> _S3MultipartWriter:
         return self
 
     async def __aexit__(self, *exc: object) -> None:
-        await self.close()
+        if exc and exc[0] is not None:
+            await self._abort()  # 例外時は multipart を破棄（確定しない）
+        else:
+            await self.close()
 
 
 class S3FileStore(S3KeyValueStore):

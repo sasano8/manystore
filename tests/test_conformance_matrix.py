@@ -15,7 +15,12 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
 import pytest
-from conformance_providers import Provider, all_providers, leaf_fault_providers
+from conformance_providers import (
+    Provider,
+    all_providers,
+    leaf_fault_providers,
+    native_file_providers,
+)
 
 from manystore import DictFileStore
 from manystore.tools.conformancer import (
@@ -28,6 +33,7 @@ from manystore.tools.conformancer import (
 
 _ALL = all_providers()
 _LEAF_FAULT = leaf_fault_providers()
+_NATIVE_FILE = native_file_providers()
 
 
 def _params(providers: list[Provider]) -> list:
@@ -95,6 +101,28 @@ async def test_put_if_match_concurrency(provider: Provider) -> None:
     # update CAS の並行安全性（lost-update を ConflictError で拒否）。uuid キーのみ（非破壊）。
     async with _store(provider) as fs:
         await assert_put_if_match_concurrency_safe(fs, size=4096)
+
+
+# ── native streaming IO（S3 multipart writer / range reader）の直接検証（M066③） ──
+
+
+@pytest.mark.parametrize("provider", _params(_NATIVE_FILE))
+async def test_native_writer_aborts_on_error(provider: Provider) -> None:
+    # native FileStore の open_writer（S3=multipart）が例外時に確定しない（all-or-nothing）。
+    # 包んだ KVS バッファ writer ではなく native streaming writer 自身を検査する。
+    async with _store(provider) as fs:
+        await assert_writer_aborts_on_error(fs)
+
+
+@pytest.mark.parametrize("provider", _params(_NATIVE_FILE))
+async def test_native_file_io_matches_oracle(provider: Provider) -> None:
+    # native open_writer/open_reader を run_light/middle/heavy で差分検証（分割 read 含む）。
+    async with _store(provider) as fs:
+        for run in ("run_light", "run_middle", "run_heavy"):
+            tester = FileStoreTester(DictFileStore(), fs)
+            report: list = []
+            await getattr(tester, run)(report)
+            assert all(s["passed"] for s in report), (run, report)
 
 
 @pytest.mark.parametrize("provider", _params(_LEAF_FAULT))
