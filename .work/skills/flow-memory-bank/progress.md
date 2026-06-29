@@ -72,7 +72,7 @@
 |----|--------|------|------|
 | M051 | kubernetes backend（M050 の具体 sink） | 相談 | ユーザー要望（2026-06-27・討議中・doc-first）＝put=server-side apply / get=補完済み live（put≠get）。キー=`namespace/resource_type/name`（`.yml` 含めず・group/version は discovery 補完・衝突時 `type.group`）。**FileInfo に世代情報**（resourceVersion/generation/uid/creationTimestamp）。**resourceVersion CAS を M046 の参照実装**に（`if_version` 不一致は ConflictError）。ローカル側=`KubeManifestStore` ラッパ（パス↔内容の同一性検証＝Safe 風 1 枚）。依存=`kubernetes-asyncio` を extra `[k8s]`（遅延 import）。cluster-scoped は後回し。詳細は interrupt |
 | M012 | `list(prefix=...)` / pagination | 中 | prefix は core `iter_all(prefix=…)` 引数化済（M030 capability は 2026-06-26 廃止）。**pagination 未対応**。設計案（2026-06-26 対話・要 doc-first）＝(a) `iter_all`/`list_all` に **offset+limit** を足す（単純・全 backend で scan 可だが大 offset は O(n)）／(b) **cursor/continuation-token** 形式（S3 ContinuationToken・NATS 等の native と整合・M021 の continuation と同一機構）。加えて **返り値を range メタ付きの独自型**にする案＝iter は「何件目〜何件目」を、list は from/to 件数属性を持つ（pagination メタ＝**file/value パラダイム内**。却下した transport の request/response 封筒とは別物）。未確定＝offset/limit vs cursor の二択と、独自結果型を入れるか。M021（S3 GW continuation）・M044（limit 既定の定数化）と連動 |
-| M013 | メタデータ / content-type | 中 | S3・NATS は native 対応だが共通 IF に無い |
+| M013 | メタデータ / content-type | 中 | S3・NATS は native 対応だが共通 IF に無い。**M067 連動**＝put 時に sha256 を計算してメタ保存すれば `FileInfo.sha256` が埋まり download の hash 検証が自動で効く（`Verify.HASH`/`STRICT`） |
 | M016 | テスト拡充（エラーパス/並行/大容量） | 中 | fake は happy path 中心 |
 | M014 | 操作レベル retry/timeout | 低 | 現状 connect のみ |
 | M015 | logging（操作・リトライ可視化） | 低 | 観測性なし |
@@ -93,6 +93,15 @@
 
 ### 完了マイルストーン（要点のみ・経緯は git 履歴）
 
+- **M067（2026-06-30・完了）＝download の整合性検証（size 必須・hash あれば追加）**: client/download に
+  検証が無かった（`DownloadCache.download` は whole get→書込のみ・client get も `r.content` 素通し）。
+  **ビットフラグ `Verify(IntFlag)`**（NONE/SIZE/HASH/REQUIRE_HASH＋合成 DEFAULT=SIZE\|HASH・
+  STRICT=SIZE\|HASH\|REQUIRE_HASH）で検証ポリシーを選べるように。`download(key, *, verify=Verify.DEFAULT)`
+  ＝取得 bytes を `head()` の期待メタと照合し**検証してから書く**（cache に入るのは検証済みのみ・
+  cache hit は再検証しない・`Verify.NONE` は head() も引かない）。size は全 backend の `head().size` で
+  完結／hash は `FileInfo.sha256`（best-effort＝無ければスキップ・REQUIRE_HASH なら失敗）。不一致は
+  新例外 `IntegrityError`（status 422）。`Verify`/`IntegrityError` をトップ export。**残（B・M013 連動）＝
+  hash メタを実際に埋める**（put 時 sha256 計算→メタ保存）と client get への verify 適用。fast 217 passed。
 - **M061（2026-06-30・完了）＝実 backend e2e を CI で gated 実走（skip 許容やめ）**: docker compose で nats /
   seaweedfs / **minio** を起こし、`ci.yml` に e2e ジョブ追加（`make e2e-up`→`MANYSTORE_E2E_REQUIRED=1
   make test-heavy`→`make e2e-down`。ubuntu runner 同梱の docker+compose を直接叩く＝local==CI）。**核は

@@ -126,6 +126,16 @@ class ConflictError(ManystoreError):
     title = "Conflict"
 
 
+class IntegrityError(ManystoreError):
+    """取得データが期待メタと一致しない（download の整合性検証で size/hash 不一致）。
+
+    truncation・転送破損・キャッシュ汚染などを fail-loud に拒否する（M067・`Verify` 参照）。
+    """
+
+    status = 422
+    title = "Integrity Error"
+
+
 # stdlib 例外 → (status, title) の既定写像。manystore 外の例外も problem にできる。
 # サブクラス関係で取りこぼさないよう**具体的なものを先**に並べる（io.UnsupportedOperation は
 # ValueError のサブクラスなので ValueError より前に置く）。

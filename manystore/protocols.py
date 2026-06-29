@@ -30,6 +30,7 @@ import io
 import os
 import tempfile
 from collections.abc import AsyncIterable, AsyncIterator, Iterable, Iterator
+from enum import IntFlag
 from functools import partial
 from pathlib import Path
 from typing import Protocol
@@ -55,7 +56,10 @@ class FileInfo(dict):
     """ファイルのメタ情報。**dict 互換**（subscript／`.get`／`== {...}`／JSON 化）＋ `is_absent()`。
 
     キー: `filename:str` / `size:int|None`（None=不在） / `modified_at:float|None`（任意） /
-    `etag:str|None`（任意・CAS 用の不透明トークン＝S3=ETag/local=mtime_ns+size/dict=世代）。
+    `etag:str|None`（任意・CAS 用の不透明トークン＝S3=ETag/local=mtime_ns+size/dict=世代） /
+    `sha256:str|None`（任意・**内容ハッシュ**＝download の整合性検証に使う。`etag` は backend ごと
+    意味が違い横断ハッシュにできないので別フィールド。現状どの backend も未設定＝将来 M013 で
+    put 時に埋める。`Verify` 参照）。
     **`size=None` は不在**（存在しないキー）を表す＝`is_absent()` が True。put の `if_match` には
     head/head_or_absent の戻り（存在なら版一致を要求／不在 FileInfo（`FileInfo.absent()`）なら
     create-only）を渡す。
@@ -87,6 +91,29 @@ class FileInfo(dict):
 #: conditional put の条件。None=無条件（LWW）／不在 FileInfo（`is_absent()`）=create-only／
 #: その他 FileInfo=その etag に一致を要求（update CAS）。
 type IfMatch = FileInfo | None
+
+
+class Verify(IntFlag):
+    """download の整合性検証ポリシー（**ビットフラグ**＝合成できる・M067）。
+
+    取得データが `head()` の期待メタと一致するかを照合する。組み合わせで「size のみ」「hash も必須」
+    「可能な限り」を選べる:
+    - `SIZE` … 取得長を `FileInfo.size` と照合（全 backend が持つ＝常に有効）。
+    - `HASH` … 取得 sha256 を `FileInfo.sha256` と照合。**メタに hash が無ければスキップ**
+      （best-effort・`REQUIRE_HASH` 併用時のみ「hash 無し」を失敗にする）。
+    - `REQUIRE_HASH` … `HASH` と併用し、メタに hash が無ければ**失敗**にする（「hash 必須」）。
+
+    既定 `DEFAULT`（=`SIZE|HASH`）＝size は必ず照合・hash はあれば照合（無ければ素通り）。
+    `STRICT`（=`SIZE|HASH|REQUIRE_HASH`）＝size と hash の両方を必須にする。`NONE`＝無検証。
+    不一致は `IntegrityError`。
+    """
+
+    NONE = 0
+    SIZE = 1
+    HASH = 2
+    REQUIRE_HASH = 4
+    DEFAULT = SIZE | HASH
+    STRICT = SIZE | HASH | REQUIRE_HASH
 
 
 # ── async（一次） ──

@@ -14,11 +14,13 @@ connect）か、顔の入口 [open_async_array_store]（mount 群を connect す
 from collections.abc import AsyncIterator
 from pathlib import Path
 
+from ...exceptions import IntegrityError
 from ...protocols import (
     AsyncKeyValueStore,
     FileInfo,
     IfMatch,
     KeyValueStoreBase,
+    Verify,
     _aclose_all,
     _atomic_write_bytes_async,
     _connect_all,
@@ -28,6 +30,36 @@ from ...protocols import (
     _kv_move,
 )
 from .safe import validate_safe_path
+
+
+def _verify_download(info: FileInfo, data: bytes, policy: Verify) -> None:
+    """取得 `data` を `head()` の期待メタ `info` と照合する（不一致は `IntegrityError`・M067）。
+
+    `SIZE` … 長さを `info.size` と照合。`HASH` … sha256 を `info.sha256` と照合（メタに無ければ
+    best-effort でスキップ。ただし `REQUIRE_HASH` 併用時は「hash 無し」を失敗にする）。
+    """
+    if policy & Verify.SIZE:
+        expected = info.get("size")
+        if expected is not None and len(data) != expected:
+            raise IntegrityError(
+                f"{info.get('filename')!r}: size 不一致（取得 {len(data)} / 期待 {expected}）"
+            )
+    if policy & Verify.HASH:
+        want = info.get("sha256")
+        if want is None:
+            if policy & Verify.REQUIRE_HASH:
+                raise IntegrityError(
+                    f"{info.get('filename')!r}: hash 未提供（メタに sha256 が無い・REQUIRE_HASH）"
+                )
+        else:
+            import hashlib
+
+            got = hashlib.sha256(data).hexdigest()
+            if got != want:
+                raise IntegrityError(
+                    f"{info.get('filename')!r}: sha256 不一致（取得 {got} / 期待 {want}）"
+                )
+
 
 # ダウンロードキャッシュのデフォルト先（ホーム配下）。
 DEFAULT_CACHE_DIR = Path.home() / ".cache" / "manystore"
@@ -222,19 +254,27 @@ class DownloadCache(KeyValueStoreBase):
     def cache_dir(self) -> Path:
         return self._cache_dir
 
-    async def download(self, key: str, *, force: bool = False) -> Path:
+    async def download(
+        self, key: str, *, verify: Verify = Verify.DEFAULT, force: bool = False
+    ) -> Path:
         """`key` の値をローカルキャッシュへ取得してパスを返す。既にあれば再取得しない。
 
         `force=True` で取り直す。`key` は [validate_safe_path] で検証し、キャッシュディレクトリの
         外へ書かせない。キャッシュ済み判定は存在ベース（上流更新の自動無効化は未対応）。上流に
         無ければ FileNotFoundError。
+
+        `verify`（[Verify] ビットフラグ・既定 `DEFAULT`＝size 必須・hash あれば照合）で取得データを
+        `head()` の期待メタと照合し、不一致は `IntegrityError`。**検証してから書く**ので cache に
+        入るのは検証済みのみ＝cache hit は再検証しない。`Verify.NONE` なら head() も引かない。
         """
         safe = validate_safe_path(key)
         dst = self._cache_dir / safe
         # 同期 FS 操作（stat/mkdir/write）は非同期ヘルパでスレッドへ逃がす（非ブロック・M063）。
         if not force and await _is_file_async(dst):
-            return dst  # cache hit（存在ベース）
+            return dst  # cache hit（書込時に検証済み）
         data = await self._store.get_or_raise(key)  # 上流に無ければ FileNotFoundError
+        if verify != Verify.NONE:
+            _verify_download(await self._store.head(key), data, verify)  # 検証してから書く
         await _ensure_parent_async(dst)
         await _atomic_write_bytes_async(dst, data)  # 原子的に書く
         return dst

@@ -12,6 +12,7 @@
 
 from .exceptions import PROBLEM_JSON as PROBLEM_JSON
 from .exceptions import ContextNotFound as ContextNotFound
+from .exceptions import IntegrityError as IntegrityError
 from .exceptions import ManystoreError as ManystoreError
 from .exceptions import NoSuchUpload as NoSuchUpload
 from .exceptions import NotFoundError as NotFoundError
@@ -39,6 +40,7 @@ __all__ = list(
             "ReadOnlyContext",
             "NoSuchUpload",
             "UnsafePathError",
+            "IntegrityError",
         ]
     )
 )

@@ -18,8 +18,10 @@ from manystore import (
     DictFileStore,
     DictKeyValueStore,
     DownloadCache,
+    FileInfo,
     HttpFileStore,
     HttpKeyValueStore,
+    IntegrityError,
     KeyValueFileStore,
     KeyValueFromFileStore,
     LocalFileStore,
@@ -32,6 +34,7 @@ from manystore import (
     SafeFileStore,
     SafeKeyValueStore,
     UnsafePathError,
+    Verify,
     connect_key_value_store,
     connecting,
     create_safe_array_store,
@@ -804,6 +807,72 @@ async def test_download_cache_rejects_unsafe_key(tmp_path: Path) -> None:
 
     with pytest.raises(UnsafePathError):
         await cache.download("../evil")  # キャッシュ外へ書かせない
+
+
+class _FakeMetaStore:
+    """`get_or_raise`/`head` だけ持つストア。head の返すメタを自由に固定して検証分岐を突く。"""
+
+    def __init__(self, data: bytes, info: FileInfo) -> None:
+        self._data = data
+        self._info = info
+
+    async def get_or_raise(self, key: str) -> bytes:
+        return self._data
+
+    async def head(self, key: str) -> FileInfo:
+        return self._info
+
+
+async def test_download_verify_size(tmp_path: Path) -> None:
+    data = b"weights-123"
+
+    # size 一致＝既定（DEFAULT）で pass（hash は無いので best-effort スキップ）。
+    ok = DownloadCache(
+        _FakeMetaStore(data, FileInfo("m/x.bin", size=len(data))), cache_dir=tmp_path / "a"
+    )
+    assert (await ok.download("m/x.bin")).read_bytes() == data
+
+    # size 不一致＝IntegrityError（head が嘘の size を返す）。
+    bad = DownloadCache(
+        _FakeMetaStore(data, FileInfo("m/x.bin", size=len(data) + 1)), cache_dir=tmp_path / "b"
+    )
+    with pytest.raises(IntegrityError):
+        await bad.download("m/x.bin")
+    # verify=NONE なら検証せず素通り（head も引かない）。
+    assert (await bad.download("m/x.bin", verify=Verify.NONE)).read_bytes() == data
+
+
+async def test_download_verify_hash(tmp_path: Path) -> None:
+    import hashlib
+
+    data = b"weights-123"
+    good = hashlib.sha256(data).hexdigest()
+
+    # sha256 一致＝DEFAULT（hash あれば照合）で pass。
+    m = DownloadCache(
+        _FakeMetaStore(data, FileInfo("m/x.bin", size=len(data), sha256=good)),
+        cache_dir=tmp_path / "a",
+    )
+    assert (await m.download("m/x.bin")).read_bytes() == data
+
+    # sha256 不一致＝IntegrityError。
+    bad = DownloadCache(
+        _FakeMetaStore(data, FileInfo("m/x.bin", size=len(data), sha256="dead")),
+        cache_dir=tmp_path / "b",
+    )
+    with pytest.raises(IntegrityError):
+        await bad.download("m/x.bin")
+
+    # hash 無し: DEFAULT は best-effort で素通り／STRICT は必須ゆえ失敗／SIZE のみは hash 無視。
+    nohash = DownloadCache(
+        _FakeMetaStore(data, FileInfo("m/x.bin", size=len(data))), cache_dir=tmp_path / "c"
+    )
+    with pytest.raises(IntegrityError):
+        await nohash.download("m/x.bin", verify=Verify.STRICT)
+    assert (await nohash.download("m/x.bin", verify=Verify.SIZE)).read_bytes() == data
+    assert (
+        await nohash.download("m/x.bin", verify=Verify.DEFAULT, force=True)
+    ).read_bytes() == data
 
 
 def test_download_cache_default_dir_under_home(tmp_path: Path) -> None:

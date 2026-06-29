@@ -14,6 +14,7 @@ from ..protocols import (
     KeyValueFromFileStore,
     KeyValueStoreBase,
     SyncKeyValueStore,
+    Verify,
 )
 from .backends import (
     DictKeyValueStore,
@@ -55,6 +56,8 @@ __all__ = [
     "ArrayKeyValueStore",
     "DownloadCache",
     "DEFAULT_CACHE_DIR",
+    # download の整合性検証ポリシー（ビットフラグ）
+    "Verify",
     # 2 ストア片方向同期（one-way mirror）
     "StorageMirror",
     "SyncPlan",
