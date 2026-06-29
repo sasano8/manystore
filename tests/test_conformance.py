@@ -34,6 +34,8 @@ from manystore.tools.conformancer import (
     FileStoreTester,
     assert_base_protocol_parity,
     assert_concrete_store_signatures,
+    assert_concurrent_delete_safe,
+    assert_concurrent_overwrite_atomic,
     assert_conformancer_protocol_current,
     assert_contract_catalog_current,
     assert_fail_loud_propagation,
@@ -268,6 +270,89 @@ async def test_writer_abort_contract_catches_committing_writer(tmp_path) -> None
         await assert_writer_aborts_on_error(broken)
 
 
+# ── 非CAS 並行契約（無条件上書きの原子性・並行 delete/get 安全・M065 残） ──
+
+
+async def test_concurrent_overwrite_atomic_dict_passes() -> None:
+    # 健全なストア（dict）は並行上書きでも最終値が完全な A/B＝契約を満たす。
+    last = await assert_concurrent_overwrite_atomic(DictFileStore(), size=256, rounds=2)
+    assert len(last) == 256 and len(set(last)) == 1  # 単一バイトの完全値（torn でない）
+
+
+async def test_concurrent_overwrite_atomic_local_passes(tmp_path) -> None:
+    await assert_concurrent_overwrite_atomic(LocalFileStore(tmp_path), size=256, rounds=2)
+
+
+async def test_concurrent_overwrite_atomic_catches_torn_writer() -> None:
+    # 契約の牙: A/B を連結して torn な値を確定する壊れた put は原子性違反で落ちる。
+    class _TornStore(DictFileStore):
+        async def put(self, key, value, *, if_match=None):  # noqa: ANN001
+            # 並行 2 本目の put で既存値に追記＝混在（torn）した値を残す。
+            prev = await self.get(key, default=b"")
+            return await super().put(key, prev + value if prev else value)
+
+    with pytest.raises(AssertionError, match="原子性違反"):
+        await assert_concurrent_overwrite_atomic(_TornStore(), size=256, rounds=1)
+
+
+async def test_concurrent_delete_safe_dict_passes() -> None:
+    await assert_concurrent_delete_safe(DictFileStore())
+
+
+async def test_concurrent_delete_safe_local_passes(tmp_path) -> None:
+    await assert_concurrent_delete_safe(LocalFileStore(tmp_path))
+
+
+async def test_concurrent_delete_safe_catches_non_deleting_store() -> None:
+    # 契約の牙: delete を握り潰して何も消さない壊れたストアは「完了後 不在」で落ちる。
+    class _NoDeleteStore(DictFileStore):
+        async def delete(self, key):  # noqa: ANN001  delete を no-op 化（残存させる）
+            return None
+
+    with pytest.raises(AssertionError, match="残存"):
+        await assert_concurrent_delete_safe(_NoDeleteStore())
+
+
+# ── run_full（差分 light+middle+heavy ＋ 絶対契約を 1 レポートへ集約・M065 残） ──
+
+
+async def test_run_full_dict_self_consistent() -> None:
+    # 健全なストアは差分も絶対契約も全て passed＝run_full の全観点が緑。
+    tester = FileStoreTester(DictFileStore(), DictFileStore())
+    report: list = []
+    await tester.run_full(report)
+    assert all(s["passed"] for s in report), [s for s in report if not s["passed"]]
+    aspects = {s["aspect"] for s in report}
+    # 差分（各レベル）＋絶対契約（非CAS 並行を含む）が 1 レポートに揃う。
+    assert {"exists:missing", "delete:missing_idempotent", "heavy:read_segments"} <= aspects
+    assert {
+        "absolute:writer.all_or_nothing",
+        "absolute:put.create_only.concurrency",
+        "absolute:concurrent.overwrite_atomic",
+        "absolute:concurrent.delete_safe",
+    } <= aspects
+
+
+async def test_run_full_local_matches_oracle(tmp_path) -> None:
+    tester = FileStoreTester(DictFileStore(), LocalFileStore(tmp_path))
+    report: list = []
+    await tester.run_full(report)
+    assert all(s["passed"] for s in report), [s for s in report if not s["passed"]]
+
+
+async def test_run_full_records_absolute_violation_without_raising() -> None:
+    # run_full は絶対契約違反でも止めず passed=False で記録する（全契約を回し切る）。
+    class _NoDeleteStore(DictFileStore):
+        async def delete(self, key):  # noqa: ANN001
+            return None
+
+    tester = FileStoreTester(DictFileStore(), _NoDeleteStore())
+    report: list = []
+    await tester.run_full(report)  # 例外を投げない
+    violated = [s for s in report if not s["passed"]]
+    assert any(s["aspect"] == "absolute:concurrent.delete_safe" for s in violated)
+
+
 # ── fail-loud 契約（fault-injection で下層障害の握り潰しを横断検知・M065 step2） ──
 
 
@@ -337,6 +422,8 @@ def test_contract_catalog_has_expected_absolute_contracts() -> None:
         "put.create_only.concurrency",
         "put.update_cas.concurrency",
         "errors.fail_loud",
+        "concurrent.overwrite_atomic",
+        "concurrent.delete_safe",
     } <= ids
 
 

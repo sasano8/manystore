@@ -16,6 +16,8 @@
 | `put.create_only.concurrency` | 並行 create-only put は一方だけ成功・他方は ConflictError（二重作成なし）。 | `assert_put_if_absent_concurrency_safe` |
 | `put.update_cas.concurrency` | 同一 base 版からの並行更新は一方だけ成功し lost-update を ConflictError で拒否。 | `assert_put_if_match_concurrency_safe` |
 | `errors.fail_loud` | 下層障害を None/False/default/NotFound に化けさせず伝播（欠損のみ NotFound）。 | `assert_fail_loud_propagation` |
+| `concurrent.overwrite_atomic` | if_match 無しの並行 put でも最終値はどちらか一方の完全値（torn/混在/空なし）。 | `assert_concurrent_overwrite_atomic` |
+| `concurrent.delete_safe` | 並行 delete は冪等（障害のみ伝播）・並行 get は seed か NotFound・完了後は不在。 | `assert_concurrent_delete_safe` |
 
 ## 差分契約（辞書ストアをオラクルに観測一致を検査）
 
@@ -87,4 +89,5 @@
 2. 上記**絶対契約**の assert を接続済みストアに対して呼び、全て緑にする。
 3. `FileStoreTester(DictFileStore(), <your_store>)` の `run_light`/`run_middle`/
    `run_heavy` を回し差分観点をオラクルに一致させる（run_* は非破壊）。
+   `run_full` は差分（light+middle+heavy）＋絶対契約を 1 レポートに集約する一括実行。
 

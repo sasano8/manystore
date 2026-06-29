@@ -25,6 +25,8 @@ from conformance_providers import (
 from manystore import DictFileStore
 from manystore.tools.conformancer import (
     FileStoreTester,
+    assert_concurrent_delete_safe,
+    assert_concurrent_overwrite_atomic,
     assert_fail_loud_over_transport,
     assert_put_if_absent_concurrency_safe,
     assert_put_if_match_concurrency_safe,
@@ -101,6 +103,20 @@ async def test_put_if_match_concurrency(provider: Provider) -> None:
     # update CAS の並行安全性（lost-update を ConflictError で拒否）。uuid キーのみ（非破壊）。
     async with _store(provider) as fs:
         await assert_put_if_match_concurrency_safe(fs, size=4096)
+
+
+@pytest.mark.parametrize("provider", _params(_ALL))
+async def test_concurrent_overwrite_atomic(provider: Provider) -> None:
+    # 非CAS 並行上書きの原子性（最終値は完全な A/B・torn なし）。uuid キーのみ（非破壊）。
+    async with _store(provider) as fs:
+        await assert_concurrent_overwrite_atomic(fs, size=4096)
+
+
+@pytest.mark.parametrize("provider", _params(_ALL))
+async def test_concurrent_delete_safe(provider: Provider) -> None:
+    # 並行 delete/get の安全性（冪等 delete・get は seed か NotFound・完了後 不在）。uuid キーのみ。
+    async with _store(provider) as fs:
+        await assert_concurrent_delete_safe(fs)
 
 
 # ── native streaming IO（S3 multipart writer / range reader）の直接検証（M066③） ──

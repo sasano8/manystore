@@ -42,7 +42,7 @@ from collections.abc import AsyncIterator
 from dataclasses import dataclass, fields
 from pathlib import Path
 
-from ...exceptions import ConflictError, NotFoundError
+from ...exceptions import ConflictError, NotFoundError, UnsupportedOperation
 from ...protocols import (
     DEFAULT_LIST_LIMIT,
     AsyncFileObject,
@@ -341,6 +341,89 @@ async def assert_put_if_match_concurrency_safe(
     return winners[0]
 
 
+async def assert_concurrent_overwrite_atomic(
+    store: object, *, size: int = 1 << 20, stagger: float = 0.001, rounds: int = 3
+) -> bytes:
+    """**非CAS 並行上書きの原子性（LWW・torn でない）**。
+
+    `if_match` 無しの並行 `put` でも、最終保存値は**どちらか一方の完全な値**でなければならない
+    （A/B が混ざった torn write や中途・空にならない）。CAS（`assert_put_if_*_concurrency_safe`）が
+    「片方だけ成功・他方 ConflictError」を見るのに対し、こちらは**両方とも成功してよい**無条件上書き
+    で「最後に残る 1 値が完全（混在しない）」を見る＝M058 の all-or-nothing を**並行**へ広げた契約。
+    内容を変え（A/B）大きめ `size` で窓を広げ、後発を `stagger` 秒遅らせ、`rounds` 回繰り返して
+    偶然の整列を弾く。read-only は `put` が `UnsupportedOperation`＝呼ばない。
+    違反は AssertionError。
+    """
+    key = f"_conformance/cc/{uuid.uuid4().hex}"
+    a, b = b"A" * size, b"B" * size
+    last = b""
+    try:
+        for _ in range(rounds):
+
+            async def _writer(value: bytes, delay: float) -> None:
+                if delay:
+                    await asyncio.sleep(delay)
+                await store.put(key, value)  # 無条件＝両方成功しうる（LWW）
+
+            await asyncio.gather(_writer(a, 0.0), _writer(b, stagger))
+            stored = await store.get_or_raise(key)
+            if stored not in (a, b):
+                detail = (
+                    "空" if not stored else ("長さ不一致/torn" if len(stored) != size else "混在")
+                )
+                raise AssertionError(
+                    f"非CAS 並行上書き原子性違反: 最終値が完全な A/B いずれでもない（{detail}・"
+                    f"len={len(stored)} 期待={size}）＝torn write（中途バッファが確定した）"
+                )
+            last = stored
+    finally:
+        with contextlib.suppress(Exception):
+            await store.delete(key)
+    return last
+
+
+async def assert_concurrent_delete_safe(
+    store: object, *, fanout: int = 8, size: int = 4096
+) -> None:
+    """**並行 delete/get の安全性**: 同一キーへ並行 delete を撃っても、(1) どの delete も**例外を
+    出さず冪等**（欠損は no-op・障害だけ伝播）、(2) 同時並行の get は **seed 値か NotFound**だけを
+    観測し（torn・別値は不可）、(3) 全完了後はキーが**不在**であること。
+
+    delete の冪等は run_middle が単発で見るが、こちらは**並行多重 delete＋並行 get**で握り潰し
+    （M054 級＝nats `delete` の `suppress(Exception)` バグの並行版）と torn read を炙り出す。
+    read-only は `delete`/`put` が `UnsupportedOperation`＝呼ばない。違反は `AssertionError`。
+    """
+    key = f"_conformance/cc/{uuid.uuid4().hex}"
+    seed = b"S" * size
+    await store.put(key, seed)
+
+    async def _deleter() -> None:
+        await store.delete(key)  # 並行多重・欠損 no-op（fault のみ伝播）
+
+    async def _reader() -> bytes | None:
+        try:
+            return await store.get_or_raise(key)  # 値か NotFound（torn/別値は不可）
+        except NotFoundError:
+            return None
+
+    deleters = [_deleter() for _ in range(fanout)]
+    readers = [_reader() for _ in range(fanout)]
+    results = await asyncio.gather(*deleters, *readers)
+    observed = [v for v in results[fanout:] if v is not None]
+    bad = [v for v in observed if v != seed]
+    if bad:
+        raise AssertionError(
+            "並行 delete/get 安全性違反: get が seed でも NotFound でもない値を観測"
+            f"（torn/別値・{len(bad)} 件・例 len={len(bad[0])} 期待={size}）"
+        )
+    if await store.exists(key):
+        with contextlib.suppress(Exception):
+            await store.delete(key)
+        raise AssertionError(
+            "並行 delete/get 安全性違反: 全 delete 完了後もキーが残存（冪等 delete が効いていない）"
+        )
+
+
 class _ConformanceProbeError(Exception):
     """conformance が**意図的に注入する故障**用の番兵例外（本物の障害と区別するための専用型）。"""
 
@@ -528,6 +611,20 @@ ABSOLUTE_CONTRACTS: list[ContractSpec] = [
         level="absolute",
         summary="下層障害を None/False/default/NotFound に化けさせず伝播（欠損のみ NotFound）。",
         check="assert_fail_loud_propagation",
+    ),
+    ContractSpec(
+        id="concurrent.overwrite_atomic",
+        title="非CAS 並行上書きの原子性",
+        level="absolute",
+        summary="if_match 無しの並行 put でも最終値はどちらか一方の完全値（torn/混在/空なし）。",
+        check="assert_concurrent_overwrite_atomic",
+    ),
+    ContractSpec(
+        id="concurrent.delete_safe",
+        title="並行 delete/get の安全性",
+        level="absolute",
+        summary="並行 delete は冪等（障害のみ伝播）・並行 get は seed か NotFound・完了後は不在。",
+        check="assert_concurrent_delete_safe",
     ),
 ]
 
@@ -1011,5 +1108,54 @@ class FileStoreTester:
         finally:
             await self._cleanup_ns(ns)
 
+    async def _run_absolute(self, report: list, contract_id: str, runner: object) -> None:
+        """絶対契約（オラクル非依存）を target に当て、結果を 1 ステップとして report へ記録する。
+
+        差分契約（`_check`）と違いオラクル比較ではなく **assert 関数の成否**を観測に写す。違反
+        （`AssertionError`）でも例外を投げず `passed=False` で記録して**全契約を回し切る**（run_full
+        はストア全体像を 1 レポートに集める）。read-only（`UnsupportedOperation`）は write 契約 非
+        対象＝skip 記録（passed=True）。`expected`/`actual` は同じ outcome（差分でなく成否の観測）。
+        """
+        aspect = f"absolute:{contract_id}"
+        try:
+            await runner(self._target)
+            outcome: dict = {"contract": "ok"}
+            passed = True
+        except UnsupportedOperation:
+            outcome, passed = {"skipped": "read-only"}, True
+        except AssertionError as e:
+            outcome, passed = {"violated": str(e)}, False
+        step = StepResult(aspect, contract_id, {}, outcome, outcome, [], [], passed)
+        report.append({f.name: getattr(step, f.name) for f in fields(step)})
+
     async def run_full(self, report: list) -> None:
-        raise NotImplementedError("run_full は未実装（M022b）")
+        """full: 差分契約（light+middle+heavy）に加え、オラクルで表せない**絶対契約**も target に
+        当てて 1 レポートへ集約する＝そのストアの conformance 全体像（`save_report` で保存・リプレイ
+        の素材／新 backend は「これが全部緑」で完成）。
+
+        絶対契約＝writer の all-or-nothing・CAS 並行安全（create-only/update）・**非CAS 並行**
+        （無条件上書きの原子性・並行 delete/get 安全）。各契約は自分の uuid キーのみ触る（非破壊）。
+        違反があっても止めず passed=False で記録し全契約を回し切る。`errors.fail_loud` は壊れた
+        下層に繋ぐ make_store ファクトリ前提で**単一ストアに当てられない**ため run_full には含めない
+        （fault-injection 専用テスト・matrix の transport 版が担う）。
+        """
+        await self.run_light(report)
+        await self.run_middle(report)
+        await self.run_heavy(report)
+        await self._run_absolute(report, "writer.all_or_nothing", assert_writer_aborts_on_error)
+        await self._run_absolute(
+            report,
+            "put.create_only.concurrency",
+            lambda s: assert_put_if_absent_concurrency_safe(s, size=4096),
+        )
+        await self._run_absolute(
+            report,
+            "put.update_cas.concurrency",
+            lambda s: assert_put_if_match_concurrency_safe(s, size=4096),
+        )
+        await self._run_absolute(
+            report,
+            "concurrent.overwrite_atomic",
+            lambda s: assert_concurrent_overwrite_atomic(s, size=4096),
+        )
+        await self._run_absolute(report, "concurrent.delete_safe", assert_concurrent_delete_safe)
