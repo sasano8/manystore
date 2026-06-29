@@ -11,13 +11,20 @@
   buffer 合成／Local=file 寄りで `LocalKeyValueStore = KeyValueFromFileStore(LocalFileStore)`）。
 - **get の duality**: primitive `get_or_raise`（欠損→`FileNotFoundError`）＋基底 `KeyValueStoreBase` が `get(default)` を
   供給。`get_or_raise` は `@abstractmethod`＝実装漏れはインスタンス化時 `TypeError`。client/service 層も具備。
-- **prefix は optional capability**（`SupportsPrefixListing`）＝S3 native／他は `scan_prefix` で明示 opt-in。
-  非対応は **fail-loud**（`NotImplementedError`・暗黙フォールバック無し）。Safe/Array が委譲伝播。
+- **prefix 列挙は core 引数**（`iter_all(prefix="")`/`list_all(prefix="")`）＝S3 はサーバ側 `Prefix=` で native／
+  他（local/dict/nats/remote）は scan+filter を契約上の既定動作で実装（旧 `SupportsPrefixListing` capability は
+  2026-06-26 廃止＝意思決定の変遷参照）。
+- **条件 put / CAS**（M046）: `put(key, value, *, if_match=None)`＝None=LWW／`FileInfo.absent()`=create-only／
+  `FileInfo`=update CAS（不一致 `ConflictError`）。比較トークンは `FileInfo.etag`（S3=ETag・local=mtime_ns+size・
+  dict=世代・NATS=メタ subject 最終 seq）。`head(key)->FileInfo` が version 読み口。全 backend＋native REST＋remote＋
+  S3 GW まで配線済。
 - async / sync ブリッジ（`AsyncToSyncKeyValueStore`）、接続ライフサイクル（`connect_key_value_store`/`connecting`/
   `ConnectPolicy`）、安全パス（`validate_safe_path`/`SafeKeyValueStore`/`SafeFileStore`）、合成（`ArrayKeyValueStore`/
-  `DownloadCache`）。
+  `DownloadCache`）、片方向同期 `StorageMirror`（`storage/sync/`）。
 - **適合性ツール `manystore.tools.conformancer`**: メソッド存在チェック＋`FileStoreTester`（DictFileStore をオラクルに
-  差分検証。`run_light` 実装済＝12 観点・副作用も記録・`save_report` で JSON 保存）。
+  差分検証＝run_light/middle/heavy/full）＋**オラクル非依存の絶対契約**（writer all-or-nothing・CAS 並行・非CAS 並行・
+  fail-loud〔in-process/transport〕＝`ABSOLUTE_CONTRACTS`）。契約カタログ→spec 文書／scaffold／drift ガード。
+  `tests/conformance_providers.py` で全 provider を 1 宣言→ matrix が dict/local/remote/実 nats/s3 へ非破壊で流す。
 - **UI/サーバ（`manystore[server]` extra）**: `serving.services`/`serving.server`/`client` の 3 層。任意 context を HTTP+WS で公開する
   汎用 CRUD UI。context = ArrayStorage 第一階層（bucket）。native REST は `{bucket}/{path}`、WS ライブ通知、
   `views.featured` で重点パス。`RemoteKeyValueStore` でサーバ越し KVS。
@@ -30,7 +37,7 @@
   で spec 再生成 → `mkdocs build --strict`）。PR はビルド検証のみ・**main push のみ公式 Actions（upload-pages-artifact/
   deploy-pages）で実公開**。`index.md` は snippets で README を取り込む単一ソース。docs 依存は `docs` group（mkdocs-material）。
   **要手動: Settings → Pages → Source = GitHub Actions を有効化**（初回のみ・ユーザー作業）。
-  直近 fast = **120 passed, 12 deselected**。実 backend E2E（NATS / S3 path-style）検証済（`make e2e-up`）。
+  実 backend E2E（NATS / S3 path-style）検証済（`make e2e-up`→gated matrix）。
 - **local backend は非ブロッキング**（M010）: 全 IO syscall を anyio でスレッドへオフロード＝event loop を塞がない。
 
 ## 残作業（What's left）— バックログ
@@ -48,19 +55,13 @@
 
 | ID | タスク | 優先 | 備考（根拠 file:line） |
 |----|--------|------|------|
-| ~~M054~~ | ~~nats `get_or_raise` の fail-loud 化~~ → **完了（2026-06-28）** | done | `except Exception`→`except JSNotFound`（`nats.js.errors.NotFoundError`・単一クラス catch で py2 書き戻し回避）に narrowing。欠損のみ NotFoundError、障害は伝播。実 NATS e2e（gated）で検証想定 |
-| ~~M055~~ | ~~remote `exists` の fail-loud 化~~ → **完了（2026-06-28）** | done | `return status==200`→`404→False / 他は raise_for_status / 200→True`（head_meta と同規約）。test +3（httpx.MockTransport で 200/404 マッピング＋500→`HTTPStatusError` 伝播）。`make check` 緑（155） |
-| ~~M056~~ | ~~nats `_get_obs` の無ロック lazy connect~~ → **完了（2026-06-28）** | done | `_NatsBase` に `asyncio.Lock` を持たせ `_get_obs` を double-checked init に（速い道はロック無し・未確立時のみロック内で接続→確立し切ってから `_obs` を公開）。並行二重接続＝接続リークを防止。test=fake nats module で 10 並行 `_get_obs` が `nats.connect` を 1 回だけ呼ぶことを検証 |
-| ~~M057~~ | ~~connect/aclose のロールバック・全件クローズ保証~~ → **完了（2026-06-28）** | done | 共有ヘルパ `_connect_all`（途中失敗で確立済みを best-effort 巻き戻して元例外を再送出）／`_aclose_all`（全件試行し最初の例外を送出＝1つの失敗で残りを漏らさない）を `protocols.py` に新設。`ArrayKeyValueStore`・`loadbalancer` の connect/aclose を置換。`StorageService.connect` は try/except で部分確立（mount 済みストア・起動済み watcher）を `aclose` で巻き戻し、`aclose` は watcher 停止＋array close を全件試行。test +2（_connect_all 巻き戻し・_aclose_all 全件クローズ） |
-| ~~M058~~ | ~~writer の例外時 all-or-nothing 統一~~ → **完了（2026-06-28・M065 と同時）** | done | `_KvWriteFileObject.__aexit__` を `exc[0] is not None` で put せず破棄に（local atomic writer と契約統一）。M065 の絶対契約 `assert_writer_aborts_on_error` がこの違反を横断検知＝契約を先に立て修正で緑化（dict writer がパスするのは本修正のおかげ）。`protocols.py:439` |
-| ~~M059~~ | ~~カバレッジ計測導入（pytest-cov）~~ → **完了（2026-06-28）** | done | `pytest-cov>=5.0` を dev group＋`make cov`（fast テスト・`--cov-report=term-missing`・branch=true）。`[tool.coverage]` で scaffold も除外せず可視化（穴を隠さない）。**ベースライン TOTAL 77%**＝nats.py 39%/s3.py 75%/http_store 79%/crypto・ipfs・loadbalancer・各 `__main__` は低〜0%。穴埋めの優先順位付けの土台に |
-| M065 | conformancer を「実装漏れ検知器」に育てる（run_middle/heavy） | **進行中（high）** | **ユーザー方針＝実装漏れは conformancer に契約として実装し横断検知**。北極星＝conformance を仕様の単一源泉に（テスト可能・pytest-cov 可視・仕様書出力・スキャフォールド材料＝究極の仕様駆動。projectbrief「北極星」）。**step1**＝run_middle＋絶対契約 `assert_writer_aborts_on_error`（M058 を契約先行修正）。**step2**＝fault-injection で fail-loud 契約化（`InjectedFault`＋`FaultInjectingKeyValueStore`＋`assert_fail_loud_propagation`＝M054/M055 クラスを wrapper 横断ロック）。**step3**＝契約カタログ→`docs/conformance_spec.md` 生成（北極星③）。**step4 完了（2026-06-28・北極星④＝scaffold 自動生成）**＝`scaffold_backend(class_name, kind)`＝基底の `__abstractmethods__`（著者が必ず実装する primitive）を Protocol 署名で stub（`raise NotImplementedError`）し、ヘッダに満たすべき絶対契約（[ABSOLUTE_CONTRACTS]）＋provider 配線手順を出力。CLI `python -m manystore.tools.conformancer --scaffold MyStore [--kind kv|file] [--out path]`。**契約一覧が実装の TODO になり、生成物を matrix の provider に通すだけで実装漏れが loud に落ちる**＝仕様駆動の出発点。conformance_spec の「新 backend の作り方」に `--scaffold` を案内。test +4。**step5 完了（2026-06-28・北極星 fail-loud を transport 越しでも契約化＝M066 step3 連動）**＝fail-loud 契約を「型を問わず raise／NotFound・正常終了に化けさせない」へ精緻化（HTTP 越しは `InjectedFault`→`HTTPStatusError` と型が変わるため）。`_assert_op_fail_loud` に共通化＋transport 版 `assert_fail_loud_over_transport`（既に「壊れた下層」に繋がった store 用）。**500 を返す fault transport の `RemoteKeyValueStore` に当て、全 op（get/get(default)/exists/delete/put/list/iter）が握り潰さず raise することを契約化**＝M054（欠損偽装）/M055（False 偽装）クラスを **HTTP 越しでも**横断検知（test_client +1・全緑）。既存 in-process 契約・牙テストは精緻化後も緑。`make check` 緑（181）。**北極星①〜④＋fail-loud（in-process/transport）完備**。**step6 完了（2026-06-28・run_heavy 本実装）**＝`run_heavy` を NotImplementedError から実装＝**規模・境界**の差分契約（128 KiB 多チャンク大容量 round-trip〔全 256 バイト値＝バイナリ完全性も〕／チャンク境界非依存の分割 read〔新 op `open_reader_read_segments`＝小片を繰り返し read して連結しオラクル一致を見る〕／多キー昇順列挙／grow→shrink→regrow 連続 overwrite）。非破壊（M066① の ns スコープ＋後始末に乗る）＝**全 provider（実 nats/s3 含む）で実行**。`differential_contract_aspects`/spec 文書生成（`__main__`）に heavy を追加＝spec 文書に heavy 観点が出る（北極星③）。test +3（local 一致・dict 自己一致・截断 reader 検出の牙）＋matrix +1。実 nats・実 s3-path で緑を確認。`make check` 緑（191）・mkdocs --strict 緑。**step7 完了（2026-06-28・leaf fault transport＝M066② 連動）**＝fail-loud over transport を **実 leaf backend（nats/s3）へ**拡張（従来は HTTP 越し Remote のみ）。`tests/conformance_providers.py` に **接続後に下層クライアントを故障プロキシへ差し替える** opener を新設＝nats は `store._obs` を全メソッド `InjectedFault` を投げる `_FaultObjStore` に／s3 は `store._session` を全メソッド `InjectedFault` の `_FaultS3Client` を yield する CM に差し替え（backend 自身の except 節を実際に通す）。`leaf_fault_providers()`＋matrix `test_fail_loud_over_transport`（gated）で `assert_fail_loud_over_transport` を当て、全 op が握り潰さず raise することを契約化。**この契約が nats `delete` の M054 級バグ（`contextlib.suppress(Exception)` で障害も握り潰し）を炙り出し是正**＝`except JSNotFound` に narrowing（欠損のみ冪等 no-op・障害は伝播）。実 nats-fault・実 s3-path-fault で緑＋crud/run_middle も緑（narrowing で冪等 delete は不変）。**step8 完了（2026-06-29・残＝非CAS並行/run_full）**＝オラクル非依存の絶対契約を2つ追加＝`assert_concurrent_overwrite_atomic`（`if_match` 無し並行 put でも最終値は完全な A/B＝torn/混在/空なし＝M058 all-or-nothing の並行版）／`assert_concurrent_delete_safe`（並行多重 delete は冪等〔障害のみ伝播＝M054 並行版〕・並行 get は seed か NotFound〔torn/別値不可〕・完了後 不在）。両者を `ABSOLUTE_CONTRACTS` へ登録（→ spec 文書・scaffold・drift ガードへ自動波及＝conformance 25→40）＋matrix へ全 provider 配線（非破壊・uuid キー）＋牙テスト（dict/local pass／torn writer・no-delete store で fail）。`run_full` を NotImplementedError から実装＝差分（light+middle+heavy）＋全絶対契約（fail_loud 除く＝make_store ファクトリ前提で単一ストア不可）を target に当て 1 レポートへ集約（`_run_absolute`＝違反でも止めず passed=False 記録・read-only は skip）＝そのストアの conformance 全体像（save_report でリプレイ素材）。`make check` 緑（215）・mkdocs --strict 緑。**残＝StorageMirror 実行中の source 変更**（別コンポーネント＝M016/M050 follow-up へ移管） |
-| ~~M060~~ | ~~crypto.py を pytest 化~~ → **完了（2026-06-29）** | done | inline `_selftest`/`__main__`（CI 収集対象外の dead code）を撤去し `tests/test_crypto.py` を新設＝XorStreamCipher の round-trip・チャンク境界非依存（transform を可変オフセットで分割呼び出し→結合一致）・対称性（encrypt==decrypt）・長さ不変・空鍵 `ValueError`／CipherReader·Writer 越し round-trip・方向別拒否（`UnsupportedOperation`）・close の下層委譲、を pytest 化（test +9）。crypto.py のカバレッジを CI で常時計測可能に（M059 の穴埋め）。`make check` 緑（200） |
 | M061 | 実 backend e2e を CI で gated 実走 | med | `test_e2e_backends.py` は nats/s3 未到達→`pytest.skip`＝CI は local のみ実走で CAS/エラーパスが緑のまま未検証。minio+nats service container を CI ジョブに起こし「skip 許容」をやめる。`assert_put_if_*_concurrency_safe` を s3/nats e2e にも適用 |
-| ~~M062~~ | ~~`list_all` 重複の基底集約＋小掃除~~ → **完了（2026-06-28）** | done | `_StoreBase.list_all` 既定へ一本化＝冗長な `list_all` override を 13 箇所削除（local/s3/nats/memory/ipfs/loadbalancer/ArrayKVS/remote の同一コピー8＋http の `_read_only`〔base→iter_all の `UnsupportedOperation` に二系統メッセージ統合〕＋safe〔iter_all 側で prefix 検証済〕＋KeyValueFile/FromFileStore/DownloadCache の委譲3）。併せて孤児 TODO（`protocols.py` アダプタ iter_all）解消・`_S3StreamReader` のデッド `client` 引数削除。**11 ファイル・47 行減**。残る `list_all` は Protocol stub・基底既定・sync_bridge の sync 版のみ。`make check` 緑（184） |
-| ~~M063~~ | ~~`DownloadCache.download` の同期 IO offload~~ → **完了（2026-06-28）** | done | async 内で直接実行していた同期 FS 操作（`is_file`/`mkdir`/`_atomic_write_bytes`）を**再利用可能な非同期ヘルパ** `_is_file_async`/`_ensure_parent_async`/`_atomic_write_bytes_async`（protocols.py・`anyio.to_thread.run_sync` でオフロード）に切り出し、DownloadCache を clean な await 3 連に（inline 閉包を廃し ユーザー指示「非同期にして」）。event loop 非ブロック（local backend と同流儀・真の async disk IO は不採用 M010）。`make check` 緑（184） |
-| ~~M064~~ | ~~array cp/mv の同一 backend 判定~~ → **完了（2026-06-28・docstring 明記＋テストで固定）** | done | 精査の結果 `s_store is d_store`（identity）判定は**正しく保守的**＝同一ストアオブジェクト（同一 mount／同一物を別名 mount）のみ native（S3 copy_object・local 原子 rename）、それ以外は get→put。別ラッパで2回包んだ別 mount を native 取りこぼすのは意図的（別 mount は論理的に別コンテキストで subkey 名前空間の一致を Array は保証できず native cp は意味論的に危険）。物理同一性判定を IF に足すのは最小・汎用に反する（YAGNI）＝**等価トークンは入れず設計意図を明記**。確実に native にしたいなら同一オブジェクトを2名で mount。test +1（同一 mount=native 委譲／跨ぎ=get→put を spy で固定）。`make check` 緑（185） |
-| M066 | 挙動契約を全 backend＋client 横断で実行（集約ハーネス） | **進行中（high）** | **ユーザー指摘＝IF が揃うので同一契約 body を複数実装に流せるはずだが配線が偏っていた**。**step1**＝Remote/実 backend へ contract を個別配線。**step2 完了（2026-06-28・集約）＝1 パラメタ化ハーネスへ集約**＝`tests/conformance_providers.py` に **全 provider を 1 か所宣言**（dict/local/remote/nats/s3-virtual/s3-path。各 `open()`→接続済み FileStore・`gated`・`reachable`。KVS-native は `KeyValueFileStore` で FileStore 化）＋`tests/test_conformance_matrix.py` が全契約を流す。**step3 完了（2026-06-28・M066①＝run_* を非破壊化して実 backend へ拡張）**＝run_light/run_middle を **delete_all 全消去から uuid 名前空間スコープ＋後始末（`_cleanup_ns`）へ**転換＝列挙・状態観測を `iter_all(prefix=ns)` に閉じ、共有 backend に既存キーが在っても run 配下だけを差分検証（非破壊）。`isolated` フラグを廃止＝**run_light/run_middle も全 provider（実 nats/s3 含む）で実行**。`_check`/`_state`/`_op_list_all`/`_op_iter_all` に prefix を貫通。**実 nats・実 s3-path で run_light/run_middle 緑を確認**（`make e2e-up`→gated matrix）。fast 185 passed。**step4 完了（2026-06-28・M066②＝leaf fault transport・M065 step7 連動）**＝fail-loud over transport を実 leaf backend（nats/s3）へ拡張（接続後に下層クライアントを故障プロキシへ差し替える opener＋`leaf_fault_providers()`＋matrix `test_fail_loud_over_transport`）。nats `delete` の握り潰しバグ（`suppress(Exception)`）を `except JSNotFound` narrowing で是正。実 nats-fault・実 s3-path-fault で緑。**step5 完了（2026-06-28・M066③＝native FileStore writer 直接検証）**＝KVS-native backend を `KeyValueFileStore` で包むと open_writer/open_reader が**バッファ writer 経由**になり S3 の native streaming IO（multipart writer / range reader）を検査できていなかった。`create_unsafe_file_store` の native `S3FileStore` を直接接続する `native_file_providers()`（`s3-path-native`）＋matrix `test_native_writer_aborts_on_error`／`test_native_file_io_matches_oracle`（run_light/middle/heavy を native IO で）を新設。**この契約が `_S3MultipartWriter.__aexit__` の all-or-nothing バグ（M058 級＝例外時も `close()`→multipart を complete し中途確定）を発見・是正**＝`_abort()`（abort_multipart_upload・best-effort）を新設し `exc[0] is not None` で確定しない（local atomic writer と契約統一）。teeth-test で違反検知も確認。実 s3-path-native で writer-aborts＋run_light/middle/heavy 緑。**M066 完了（残なし）**。⚠️既知の弱点＝gated provider は contract の AssertionError も skip に化ける（`_store` の except）＝実 backend の contract 違反が test-heavy で skip 扱いになりうる（SeaweedFS の CAS 非対応 skip がこれに依存）。健全時は real PASS でカバレッジは効く。harness 改善は別タスク候補 |
+
+> **完了済み（下記「完了マイルストーン」へ昇格）**: M054/M055（fail-loud）・M056（nats lock）・M057（lifecycle
+> ロールバック）・M058（writer all-or-nothing）・M059（pytest-cov）・M060（crypto pytest）・M062（list_all 集約）・
+> M063（DownloadCache async）・M064（cp/mv identity 設計固定）・**M065**（conformance を仕様の単一源泉に＝北極星
+> ①〜④＋fail-loud〔in-process/transport〕＋非CAS並行＋run_full）・**M066**（挙動契約の集約ハーネス）。
+> M016（CAS 以外の並行/大容量/エラーパス）は並行系を M065 step8 で契約化済＝残は StorageMirror 実行中の source 変更。
 
 > M016（既存・下表）も本監査で具体化＝CAS 以外の並行操作（並行 delete/get・Mirror 実行中の source 変更）／大容量・チャンク境界／backend エラーパスの fail-loud 検証が手薄。M059 で可視化 → M016 で穴埋め。
 
@@ -68,7 +69,6 @@
 
 | ID | タスク | 優先 | 備考 |
 |----|--------|------|------|
-| ~~M046残~~ | ~~conditional put の残~~ → **完了（2026-06-28）** | done | **全面完了**。コア backend（local/dict/S3/NATS）＋ native REST＋remote＋**S3 ゲートウェイ**まで conditional put/CAS を配線。conformancer で create/update CAS の並行安全性を機械検証（local/nats は実 backend e2e でも緑）。設計 plan は完了につき GC 済（設計詳細は下記完了マイルストーン群＋git 履歴に保持） |
 | M051 | kubernetes backend（M050 の具体 sink） | 相談 | ユーザー要望（2026-06-27・討議中・doc-first）＝put=server-side apply / get=補完済み live（put≠get）。キー=`namespace/resource_type/name`（`.yml` 含めず・group/version は discovery 補完・衝突時 `type.group`）。**FileInfo に世代情報**（resourceVersion/generation/uid/creationTimestamp）。**resourceVersion CAS を M046 の参照実装**に（`if_version` 不一致は ConflictError）。ローカル側=`KubeManifestStore` ラッパ（パス↔内容の同一性検証＝Safe 風 1 枚）。依存=`kubernetes-asyncio` を extra `[k8s]`（遅延 import）。cluster-scoped は後回し。詳細は interrupt |
 | M012 | `list(prefix=...)` / pagination | 中 | prefix は core `iter_all(prefix=…)` 引数化済（M030 capability は 2026-06-26 廃止）。**pagination 未対応**。設計案（2026-06-26 対話・要 doc-first）＝(a) `iter_all`/`list_all` に **offset+limit** を足す（単純・全 backend で scan 可だが大 offset は O(n)）／(b) **cursor/continuation-token** 形式（S3 ContinuationToken・NATS 等の native と整合・M021 の continuation と同一機構）。加えて **返り値を range メタ付きの独自型**にする案＝iter は「何件目〜何件目」を、list は from/to 件数属性を持つ（pagination メタ＝**file/value パラダイム内**。却下した transport の request/response 封筒とは別物）。未確定＝offset/limit vs cursor の二択と、独自結果型を入れるか。M021（S3 GW continuation）・M044（limit 既定の定数化）と連動 |
 | M013 | メタデータ / content-type | 中 | S3・NATS は native 対応だが共通 IF に無い |
@@ -84,7 +84,6 @@
 | M039 | IPFS backend 本実装 | 相談 | scaffold 配置済（`backends/ipfs.py`・本体 NotImplementedError・**factory 未接続**）。MFS（`/api/v0/files/*`）主＝パス鍵で KVS に乗せる／CID 直は従（フック `cid_add`/`cid_get` のみ）。httpx 流用。接続ネタ＝api_url/gateway_url/token/mfs_root/pin_on_write/timeout。本実装時に factory `"ipfs"` 分岐を足す |
 | M041 | nats not-found catch を撤去 | low | `nats.iter_all`/`exists` の `NotFoundError` catch（空/欠損の正規化）を将来 `obs.watch()` ベース再実装で取っ払う。M036 の残置（コード内 `# TODO(M041)`）|
 | M042 | transport 層の整理 | low | `client/remote.py` の Safepath Client / RemoteKVS の所属切り分け（コード内 `# TODO(M042)`）。設計musing を backlog 化 |
-| ~~M044~~ | ~~spec/既定値の定数を集約~~ → **完了（2026-06-28）** | done | 専用 `specs.py` は作らず **`protocols.py` 冒頭に「spec/既定値」節**を新設（ユーザー確定＝定数の正本はインターフェースと同居）。core 共通の共有値のみ集約＝`DEFAULT_LIST_LIMIT=1000`（service/server routes/remote client/conformancer の list 既定）／`MAX_HTTP_LIST_FETCH=10_000`（remote の HTTP fetch 上限）。S3 仕様由来値（`DEFAULT_MAX_KEYS`・partNumber 範囲）と単一使用の局所定数（`DEFAULT_CACHE_DIR`）は所有モジュールに据え置き（locality 優先・god-module 化回避）。定数は**データ専用**でロジックは寄せない。`make check` 緑（152） |
 | M040 | ロードバランサーストレージ層 本実装 | 相談 | scaffold 配置済（`surfaces/loadbalancer.py`・本体 NotImplementedError・**facade 未公開**）。**負荷メトリクスで適切な1 backend を選ぶ**動的プレースメント（シャーディング/レプリケーションではない）。ネタ＝capability `SupportsLoadStats`/`LoadStats`＋`BalancePolicy`（RoundRobin/MostFreeSpace/LeastLoaded）。Array の兄弟。**未解決＝読みルーティング**（probe-all 既定 vs 配置インデックス）。local の free は `shutil.disk_usage`、cpu/mem は別途エージェント/エンドポイント要 |
 | M045 | `put2` ＝ error-as-value（Go 風 `(Error\|None, FileInfo)`） | 相談 | 別メソッド `put2(key, value) -> tuple[Error \| None, FileInfo]`＝成功は `(None, FileInfo)`／失敗は `(Error(...), FileInfo?)` で **エラー側に任意情報を載せられる**（“**半分** request/response 型”＝成功は FileInfo のまま・封筒は被せない。却下した full envelope とは別物）。要 doc-first。**未確定**＝(1) 例外ベース fail-loud（既存 put が raise）との二重化＝どの op が raise／どの op が tuple か、混在の指針／(2) `Error` 型の定義（共通基底 or 既存例外 `Exception\|None`／backend 固有情報の持たせ方）／(3) core IF に載せるか別系統 method か（載せるなら async↔sync lockstep ＋ conformancer parity ＝M043 前提）／(4) get/delete 等への波及。put→FileInfo（済）と request/response 封筒却下（projectbrief 非ターゲット）の中間地点 |
 
@@ -93,64 +92,39 @@
 
 ### 完了マイルストーン（要点のみ・経緯は git 履歴）
 
-- **M046 MVP（2026-06-28・完了）**: put の並行安全性（lost-update 検出）を **conditional put** で実装。
-  **派生メソッドを作らず put 1 本＋任意 `if_match`**（ユーザー確定）＝`put(key, value, *, if_match=None)`:
-  None=原子＋直列化の **LWW**（失敗しない）／`ABSENT`=create-only（既存なら `ConflictError`）／
-  `FileInfo`=update CAS（etag 不一致は `ConflictError`）。**opaque version 文字列は出さず**、比較トークンは
-  `FileInfo` 内に畳む（`_Absent`/`ABSENT` センチネル＋`type IfMatch` を protocols に新設・kv facade で公開）。
-  **`head(key)->FileInfo` 新設**（`FileInfo` に `modified_at`/`etag` を `NotRequired` 追加・既定実装は
-  get 由来で etag=None・native backend が override）。backend: **dict=メタストア**（通し番号 `_seq` を etag に・
-  ABA 安全）／**local=os.link（create）＋flock+stat 比較+replace（update CAS）・head は os.stat**／S3=
-  IfNoneMatch/IfMatch＋HeadObject／NATS=head のみ（CAS は P2 で loud）／http=read-only（head は HTTP HEAD）。
-  ラッパ（Safe/Array/DownloadCache/sync_bridge/KeyValueFile(From)Store）は put if_match＋head を委譲。
-  M043 lockstep を全揃え（Protocol async/sync・`_StoreBase`・parity 緑）。**conformancer が並行安全性を強制**＝
-  `assert_put_if_absent_concurrency_safe`（create 競合・put(if_match=ABSENT)）＋新 `assert_put_if_match_
-  concurrency_safe`（update CAS）。テストは **実ストア経由**（Dict/Local）＝旧 `_ConditionalDict` フェイクを
-  廃し、否定テストだけ故意 TOCTOU の `_RacyCreateDict` を残置（チェッカの牙を担保）。put 戻りは安価な
-  `{filename,size}` 据置。残＝M046残（NATS CAS / serving 配線 / remote）。fast 139 passed・`make check` 緑。
-- **M046残 remote 署名検証（2026-06-28・案B step1・ユーザー対話）**: 「HTTP 越し conformance」の前段＝
-  `RemoteKeyValueStore` が `AsyncKeyValueStore` を**署名レベル**で満たすかの機械ガードを追加。conformancer に
-  再利用ヘルパ `concrete_store_signature_errors`/`assert_concrete_store_signatures` 新設＝**メンバ存在＋
-  パラメータ署名の一致**を見て **戻り注釈の narrowing は許容**（`iter_all` が Protocol の `AsyncIterable`→
-  部分型 `AsyncIterator`＝全 9 backend/surface 共通の house convention・LSP 安全な共変）。strict な
-  `base_protocol_parity_errors` は concrete store でこの narrowing を誤検出＝**base↔Protocol lockstep 専用**と
-  棲み分け（concrete store 用の新ヘルパが正本）。remote は put の `if_match`・`head`・`create` まで param drift
-  ゼロを確認。test=`test_remote_kvs_signature_parity`＋ヘルパ健全性 `test_concrete_store_signatures_tolerate_return_narrowing`
-  （narrowing 許容／param drift 検出の二面）。**スコープ確定＝今回は署名検証のみ**（CAS の HTTP 越し
-  conformance は serving 配線が前提＝M046残に保持）。`make check` 緑（142）。
-- **M046残 S3 ゲートウェイ If-Match/If-None-Match（2026-06-28・ユーザー指示で実装）＝M046 全面完了**: S3 互換
-  ゲートウェイの PutObject に conditional write を配線。`If-None-Match: *`→create-only（`if_match=FileInfo.absent()`）／
-  `If-Match: *`→存在要求 update／`If-Match: "<etag>"`→ETag（本体 MD5）突合＋backend の version トークンで原子 CAS。
-  precondition 不成立は **412 PreconditionFailed**（S3 XML）、非対応形（非 `*` の If-None-Match）は **501 NotImplemented**
-  （fail-loud）。backend CAS の `ConflictError` も 412 に写す。**gateway の ETag は MD5 のまま**（S3 互換・既存契約）＝
-  backend CAS トークンと別物のため、If-Match は MD5 突合（S3 意味論）＋head の version 渡し（原子性）の二段で橋渡し
-  （read と put の間の並行変更は backend CAS が弾く）。test_gateway +5（create-only の 200/412・update CAS の 200/412・
-  If-Match on absent→412・If-Match: * の存在要求・非 `*` If-None-Match→501）。`uv run pytest` 全緑（163 passed）。
-- **M046残 NATS revision CAS（2026-06-28・ユーザー指示「NATS revision CAS を実装」・実 NATS で検証）**: NATS
-  Object Store の条件 put を実装。高レベル `obs.put` は OCC を露出しないため、**version トークン＝オブジェクトの
-  メタ subject（`$O.<bucket>.M.<b64(name)>`）の最終ストリーム seq** を採り、メタ publish に JetStream の
-  `Nats-Expected-Last-Subject-Sequence` を付けて**サーバ側で原子 CAS**（不一致は err_code 10071→`ConflictError`）。
-  create-only=baseline seq（不在=0／tombstone=その seq）／update CAS=etag(=seq) を期待値に。`head` は seq を etag に
-  返すよう変更（旧 digest/nuid は OCC 不可だった）。`_put_with_occ` は bytes 値をチャンク＋メタ publish で最小再実装
-  （object store 内部ワイヤ形式に依存＝nats-py 仕様変更に弱いが object store で原子 CAS を得る唯一経路）。
-  **実 NATS（docker compose）で検証**＝conformancer の create-only/update CAS 並行チェッカ＋多チャンク roundtrip 緑。
-  e2e に `test_backend_conditional_put_cas`（全 backend 共通・local 常時／nats・s3 は gate）を追加＝local/nats 緑。
-  ⚠️作業環境異常が再発＝`except (A, B):` を py2 構文へ書き戻された→**単一クラス catch**（`except JSNotFound:`）で回避。
-  `uv run pytest` 全緑（158 passed・4 skip=s3 のみ）。残＝S3 GW の If-Match のみ。
-- **M046残 serving 配線＋remote 条件 put（2026-06-28・案B step2/3・ユーザー指示で実装）**: conditional put を
-  **native REST と remote クライアントに end-to-end 配線**し、**CAS の並行安全性を HTTP 越し conformance で機械検証**。
-  - **serving/server/routes.py**: PUT が条件ヘッダを `if_match` に解く＝`If-None-Match: *`→`FileInfo.absent()`
-    （create-only）／`If-Match: "<etag>"`→`FileInfo(etag=...)`（update CAS）／無し→None（LWW）。HEAD が
-    メタを露出＝`ETag`（CAS トークン quote）＋独自 `X-Manystore-Size`/`X-Manystore-Modified-At`（標準 HTTP-date は
-    秒精度で lossy）。条件不一致は backend の `ConflictError`→既存 `_on_error`/`to_problem` が problem(409)。
-  - **serving/services/service.py**: `head`/`head_or_absent` 新設（合成キーを bare key へ・etag 透過）＋
-    `put(..., if_match=None)` に拡張（`_array` へ委譲）。
-  - **client/remote.py**: `RemoteKeyValueStore.put` が if_match を条件ヘッダへ写し、`head` を override（HEAD の
-    ETag/size/modified_at から version 付き FileInfo を組む＝既定 head は get で etag=None ゆえ CAS 不可）。
-    `ManystoreClient.put` は 409→`ConflictError` に戻す＋`head_meta` 追加。
-  - **tests/ui/test_client.py +4**: HEAD の version 露出／単発の create-only・update CAS の Conflict／
-    **conformancer の `assert_put_if_absent/if_match_concurrency_safe` を HTTP 越し**（client→server→local）に回す。
-  - 残＝M046残（① NATS revision CAS〔要 nats-py 調査＋実 NATS〕② S3 GW の If-Match）。`make check` 緑（146）。
+- **M065（2026-06-28〜29・完了）＝conformancer を「仕様の単一源泉」に育てる（北極星①〜④）**: 実装漏れを
+  conformancer に契約として実装し backend 横断で検知。`FileStoreTester` に **run_middle/heavy/full** を実装
+  （差分契約＝DictFileStore をオラクルに観測一致）＋**オラクル非依存の絶対契約**（`ABSOLUTE_CONTRACTS` カタログ）
+  ＝writer all-or-nothing（M058 を契約先行修正）・CAS 並行（create/update）・**非CAS 並行**（`assert_concurrent_
+  overwrite_atomic`＝無条件並行上書きの原子性／`assert_concurrent_delete_safe`＝並行 delete 冪等・get は seed か
+  NotFound）・**fail-loud**（fault-injection で「障害を欠損/False/default/正常終了に化けさせない」を契約化＝
+  in-process `assert_fail_loud_propagation`／transport `assert_fail_loud_over_transport`＝HTTP Remote＋実 leaf
+  nats/s3 の下層を故障プロキシに差し替え）。北極星＝**①テスト②pytest-cov 可視（`make cov`・TOTAL 77%＝M059）
+  ③spec 文書生成（`docs/conformance_spec.md`・絶対契約は宣言／差分観点は run_* 実行から導出）④scaffold
+  （`--scaffold`＝契約一覧が実装の TODO）**。`run_full`＝差分＋全絶対契約を 1 レポートへ集約。**この契約群が
+  nats `delete` の握り潰し（`suppress(Exception)`→`except JSNotFound`）と `_S3MultipartWriter.__aexit__` の
+  all-or-nothing 違反（→`_abort()`）を炙り出し是正**。実 nats/s3-path/native で緑。`make check` 緑（215）。
+- **M066（2026-06-28・完了）＝挙動契約の集約ハーネス**: IF が揃うので同一契約 body を全実装へ流す。
+  `tests/conformance_providers.py` に **全 provider を 1 か所宣言**（dict/local/remote/実 nats/s3-virtual/s3-path
+  ＋leaf-fault＋native-file）→ `tests/test_conformance_matrix.py` が全契約をパラメタ化して流す。run_light/middle/heavy
+  を **delete_all 全消去から uuid 名前空間スコープ＋後始末（`_cleanup_ns`）へ**転換＝**非破壊**ゆえ共有 backend
+  （実 nats/s3）でも安全に実行。⚠️既知の弱点＝gated provider は contract の AssertionError も skip に化けうる
+  （`_store` の except・健全時は real PASS でカバレッジは効く）。
+- **M054〜M064 品質監査（2026-06-28〜29・完了）＝2026-06-28 の 4 観点監査で抽出**: M054（nats `get_or_raise`
+  fail-loud＝`except JSNotFound` narrowing）・M055（remote `exists` の 404/5xx 区別）・M056（nats `_get_obs` の
+  double-checked lock＝接続リーク防止）・M057（connect/aclose の `_connect_all`/`_aclose_all`＝部分確立を巻き戻し・
+  全件クローズ）・M058（`_KvWriteFileObject.__aexit__` の all-or-nothing）・M059（pytest-cov・`make cov`・TOTAL 77%）・
+  M060（crypto.py を pytest 化＝inline `_selftest` を撤去し `tests/test_crypto.py`・test +9）・M062（`list_all` の
+  基底集約＝override 13 箇所削除・47 行減）・M063（`DownloadCache.download` の同期 IO を anyio offload）・
+  M064（array cp/mv の identity 判定＝保守設計を docstring 明記＋テスト固定）。
+- **M046（2026-06-28・完了）＝conditional put / CAS**: put の lost-update を **派生メソッドを作らず put 1 本＋任意
+  `if_match`**（ユーザー確定）で実装＝None=LWW／`FileInfo.absent()`=create-only／`FileInfo`=update CAS（不一致
+  `ConflictError`）。**opaque version 文字列は出さず比較トークンは `FileInfo.etag` に畳む**（S3=ETag・local=
+  os.link/flock+mtime_ns+size・dict=世代 seq・NATS=メタ subject の最終 stream seq＋`Nats-Expected-Last-Subject-
+  Sequence` でサーバ側原子 CAS）。`head(key)->FileInfo` が version 読み口。**全 backend＋native REST（routes の
+  If-None-Match/If-Match→if_match・HEAD で ETag 露出）＋remote（条件ヘッダ＋head override）＋S3 GW（If-Match は
+  MD5 突合＋head version の二段橋渡し・不成立 412・非対応 501）**まで配線。conformancer の create/update CAS 並行
+  チェッカを実ストア（Dict/Local）＋HTTP 越し＋実 nats で機械検証。M043 lockstep 全揃え。
 - **M053（2026-06-27・完了）**: 「欠損」を例外ファミリへ昇格＝**`NotFoundError(FileNotFoundError, ManystoreError)`**
   （status=404・title="Not Found"）を新設（ユーザー指摘＝tests が exceptions.py 定義でない生 `FileNotFoundError`
   を想定していた）。stdlib を先頭に残すので既存 `except FileNotFoundError`/`pytest.raises(FileNotFoundError)` は
@@ -263,8 +237,10 @@
 ## 現状ステータス
 
 独立ライブラリ化＋配布前提（G1）完了。コア抽象は「FileStore=KVS+IO・核は native primitive 側・get duality・
-prefix capability（fail-loud）」で安定。protocols.py が契約＋既定実装の単一源泉。次は G2（安心して使える＝
-error-swallow 監査 M036 / Safe 既定化 M011・M032 / テスト拡充）と UI/GW の残フェーズ。
+prefix は core 引数・conditional put/CAS」で安定。protocols.py が契約＋既定実装の単一源泉。**品質優先フェーズ**
+（2026-06-28〜）＝4 観点監査の品質強化（M054〜M064）と **conformance を仕様の単一源泉に**（M065/M066＝北極星
+①〜④＋fail-loud＋非CAS並行＋run_full）を完了。残＝M061（CI で実 backend e2e 実走）と機能・完成度（M012/M013/
+M021残/M025残 等）。拡張（M051/M039/M040/M026/M045）は方針どおり後回し。fast 215 passed。
 
 ## 既知の問題
 
@@ -274,14 +250,14 @@ error-swallow 監査 M036 / Safe 既定化 M011・M032 / テスト拡充）と U
 
 ## 意思決定の変遷
 
-- **atomic write は torn-write 防止であり排他制御ではない／並行更新は conditional put で別途**（2026-06-27・
-  ユーザー指摘を受けた方針メモ・未実装＝M046）: local の temp+`os.replace` は「壊れた半端ファイルを見せない」
-  原子性のみを保証し、同一キーへの並行 put の**lost update は検出しない**（last-writer-wins）。検出は
-  **version/etag の compare-and-swap** を **opt-in の conditional put として fail-loud に raise**。put 既定の
-  無条件 set 契約は維持（最小-core）。**version は backend native を opaque な `version:str` に畳む**＝
-  S3=ETag・NATS=revision・**local=mtime(+size)**。当初「mtime は不適」としたが**訂正**＝modern FS は ns 精度で
-  etag 的に使える（ユーザー合意）。**真の難所はトークン選択でなく CAS の原子性**＝stat→比較→replace は TOCTOU で
-  racy ゆえ commit をロック/原子 rename（`renameat2(RENAME_NOREPLACE)` 等）で直列化する必要。doc-first で M046。
+- **atomic write は torn-write 防止であり排他制御ではない／並行更新は conditional put で別途**（2026-06-27 方針→
+  **M046 で実装済**）: local の temp+`os.replace` は torn を見せない原子性のみ保証し、並行 put の lost update は
+  検出しない（LWW）。検出は **CAS を opt-in の conditional put として `ConflictError` で raise**（put 既定の無条件
+  set 契約は維持＝最小-core）。**比較トークンは opaque な `version:str` でなく `FileInfo.etag` に畳んだ**（当初の
+  opaque version 案から訂正）＝S3=ETag・NATS=メタ subject の最終 seq・**local=mtime_ns+size**（modern FS は ns 精度で
+  etag 的に使える・ユーザー合意）。難所はトークン選択でなく CAS の原子性＝local は os.link（create）／flock+stat
+  比較+replace（update）で直列化し TOCTOU を避ける。全 backend＋REST/remote/S3 GW まで配線し conformancer が並行
+  安全性を機械検証（M065 の絶対契約）。
 - **`put` は共通レスポンス `FileInfo`（`{filename,size}`）を返す**（2026-06-26）: 全 backend が追加 I/O なしに生成できる
   最小・共通の *file メタデータ* のみ。revision/etag は共通でないため core には載せない。
 - **prefix 列挙を core の `iter_all(prefix="")`/`list_all(prefix="")` 引数に畳む（capability 廃止）**（2026-06-26・ユーザー判断）:
