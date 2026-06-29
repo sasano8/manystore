@@ -17,22 +17,24 @@ backend 横断で検知する。**①〜④＋fail-loud＋非CAS並行＋run_ful
 安全）**・fail-loud。全契約を 1 か所宣言（`tests/conformance_providers.py`）→ `tests/test_conformance_matrix.py` が
 全 provider（dict/local/remote/実 nats/s3）へ非破壊（uuid 名前空間スコープ）で流す。
 
-**直近サイクル（2026-06-29）**＝M060（crypto.py を pytest 化）＋M065 step8（非CAS並行の絶対契約2件＋run_full 本実装）。
-`make check` 緑（215）・mkdocs --strict 緑。
+**直近サイクル（2026-06-30）**＝M061（実 backend e2e を CI で gated 実走＝skip 許容やめ）。docker compose で
+nats/seaweedfs/minio を起こし CI に e2e ジョブ追加。skip マスク撤去で実問題 2 件を炙り出し是正（nats 並行
+delete/get ハング→get の境界化＋レース判定／SeaweedFS の CAS 非対応→s3 実装マトリクス化＋能力差を xfail strict）。
+`make check` 緑（215）・slow 41 passed/2 xfailed/9 skipped・mkdocs --strict 緑。**品質強化フェーズ（M054〜M066）完了**。
 
-**次サイクル候補**＝M061（実 backend e2e を CI で gated 実走）／M013・M012・M021残・M025残 等（機能・完成度）。
-詳細は progress「残作業」。
+**次サイクル候補**＝機能・完成度（M013/M012/M021残/M025残 等）。詳細は progress「残作業」。
 
 ## 直近の変更
 
 > 完了マイルストーンの詳細は `progress.md` に集約。ここには溜めない（クリーン済）。
 
-- （特記なし。次サイクルの着手内容をここに 1 行残す。）
+- M061 完了（実 backend e2e を CI で gated 実走・skip マスク撤去・nats 並行 delete/get 修正・s3 実装マトリクス）。詳細は progress。
 
 ## 次のステップ
 
-- **品質強化**: M061（CI で実 backend e2e を gated 実走＝skip 許容をやめ CAS/エラーパスを実検証）。
-- **機能・完成度**: M013（メタデータ/content-type）/ M012（pagination）/ M021残（S3 GW）/ M025残（名前空間 P2/P3）。
+- **機能・完成度**（品質強化フェーズ完了後の本流）: M013（メタデータ/content-type）/ M012（pagination）/
+  M021残（S3 GW）/ M025残（名前空間 P2/P3）。
+- **横展開（任意）**: s3 実装マトリクスに real AWS / 他 S3 互換を足す余地（`S3_IMPLS` に 1 行＋unsupported 宣言）。
 
 ## 進行中の決定・考慮事項
 

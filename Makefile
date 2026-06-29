@@ -83,11 +83,16 @@ docs: conformance-docs
 docs-serve: conformance-docs
 	uv run --group docs mkdocs serve
 
-# 実 backend E2E の起動＋S3 identity 登録（これで s3-path / nats ケースが走る）
+# 実 backend E2E の起動＋S3 identity 登録（これで nats / s3（seaweedfs・minio）ケースが走る）。
+# SeaweedFS と MinIO の両方を立て、conformance の s3 実装マトリクスを実機検証する。
 e2e-up:
-	docker compose up -d nats seaweedfs
+	docker compose up -d nats seaweedfs minio
 	@echo "SeaweedFS の起動待ち..."; sleep 4
 	echo 's3.configure -access_key $(E2E_S3_ACCESS_KEY) -secret_key $(E2E_S3_SECRET_KEY) -user manystore -actions Read,Write,List,Tagging,Admin -apply' | docker compose exec -T seaweedfs weed shell
+	@echo "MinIO の起動待ち..."; \
+	  for i in $$(seq 1 30); do \
+	    curl -sf http://localhost:9000/minio/health/live >/dev/null 2>&1 && break || sleep 1; \
+	  done
 
 # 実 backend の停止
 e2e-down:

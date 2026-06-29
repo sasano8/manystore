@@ -32,12 +32,14 @@
   1:1 合成（コア IF 不変・実 aiobotocore 往復で検証済）。
 - **統合エントリポイント `manystore.combined`（`python -m manystore`）**: native REST/WS（`/kv/raw`・buffered）と
   S3 ゲートウェイ（`/storage/s3`・streaming）を単一 lifespan で束ねる。
-- **CI**: GitHub Actions で `make check`（`ci.yml`）。**テスト軽重分離**＝`make test`（fast・`-m "not slow"`）/`make test-all`（全部）。
+- **CI**: GitHub Actions（`ci.yml`）＝`check` ジョブ（`make check`＝fast）＋**`e2e` ジョブ（M061）**＝docker compose で
+  nats/seaweedfs/minio を起こし `MANYSTORE_E2E_REQUIRED=1 make test-heavy`（実 backend・skip 不可）。**テスト軽重
+  分離**＝`make test`（fast・`-m "not slow"`）/`make test-heavy`（slow＝実 backend）/`make test-all`（全部）。
 - **Docs サイト（GitHub Pages・2026-06-25）**: `pages.yml` で MkDocs Material をビルド＝`make docs`（先に `make conformance-docs`
   で spec 再生成 → `mkdocs build --strict`）。PR はビルド検証のみ・**main push のみ公式 Actions（upload-pages-artifact/
   deploy-pages）で実公開**。`index.md` は snippets で README を取り込む単一ソース。docs 依存は `docs` group（mkdocs-material）。
   **要手動: Settings → Pages → Source = GitHub Actions を有効化**（初回のみ・ユーザー作業）。
-  実 backend E2E（NATS / S3 path-style）検証済（`make e2e-up`→gated matrix）。
+  実 backend E2E（NATS / S3 path-style＝SeaweedFS・MinIO）検証済（`make e2e-up`→gated matrix・CI `e2e` ジョブで実走）。
 - **local backend は非ブロッキング**（M010）: 全 IO syscall を anyio でスレッドへオフロード＝event loop を塞がない。
 
 ## 残作業（What's left）— バックログ
@@ -53,14 +55,13 @@
 
 ### 品質強化（最優先・2026-06-28 監査で抽出）
 
-| ID | タスク | 優先 | 備考（根拠 file:line） |
-|----|--------|------|------|
-| M061 | 実 backend e2e を CI で gated 実走 | med | `test_e2e_backends.py` は nats/s3 未到達→`pytest.skip`＝CI は local のみ実走で CAS/エラーパスが緑のまま未検証。minio+nats service container を CI ジョブに起こし「skip 許容」をやめる。`assert_put_if_*_concurrency_safe` を s3/nats e2e にも適用 |
+> **全項目 完了済み**（下記「完了マイルストーン」へ昇格）。次は「機能・完成度」へ。
 
 > **完了済み（下記「完了マイルストーン」へ昇格）**: M054/M055（fail-loud）・M056（nats lock）・M057（lifecycle
-> ロールバック）・M058（writer all-or-nothing）・M059（pytest-cov）・M060（crypto pytest）・M062（list_all 集約）・
-> M063（DownloadCache async）・M064（cp/mv identity 設計固定）・**M065**（conformance を仕様の単一源泉に＝北極星
-> ①〜④＋fail-loud〔in-process/transport〕＋非CAS並行＋run_full）・**M066**（挙動契約の集約ハーネス）。
+> ロールバック）・M058（writer all-or-nothing）・M059（pytest-cov）・M060（crypto pytest）・**M061**（実 backend e2e
+> を CI で gated 実走＝skip 許容やめ）・M062（list_all 集約）・M063（DownloadCache async）・M064（cp/mv identity
+> 設計固定）・**M065**（conformance を仕様の単一源泉に＝北極星 ①〜④＋fail-loud〔in-process/transport〕＋
+> 非CAS並行＋run_full）・**M066**（挙動契約の集約ハーネス）。
 > M016（CAS 以外の並行/大容量/エラーパス）は並行系を M065 step8 で契約化済＝残は StorageMirror 実行中の source 変更。
 
 > M016（既存・下表）も本監査で具体化＝CAS 以外の並行操作（並行 delete/get・Mirror 実行中の source 変更）／大容量・チャンク境界／backend エラーパスの fail-loud 検証が手薄。M059 で可視化 → M016 で穴埋め。
@@ -92,6 +93,20 @@
 
 ### 完了マイルストーン（要点のみ・経緯は git 履歴）
 
+- **M061（2026-06-30・完了）＝実 backend e2e を CI で gated 実走（skip 許容やめ）**: docker compose で nats /
+  seaweedfs / **minio** を起こし、`ci.yml` に e2e ジョブ追加（`make e2e-up`→`MANYSTORE_E2E_REQUIRED=1
+  make test-heavy`→`make e2e-down`。ubuntu runner 同梱の docker+compose を直接叩く＝local==CI）。**核は
+  skip マスクの撤去**＝`test_conformance_matrix._store` の `except Exception`→`pytest.skip` を外し、**未到達
+  のみ skip／到達できる接続・契約の失敗は伝播**（gated の実バグ・能力差を赤/xfail で表に出す）。実走で
+  2 つの実問題を炙り出して是正: ①**nats `concurrent_delete_safe` ハング**＝`obs.get` がチャンク購読で
+  待つ間に並行 delete の `purge_stream` がチャンクを消し「来ないチャンク」を無期限待ち（nats-py に read
+  timeout 無し）→ `get_or_raise` を `wait_for(_GET_TIMEOUT_S=10s)` で境界化し、タイムアウト時は実在再確認で
+  「消えていれば NotFound（delete にレース負け＝契約許容）／残存なら伝播（fail-loud）」に振り分け。
+  ②**SeaweedFS は条件付き PUT（CAS）を原子強制しない**＝同時 create が二重成功。**conformancer を s3 実装
+  ごとのマトリクスに**（`conformance_providers.S3_IMPLS`＝seaweedfs/minio。MinIO は CAS を満たす＝実機 6/6 実証）。
+  実装の能力差は provider の `unsupported` から **`xfail(strict)`**＝暗黙 skip でなく明示の行（将来満たせば
+  XPASS で検知）。CI 必須時は `test_e2e_backends_reachable_when_required` が起動漏れを赤にする。slow 41 passed
+  / 2 xfailed（seaweedfs CAS）/ 9 skipped（virtual ほか）。`make check` 緑（215）・mkdocs --strict 緑。
 - **M065（2026-06-28〜29・完了）＝conformancer を「仕様の単一源泉」に育てる（北極星①〜④）**: 実装漏れを
   conformancer に契約として実装し backend 横断で検知。`FileStoreTester` に **run_middle/heavy/full** を実装
   （差分契約＝DictFileStore をオラクルに観測一致）＋**オラクル非依存の絶対契約**（`ABSOLUTE_CONTRACTS` カタログ）
@@ -238,14 +253,18 @@
 
 独立ライブラリ化＋配布前提（G1）完了。コア抽象は「FileStore=KVS+IO・核は native primitive 側・get duality・
 prefix は core 引数・conditional put/CAS」で安定。protocols.py が契約＋既定実装の単一源泉。**品質優先フェーズ**
-（2026-06-28〜）＝4 観点監査の品質強化（M054〜M064）と **conformance を仕様の単一源泉に**（M065/M066＝北極星
-①〜④＋fail-loud＋非CAS並行＋run_full）を完了。残＝M061（CI で実 backend e2e 実走）と機能・完成度（M012/M013/
-M021残/M025残 等）。拡張（M051/M039/M040/M026/M045）は方針どおり後回し。fast 215 passed。
+（2026-06-28〜30）＝4 観点監査の品質強化（M054〜M064）・**conformance を仕様の単一源泉に**（M065/M066＝北極星
+①〜④＋fail-loud＋非CAS並行＋run_full）・**M061**（実 backend e2e を CI で gated 実走＝skip 許容やめ・s3 実装
+マトリクス・nats 並行 delete/get 修正）まで完了＝**品質強化フェーズ完了**。残＝機能・完成度（M012/M013/M021残/
+M025残 等）。拡張（M051/M039/M040/M026/M045）は方針どおり後回し。fast 215 passed・slow 41 passed/2 xfailed。
 
 ## 既知の問題
 
 - `s3-virtual`（ドメインスタイル）はローカル S3 互換では `bucket.<host>` を名前解決できず常に skip。
   **virtual-host の仕様上の制約**（実 AWS 等の DNS 環境向け）であり未解決バグではない。
+- **SeaweedFS は条件付き PUT（CAS）を原子強制しない**＝`put_if_absent`/`put_if_match` の並行契約を満たさず
+  同時 create が二重成功する。**実装の能力差**（バグでなく backend 仕様）＝conformance では `S3_IMPLS` の
+  `unsupported` で `xfail(strict)` 宣言。CAS が要るなら MinIO / 実 AWS S3 を使う（実機検証済）。
 - `make test`（fast）は lint を回さない＝format ドリフト（特に CJK 行の E501）は `make format` でしか出ない。
 
 ## 意思決定の変遷

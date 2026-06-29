@@ -33,3 +33,18 @@ services:
     # command: "server -dir=/data"  # server 版の方が本番向け
     # volumes:
     #   - ./.cache/seaweedfs:/data
+
+  # S3 互換ストレージ（AWS セマンティクスを忠実に追従＝条件付き PUT=CAS を原子強制する）。
+  # SeaweedFS が満たさない put_if_absent/put_if_match の絶対契約を実機検証するために併設する
+  # （conformance の s3 実装マトリクス。詳細は tests/conformance_providers.py の S3_IMPLS）。
+  minio:
+    image: minio/minio
+    ports:
+      - "9000:9000"   # S3 API
+      - "9001:9001"   # Console UI
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    # volumes:
+    #   - ./.cache/minio:/data

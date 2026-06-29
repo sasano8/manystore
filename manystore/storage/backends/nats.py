@@ -30,6 +30,14 @@ from ...protocols import (
 # JetStream が「期待した最終 subject シーケンスと不一致」を返すときの err_code（CAS 失敗の判別）。
 _WRONG_LAST_SEQ_ERR = 10071
 
+# whole get（`obs.get`）の境界。nats-py の `obs.get` はメタ参照後にチャンク subject を購読し
+# `OBJ_NO_PENDING` マーカーまで待つが read timeout を持たない＝並行 delete がチャンクを purge すると
+# 「来ないチャンク」を無期限に待ってハングする。バッファ get（値＝メモリ常駐 bytes）の正常読みは
+# localhost/LAN で即完了する（conformance の最大値でも ~1 MiB＝ミリ秒）ので、この値は病的な
+# stall を断ち切るためだけの十分に広い上限（正常読みの ~1000 倍の余裕）。タイムアウト時は実在を
+# 再確認し「消えていれば NotFound／残存なら伝播」に振り分けるので、短くしても欠損マスクは生じない。
+_GET_TIMEOUT_S = 10.0
+
 
 class _NatsBase:
     """NATS object store の共通接続部（lazy connect の `_get_obs`）。"""
@@ -211,11 +219,19 @@ class NatsObjectKeyValueStore(_NatsBase, KeyValueStoreBase):
 
         obs = await self._get_obs()
         try:
-            result = await obs.get(key)
+            result = await asyncio.wait_for(obs.get(key), _GET_TIMEOUT_S)
         except JSNotFound as e:
             # 欠損のみ正規化。障害（接続断/認証/timeout）は伝播＝fail-loud（要求7）。
             # 単一クラス catch（tuple 形 `except (A, B):` は py2 書き戻し既知異常を避けるため）。
             raise NotFoundError(key) from e
+        except TimeoutError:
+            # `obs.get` がチャンク購読で停止＝並行 delete の purge にレース負けした疑い。実在を
+            # 再確認し、消えていれば NotFound に正規化（並行 delete/get 契約が許す観測）。残存して
+            # いれば本物の stall として伝播＝欠損/default に化けさせない（fail-loud・要求7）。
+            seq, info = await self._seq_and_info(key)
+            if seq is None or info is None or info.get("deleted"):
+                raise NotFoundError(key) from None
+            raise
         return result.data or b""
 
     async def iter_all(self, limit: int | None = None, prefix: str = "") -> AsyncIterator[FileInfo]:

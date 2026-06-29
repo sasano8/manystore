@@ -7,10 +7,16 @@
 - **CRUD / writer all-or-nothing / 並行 CAS** … 自分の uuid キーのみ。
 - **run_light / run_middle**（差分検証）… uuid 名前空間に閉じて操作し後始末する（全消去しない）。
 
-実 backend（gated）は未到達なら skip・`slow` マーク・環境/認証未整備の実行時エラーも skip 扱い
-（CI など backend 無し環境で赤くしない。`make e2e-up` で起動して `make test-heavy` で実走）。
+実 backend（gated）は **未到達なら skip・`slow` マーク**。到達できる限り**実走**＝接続/契約の
+失敗はもう skip に化けさせない（M061。`make e2e-up` で起動して `make test-heavy` で実走）。
+**実装の能力差**（例: SeaweedFS は条件付き PUT=CAS を原子強制しない）は provider の
+`unsupported` 宣言から `xfail(strict)` にする＝暗黙 skip でなく明示の行で表に出し、将来満たしたら
+XPASS で検知する。
+CI は `MANYSTORE_E2E_REQUIRED=1` を立て、`test_e2e_backends_reachable_when_required` が
+「compose で立てたはずの backend が落ちていたら赤」を保証する（skip で素通りさせない）。
 """
 
+import os
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
@@ -18,6 +24,7 @@ import pytest
 from conformance_providers import (
     Provider,
     all_providers,
+    backend_reachability,
     leaf_fault_providers,
     native_file_providers,
 )
@@ -38,27 +45,46 @@ _LEAF_FAULT = leaf_fault_providers()
 _NATIVE_FILE = native_file_providers()
 
 
-def _params(providers: list[Provider]) -> list:
-    # 実 backend（gated）は slow マークで内ループ（make test）から除外。
-    return [
-        pytest.param(p, id=p.id, marks=[pytest.mark.slow] if p.gated else []) for p in providers
-    ]
+def _params(providers: list[Provider], contract: str | None = None) -> list:
+    # 実 backend（gated）は slow マークで内ループ（make test）から除外。`contract` を満たさないと
+    # 宣言した実装（provider.unsupported）はその契約だけ xfail(strict)＝既知の能力差を明示の行に。
+    out = []
+    for p in providers:
+        marks = [pytest.mark.slow] if p.gated else []
+        if contract is not None and contract in p.unsupported:
+            marks = [
+                *marks,
+                pytest.mark.xfail(
+                    reason=f"{p.id}: 実装が {contract} を満たさない（既知の能力差・strict）",
+                    strict=True,
+                    raises=AssertionError,
+                ),
+            ]
+        out.append(pytest.param(p, id=p.id, marks=marks))
+    return out
 
 
 @asynccontextmanager
 async def _store(provider: Provider) -> AsyncIterator[object]:
-    """provider を開く。未到達は skip、gated の環境/認証未整備エラーも skip（非 gated は伝播）。"""
+    """provider を開く。**未到達のみ skip**。到達できる接続/契約の失敗は伝播させる（M061＝もう
+    skip に化けさせない＝gated でも実バグ・能力差を赤/xfail で表に出す）。"""
     if not provider.reachable():
         pytest.skip(f"{provider.id}: backend 未到達")
-    try:
-        async with provider.open() as fs:
-            yield fs
-    except pytest.skip.Exception:
-        raise
-    except Exception as e:  # noqa: BLE001  gated は環境未整備を skip 扱い（実バグは非 gated で捕まる）
-        if provider.gated:
-            pytest.skip(f"{provider.id}: 環境/認証 未整備 → {type(e).__name__}: {e}")
-        raise
+    async with provider.open() as fs:
+        yield fs
+
+
+@pytest.mark.slow
+def test_e2e_backends_reachable_when_required() -> None:
+    """CI（`MANYSTORE_E2E_REQUIRED=1`）で compose の backend が全部立っているかを検める番兵。
+
+    未到達 provider は個別には skip するので、compose の起動漏れが「skip で素通り（緑）」に
+    なりうる。必須モードではここで「立てたはずの backend が落ちていたら赤」にして取りこぼしを防ぐ。
+    """
+    if not os.environ.get("MANYSTORE_E2E_REQUIRED"):
+        pytest.skip("E2E 非必須（CI は MANYSTORE_E2E_REQUIRED=1 を立てて起動漏れを赤にする）")
+    missing = [name for name, up in backend_reachability() if not up]
+    assert not missing, f"E2E 必須だが未到達の backend: {missing}"
 
 
 # ── 非破壊契約（全 provider） ──
@@ -91,14 +117,14 @@ async def test_writer_aborts_on_error(provider: Provider) -> None:
         await assert_writer_aborts_on_error(fs)
 
 
-@pytest.mark.parametrize("provider", _params(_ALL))
+@pytest.mark.parametrize("provider", _params(_ALL, "put_if_absent"))
 async def test_put_if_absent_concurrency(provider: Provider) -> None:
     # create-only put の並行安全性（一方だけ成功・他方 ConflictError）。uuid キーのみ（非破壊）。
     async with _store(provider) as fs:
         await assert_put_if_absent_concurrency_safe(fs, size=4096)
 
 
-@pytest.mark.parametrize("provider", _params(_ALL))
+@pytest.mark.parametrize("provider", _params(_ALL, "put_if_match"))
 async def test_put_if_match_concurrency(provider: Provider) -> None:
     # update CAS の並行安全性（lost-update を ConflictError で拒否）。uuid キーのみ（非破壊）。
     async with _store(provider) as fs:

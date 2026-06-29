@@ -9,10 +9,18 @@ remote）は `KeyValueFileStore` で FileStore 化して被せる（put/get/iter
 put(if_match)/head を下層へ委譲＝同じ契約で検査できる）。
 
 フラグ:
-- `gated` … 実 backend（未到達なら skip・`slow` マーク・環境/認証未整備の実行時エラーも skip）。
+- `gated` … 実 backend（未到達なら skip・`slow` マーク）。**到達できる限り実走**＝接続/契約の
+  失敗はもう skip に化けさせない（M061）。
+- `unsupported` … その**実装が満たさない契約キー**の集合。matrix がその (provider, 契約) を
+  `xfail(strict)` にする＝既知の能力差を「暗黙 skip」でなく**明示の行**として表に出し、将来
+  満たすようになったら XPASS で検知する。
 
-run_light/run_middle は **非破壊**（uuid 名前空間に閉じて操作し後始末する・M066①）になったので、
-実共有 backend（nats/s3）にもそのまま流せる＝`isolated` 区別は不要になり廃止した。
+**S3 は実装ごとにマトリクス化**する（`S3_IMPLS`）。条件付き PUT（create-only / update CAS）の
+原子強制は実装差が大きい＝**SeaweedFS は非対応**（同時 create が二重成功）／**MinIO は対応**
+（AWS S3 セマンティクスを忠実に追従）。この差を unsupported で宣言し matrix に載せる。
+
+run_light/run_middle は **非破壊**（uuid 名前空間に閉じて操作し後始末する・M066①）なので、実共有
+backend（nats/s3）にもそのまま流せる。
 """
 
 import contextlib
@@ -42,14 +50,48 @@ from manystore.storage.backends import create_unsafe_file_store
 from manystore.storage.connect import connecting
 from manystore.tools.conformancer import InjectedFault
 
-# ── 実 backend の接続情報（`make e2e-up` の dev 既定。別サーバは env で上書き）。 ──
-S3_HOST, S3_PORT = "localhost", 8333
+# ── 実 backend の接続情報（`make e2e-up` の dev 既定＝CI compose と一致。env で上書き）。 ──
 NATS_HOST, NATS_PORT = "localhost", 4222
-S3_ENDPOINT = f"http://{S3_HOST}:{S3_PORT}"
 NATS_URL = f"nats://{NATS_HOST}:{NATS_PORT}"
 S3_BUCKET = "manystore-e2e"
-S3_ACCESS_KEY = os.environ.get("MANYSTORE_S3_ACCESS_KEY", "manystore")
-S3_SECRET_KEY = os.environ.get("MANYSTORE_S3_SECRET_KEY", "manystoresecret123")
+
+
+@dataclass(frozen=True)
+class S3Impl:
+    """1 つの S3 互換実装の接続先と能力差。`unsupported` は満たさない契約キー（xfail strict）。"""
+
+    id: str  # provider id の接尾（`s3-<id>-<style>`）
+    host: str
+    port: int
+    access: str
+    secret: str
+    unsupported: frozenset[str] = frozenset()
+
+    @property
+    def endpoint(self) -> str:
+        return f"http://{self.host}:{self.port}"
+
+
+# 条件付き PUT（put_if_absent=create-only / put_if_match=update CAS）の原子強制が実装差の核。
+# SeaweedFS は同時 create が二重成功（非原子）＝非対応。MinIO は AWS 準拠で対応。実測で裏取り済。
+S3_IMPLS: list[S3Impl] = [
+    S3Impl(
+        "seaweedfs",
+        "localhost",
+        8333,
+        os.environ.get("MANYSTORE_S3_ACCESS_KEY", "manystore"),
+        os.environ.get("MANYSTORE_S3_SECRET_KEY", "manystoresecret123"),
+        unsupported=frozenset({"put_if_absent", "put_if_match"}),
+    ),
+    S3Impl(
+        "minio",
+        "localhost",
+        9000,
+        os.environ.get("MANYSTORE_MINIO_ACCESS_KEY", "minioadmin"),
+        os.environ.get("MANYSTORE_MINIO_SECRET_KEY", "minioadmin"),
+    ),
+]
+_S3_BY_ID = {impl.id: impl for impl in S3_IMPLS}
 
 
 def _reachable(host: str, port: int) -> bool:
@@ -60,17 +102,27 @@ def _reachable(host: str, port: int) -> bool:
         return False
 
 
-def _s3_up() -> bool:
-    return _reachable(S3_HOST, S3_PORT)
+def _impl_up(impl: S3Impl) -> Callable[[], bool]:
+    return lambda: _reachable(impl.host, impl.port)
 
 
 def _s3_virtual_up() -> bool:
     # virtual-host は `<bucket>.<host>` を解決できる DNS 環境のみ成立（ローカルは即 skip・R13）。
-    return bool(os.environ.get("MANYSTORE_S3_VIRTUAL")) and _s3_up()
+    seaweed = _S3_BY_ID["seaweedfs"]
+    return bool(os.environ.get("MANYSTORE_S3_VIRTUAL")) and _reachable(seaweed.host, seaweed.port)
 
 
 def _nats_up() -> bool:
     return _reachable(NATS_HOST, NATS_PORT)
+
+
+def backend_reachability() -> list[tuple[str, bool]]:
+    """CI（`MANYSTORE_E2E_REQUIRED`）で「立てたはずの backend が落ちていないか」を検める一覧。
+
+    compose で起動する nats／各 S3 実装の到達性。s3-virtual（DNS 依存）は CI 既定では立てないので
+    含めない＝未到達でも skip のまま（必須ではない）。
+    """
+    return [("nats", _nats_up()), *[(impl.id, _impl_up(impl)()) for impl in S3_IMPLS]]
 
 
 # ── provider（接続済み FileStore を yield する async CM）の宣言 ──
@@ -113,33 +165,33 @@ async def _open_nats() -> AsyncIterator[object]:
         yield KeyValueFileStore(store)
 
 
-async def _s3_ensure_bucket(addressing_style: str) -> None:
+async def _s3_ensure_bucket(impl: S3Impl, addressing_style: str) -> None:
     from aiobotocore.config import AioConfig
     from aiobotocore.session import get_session
 
     session = get_session()
     async with session.create_client(
         "s3",
-        endpoint_url=S3_ENDPOINT,
+        endpoint_url=impl.endpoint,
         region_name="us-east-1",
-        aws_access_key_id=S3_ACCESS_KEY,
-        aws_secret_access_key=S3_SECRET_KEY,
+        aws_access_key_id=impl.access,
+        aws_secret_access_key=impl.secret,
         config=AioConfig(s3={"addressing_style": addressing_style}),
     ) as client:
         with contextlib.suppress(Exception):
             await client.create_bucket(Bucket=S3_BUCKET)
 
 
-def _open_s3(addressing_style: str) -> Callable[[], object]:
+def _open_s3(impl: S3Impl, addressing_style: str) -> Callable[[], object]:
     @asynccontextmanager
     async def opener() -> AsyncIterator[object]:
-        await _s3_ensure_bucket(addressing_style)
+        await _s3_ensure_bucket(impl, addressing_style)
         async with connect_key_value_store(
             "s3",
             s3_bucket=S3_BUCKET,
-            s3_endpoint=S3_ENDPOINT,
-            s3_access_key=S3_ACCESS_KEY,
-            s3_secret_key=S3_SECRET_KEY,
+            s3_endpoint=impl.endpoint,
+            s3_access_key=impl.access,
+            s3_secret_key=impl.secret,
             s3_addressing_style=addressing_style,
             policy=ConnectPolicy.fail_fast(),
         ) as store:
@@ -148,7 +200,7 @@ def _open_s3(addressing_style: str) -> Callable[[], object]:
     return opener
 
 
-def _open_s3_native_file(addressing_style: str) -> Callable[[], object]:
+def _open_s3_native_file(impl: S3Impl, addressing_style: str) -> Callable[[], object]:
     """**native FileStore**（`S3FileStore`）を直接 yield する（M066③）。
 
     既定の `_open_s3` は KVS を `KeyValueFileStore` で包む＝open_writer/open_reader が **バッファ
@@ -158,14 +210,14 @@ def _open_s3_native_file(addressing_style: str) -> Callable[[], object]:
 
     @asynccontextmanager
     async def opener() -> AsyncIterator[object]:
-        await _s3_ensure_bucket(addressing_style)
+        await _s3_ensure_bucket(impl, addressing_style)
         async with connecting(
             lambda: create_unsafe_file_store(
                 "s3",
                 s3_bucket=S3_BUCKET,
-                s3_endpoint=S3_ENDPOINT,
-                s3_access_key=S3_ACCESS_KEY,
-                s3_secret_key=S3_SECRET_KEY,
+                s3_endpoint=impl.endpoint,
+                s3_access_key=impl.access,
+                s3_secret_key=impl.secret,
                 s3_addressing_style=addressing_style,
             ),
             policy=ConnectPolicy.fail_fast(),
@@ -239,16 +291,16 @@ async def _fault_s3_session() -> AsyncIterator[object]:
     yield _FaultS3Client()
 
 
-def _open_s3_faulty(addressing_style: str) -> Callable[[], object]:
+def _open_s3_faulty(impl: S3Impl, addressing_style: str) -> Callable[[], object]:
     @asynccontextmanager
     async def opener() -> AsyncIterator[object]:
-        await _s3_ensure_bucket(addressing_style)
+        await _s3_ensure_bucket(impl, addressing_style)
         async with connect_key_value_store(
             "s3",
             s3_bucket=S3_BUCKET,
-            s3_endpoint=S3_ENDPOINT,
-            s3_access_key=S3_ACCESS_KEY,
-            s3_secret_key=S3_SECRET_KEY,
+            s3_endpoint=impl.endpoint,
+            s3_access_key=impl.access,
+            s3_secret_key=impl.secret,
             s3_addressing_style=addressing_style,
             policy=ConnectPolicy.fail_fast(),
         ) as store:
@@ -264,20 +316,44 @@ class Provider:
 
     id: str
     open: Callable[[], object]  # () -> async context manager（FileStore を yield）
-    gated: bool = False  # 実 backend（未到達 skip・slow・実行時エラーも skip 扱い）
+    gated: bool = (
+        False  # 実 backend（未到達なら skip・slow）。到達できる限り実走＝失敗は skip にしない
+    )
     reachable: Callable[[], bool] = field(default=lambda: True)
+    unsupported: frozenset[str] = frozenset()  # 満たさない契約キー（matrix が xfail strict）
 
 
 def all_providers() -> list[Provider]:
     """全 provider の宣言（ここ 1 か所に backend を集約）。"""
-    return [
+    providers = [
         Provider("dict", _open_dict),
         Provider("local", _open_local),
         Provider("remote", _open_remote),
         Provider("nats", _open_nats, gated=True, reachable=_nats_up),
-        Provider("s3-virtual", _open_s3("virtual"), gated=True, reachable=_s3_virtual_up),
-        Provider("s3-path", _open_s3("path"), gated=True, reachable=_s3_up),
     ]
+    # S3 は実装ごとに path-style を 1 行ずつ（能力差は unsupported で xfail strict に）。
+    for impl in S3_IMPLS:
+        providers.append(
+            Provider(
+                f"s3-{impl.id}-path",
+                _open_s3(impl, "path"),
+                gated=True,
+                reachable=_impl_up(impl),
+                unsupported=impl.unsupported,
+            )
+        )
+    # virtual-host は SeaweedFS で代表（DNS 環境のみ・既定 skip）。
+    seaweed = _S3_BY_ID["seaweedfs"]
+    providers.append(
+        Provider(
+            "s3-seaweedfs-virtual",
+            _open_s3(seaweed, "virtual"),
+            gated=True,
+            reachable=_s3_virtual_up,
+            unsupported=seaweed.unsupported,
+        )
+    )
+    return providers
 
 
 def leaf_fault_providers() -> list[Provider]:
@@ -285,10 +361,18 @@ def leaf_fault_providers() -> list[Provider]:
 
     `open()` は接続済みだが下層クライアントを故障プロキシへ差し替えた leaf store を yield する。
     `assert_fail_loud_over_transport` を当て、全 op が障害を握り潰さず loud に失敗するかを検査する。
+    検査対象は backend 自身の except 節（欠損偽装の有無）＝S3 は実装差が出ない
+    1 つ（seaweedfs）で足る。
     """
+    seaweed = _S3_BY_ID["seaweedfs"]
     return [
         Provider("nats-fault", _open_nats_faulty(), gated=True, reachable=_nats_up),
-        Provider("s3-path-fault", _open_s3_faulty("path"), gated=True, reachable=_s3_up),
+        Provider(
+            "s3-seaweedfs-path-fault",
+            _open_s3_faulty(seaweed, "path"),
+            gated=True,
+            reachable=_impl_up(seaweed),
+        ),
     ]
 
 
@@ -296,9 +380,16 @@ def native_file_providers() -> list[Provider]:
     """**native streaming IO** を持つ FileStore を直接 yield する provider（M066③）。
 
     KVS-native backend を `KeyValueFileStore` で包むとバッファ writer 経由になるので、native の
-    open_writer/open_reader（S3=multipart/range）を直接検査するための別系統。local/dict は元々
-    matrix で native を流すのでここには入れない＝差分は S3 の native streaming IO のみ。
+    open_writer/open_reader（S3=multipart/range）を直接検査する別系統。multipart/range は実装差が
+    出うる＝S3 実装ごとに行を立てる。local/dict は元々 matrix で native を流すのでここには入れない。
     """
     return [
-        Provider("s3-path-native", _open_s3_native_file("path"), gated=True, reachable=_s3_up),
+        Provider(
+            f"s3-{impl.id}-path-native",
+            _open_s3_native_file(impl, "path"),
+            gated=True,
+            reachable=_impl_up(impl),
+            unsupported=impl.unsupported,
+        )
+        for impl in S3_IMPLS
     ]
