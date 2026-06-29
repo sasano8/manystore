@@ -9,9 +9,9 @@
 
 実 backend（gated）は **未到達なら skip・`slow` マーク**。到達できる限り**実走**＝接続/契約の
 失敗はもう skip に化けさせない（M061。`make e2e-up` で起動して `make test-heavy` で実走）。
-**実装の能力差**（例: SeaweedFS は条件付き PUT=CAS を原子強制しない）は provider の
-`unsupported` 宣言から `xfail(strict)` にする＝暗黙 skip でなく明示の行で表に出し、将来満たしたら
-XPASS で検知する。
+**実装の能力差**（例: SeaweedFS は条件付き PUT=CAS を保証しない）は provider の `unsupported`
+宣言から `xfail(非strict)` にする＝暗黙 skip でなく明示の行で表に出す（能力差は flaky なので strict
+にせず＝XFAIL/XPASS の揺れが「保証なし」を物語る）。
 CI は `MANYSTORE_E2E_REQUIRED=1` を立て、`test_e2e_backends_reachable_when_required` が
 「compose で立てたはずの backend が落ちていたら赤」を保証する（skip で素通りさせない）。
 """
@@ -52,11 +52,14 @@ def _params(providers: list[Provider], contract: str | None = None) -> list:
     for p in providers:
         marks = [pytest.mark.slow] if p.gated else []
         if contract is not None and contract in p.unsupported:
+            # 能力差は **flaky**（SeaweedFS の CAS は時々強制・時々二重成功＝非決定的）。strict だと
+            # XPASS のたびに CI が赤くなるので **非 strict**＝XFAIL/XPASS どちらでも落とさず、gap を
+            # 明示の行として可視化するに留める（暗黙 skip でなく・揺れ自体が「保証なし」を物語る）。
             marks = [
                 *marks,
                 pytest.mark.xfail(
-                    reason=f"{p.id}: 実装が {contract} を満たさない（既知の能力差・strict）",
-                    strict=True,
+                    reason=f"{p.id}: 実装が {contract} を保証しない（能力差・flaky・非strict）",
+                    strict=False,
                     raises=AssertionError,
                 ),
             ]

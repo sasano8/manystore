@@ -48,6 +48,9 @@ dev = [
     "pytest-asyncio>=0.24.0",
     # カバレッジ計測（`make cov`＝未到達行の可視化。happy-path 偏重の穴を定量把握）。
     "pytest-cov>=5.0",
+    # per-test タイムアウト（`make test-heavy` の backstop＝実 backend 越しのハングを目標時間で打ち切り
+    # stack を吐いて落とす。必要以上の待機を防ぐ）。
+    "pytest-timeout>=2.3.0",
     # server 層のテスト（ASGI TestClient = starlette + httpx）に必要。httpx は本体依存にも含む。
     "fastapi>=0.110.0",
     "uvicorn>=0.29.0",

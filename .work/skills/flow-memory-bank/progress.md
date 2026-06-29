@@ -102,11 +102,15 @@
   待つ間に並行 delete の `purge_stream` がチャンクを消し「来ないチャンク」を無期限待ち（nats-py に read
   timeout 無し）→ `get_or_raise` を `wait_for(_GET_TIMEOUT_S=10s)` で境界化し、タイムアウト時は実在再確認で
   「消えていれば NotFound（delete にレース負け＝契約許容）／残存なら伝播（fail-loud）」に振り分け。
-  ②**SeaweedFS は条件付き PUT（CAS）を原子強制しない**＝同時 create が二重成功。**conformancer を s3 実装
-  ごとのマトリクスに**（`conformance_providers.S3_IMPLS`＝seaweedfs/minio。MinIO は CAS を満たす＝実機 6/6 実証）。
-  実装の能力差は provider の `unsupported` から **`xfail(strict)`**＝暗黙 skip でなく明示の行（将来満たせば
-  XPASS で検知）。CI 必須時は `test_e2e_backends_reachable_when_required` が起動漏れを赤にする。slow 41 passed
-  / 2 xfailed（seaweedfs CAS）/ 9 skipped（virtual ほか）。`make check` 緑（215）・mkdocs --strict 緑。
+  ②**SeaweedFS は条件付き PUT（CAS）を保証しない**＝同時 create が**時々**二重成功（**flaky**＝強制したり
+  しなかったり・非決定的）。**conformancer を s3 実装ごとのマトリクスに**（`conformance_providers.S3_IMPLS`＝
+  seaweedfs/minio。MinIO は CAS を満たす＝実機 6/6 実証）。実装の能力差は provider の `unsupported` から
+  **`xfail(非strict)`**＝暗黙 skip でなく明示の行に出す（flaky ゆえ strict にしない＝XPASS のたびに CI を
+  割らない・XFAIL/XPASS の揺れ自体が「保証なし」を物語る）。CI 必須時は `test_e2e_backends_reachable_when_
+  required` が起動漏れを赤にする。slow 41 passed / 2 xfailed（seaweedfs CAS）/ 9 skipped（virtual ほか）。
+  **`make test-heavy` に per-test 目標時間**（`pytest-timeout`・既定 `TEST_HEAVY_TIMEOUT=60s`）＝将来の
+  ハングを stack 付きで打ち切り「必要以上の待機」を防ぐ backstop（async の await 中の停止も signal method で
+  中断＝実証済）。`make check` 緑（215）・mkdocs --strict 緑。
 - **M065（2026-06-28〜29・完了）＝conformancer を「仕様の単一源泉」に育てる（北極星①〜④）**: 実装漏れを
   conformancer に契約として実装し backend 横断で検知。`FileStoreTester` に **run_middle/heavy/full** を実装
   （差分契約＝DictFileStore をオラクルに観測一致）＋**オラクル非依存の絶対契約**（`ABSOLUTE_CONTRACTS` カタログ）
@@ -262,9 +266,10 @@ M025残 等）。拡張（M051/M039/M040/M026/M045）は方針どおり後回し
 
 - `s3-virtual`（ドメインスタイル）はローカル S3 互換では `bucket.<host>` を名前解決できず常に skip。
   **virtual-host の仕様上の制約**（実 AWS 等の DNS 環境向け）であり未解決バグではない。
-- **SeaweedFS は条件付き PUT（CAS）を原子強制しない**＝`put_if_absent`/`put_if_match` の並行契約を満たさず
-  同時 create が二重成功する。**実装の能力差**（バグでなく backend 仕様）＝conformance では `S3_IMPLS` の
-  `unsupported` で `xfail(strict)` 宣言。CAS が要るなら MinIO / 実 AWS S3 を使う（実機検証済）。
+- **SeaweedFS は条件付き PUT（CAS）を保証しない**＝`put_if_absent`/`put_if_match` の並行契約で同時 create が
+  **時々**二重成功（**flaky**＝強制したりしなかったり・非決定的）。**実装の能力差**（バグでなく backend 仕様）
+  ＝conformance では `S3_IMPLS` の `unsupported` で `xfail(非strict)` 宣言（flaky ゆえ strict 不可）。CAS が
+  要るなら MinIO / 実 AWS S3 を使う（実機検証済）。
 - `make test`（fast）は lint を回さない＝format ドリフト（特に CJK 行の E501）は `make format` でしか出ない。
 
 ## 意思決定の変遷

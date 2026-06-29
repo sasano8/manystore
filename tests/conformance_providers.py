@@ -11,9 +11,10 @@ put(if_match)/head を下層へ委譲＝同じ契約で検査できる）。
 フラグ:
 - `gated` … 実 backend（未到達なら skip・`slow` マーク）。**到達できる限り実走**＝接続/契約の
   失敗はもう skip に化けさせない（M061）。
-- `unsupported` … その**実装が満たさない契約キー**の集合。matrix がその (provider, 契約) を
-  `xfail(strict)` にする＝既知の能力差を「暗黙 skip」でなく**明示の行**として表に出し、将来
-  満たすようになったら XPASS で検知する。
+- `unsupported` … その**実装が保証しない契約キー**の集合。matrix がその (provider, 契約) を
+  `xfail(非strict)` にする＝既知の能力差を「暗黙 skip」でなく**明示の行**として表に出す。能力差は
+  flaky（例: SeaweedFS の CAS は時々強制・時々二重成功）なので strict にはしない＝XFAIL/XPASS の
+  揺れ自体が「保証なし」を物語る（strict だと XPASS のたびに CI を割る）。
 
 **S3 は実装ごとにマトリクス化**する（`S3_IMPLS`）。条件付き PUT（create-only / update CAS）の
 原子強制は実装差が大きい＝**SeaweedFS は非対応**（同時 create が二重成功）／**MinIO は対応**

@@ -12,6 +12,10 @@ SRC := manystore tests
 E2E_S3_ACCESS_KEY := manystore
 E2E_S3_SECRET_KEY := manystoresecret123
 
+# slow（実 backend）テストの per-test 目標時間（秒）。超過＝ハング扱いで stack を吐いて落とす
+# （pytest-timeout・必要以上の待機を防ぐ backstop）。正規の最遅は ~10s なので CI ばらつき込みで 60s。
+TEST_HEAVY_TIMEOUT := 60
+
 .PHONY: format format-check lint pylint test test-heavy test-benchmark test-all cov check grep-todo ui e2e-up e2e-down conformance-docs docs docs-serve
 
 # ストレージ UI / サーバを開発設定で起動（既定 http://127.0.0.1:8000）。
@@ -46,8 +50,9 @@ test:
 	uv run pytest -m "not slow and not benchmark"
 
 # 重いテスト（実 backend/ネットワーク/ポーリング待ち）。CI では別 job（e2e-up）で回す。
+# `--timeout` で per-test の目標時間を設ける＝詰まりは stack を吐いて落とし、必要以上に待たない。
 test-heavy:
-	uv run pytest -m "slow"
+	uv run pytest -m "slow" --timeout=$(TEST_HEAVY_TIMEOUT)
 
 # ベンチマーク（環境差で揺れる＝gate にせず情報収集に留める。該当無しなら exit 5 でも可）。
 test-benchmark:
