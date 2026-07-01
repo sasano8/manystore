@@ -107,7 +107,10 @@
   rounds=40＝deleter と reader を分離し gated の並行 get 負荷を抑制）で TOCTOU 検出を ~12%→ほぼ確定（バグ版
   in-process 40/40 検知・修正版は緑）。iter_all は monkeypatch で「is_file=1回目 OK／ループ stat=2回目で欠損」を
   **確定的に再現**する white-box テスト（`test_local_iter_all_skips_file_vanished_mid_scan`・fix で緑/未fix で赤）。
-  `make check` 緑（231）・full fast x5 flake 0。
+  `make check` 緑（231）・full fast x5 flake 0。**併せて e2e ゲートを締めた**＝`make test-heavy` に
+  `MANYSTORE_E2E_REQUIRED=1` を焼き込み（docker 未起動なら番兵が**赤**＝silent skip で緑を素通りさせない）。
+  CI は step env を削除し e2e-up→test-heavy を叩くだけ＝local==CI。docker 無しで slow を見たいだけなら
+  `uv run pytest -m slow` を直接叩く（fast/`make check` は従来どおり docker 不要・緑）。
 - **M068（2026-07-02・完了）＝backend レジストリ / プラグイン機構（fsspec 風の土台）**: `storage/backends/
   __init__.py` の if/elif を `backends/registry.py` へ集約。**flat lookup ＋ tier/origin 分離 ＋ clobber 保護**
   ＝builtin（予約・shadow 不可）/ entry-point（group `manystore.stores`・遅延発見・既存名は拒否+warn）/

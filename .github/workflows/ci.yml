@@ -20,7 +20,8 @@ jobs:
 
   # 実 backend e2e（gated）を**実走**するジョブ。GitHub の ubuntu runner は docker + compose v2
   # を同梱するので `make e2e-up`（local と同一フロー＝nats / seaweedfs / minio を compose で起動）
-  # をそのまま叩く。`MANYSTORE_E2E_REQUIRED=1` で「起動漏れ→skip で素通り」を赤にする（M061）。
+  # をそのまま叩く。`MANYSTORE_E2E_REQUIRED=1` は `make test-heavy` に焼き込み済＝起動漏れ→skip で
+  # 素通りを赤にする（M061）。CI は e2e-up→test-heavy を叩くだけで local と完全一致（M072・local==CI）。
   e2e:
     runs-on: ubuntu-latest
     steps:
@@ -35,9 +36,7 @@ jobs:
         run: make e2e-up
 
       - name: Run gated e2e (slow・実 backend・skip 不可)
-        run: make test-heavy
-        env:
-          MANYSTORE_E2E_REQUIRED: "1"
+        run: make test-heavy  # MANYSTORE_E2E_REQUIRED=1 は target に焼き込み済
 
       - name: Stop backends
         if: always()

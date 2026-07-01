@@ -47,12 +47,14 @@ pylint:
 # テスト 4 段（R13）。内ループ既定＝fast（slow=実 backend/ネットワーク/ポーリング待ち、
 # benchmark=性能計測 を除外）。slow/benchmark はマーカーで分離。
 test:
-	uv run pytest -m "not slow and not benchmark"
+	uv run pytest -svx -m "not slow and not benchmark"
 
-# 重いテスト（実 backend/ネットワーク/ポーリング待ち）。CI では別 job（e2e-up）で回す。
+# 重いテスト（実 backend/ネットワーク/ポーリング待ち）。先に `make e2e-up` で backend を起動する。
+# `MANYSTORE_E2E_REQUIRED=1` を焼き込む＝backend 未起動なら番兵が**赤**（silent skip で緑を素通り
+# させない・local==CI）。docker 無しで slow を見たいだけなら `uv run pytest -m slow` を直接叩く。
 # `--timeout` で per-test の目標時間を設ける＝詰まりは stack を吐いて落とし、必要以上に待たない。
 test-heavy:
-	uv run pytest -m "slow" --timeout=$(TEST_HEAVY_TIMEOUT)
+	MANYSTORE_E2E_REQUIRED=1 uv run pytest -m "slow" --timeout=$(TEST_HEAVY_TIMEOUT)
 
 # ベンチマーク（環境差で揺れる＝gate にせず情報収集に留める。該当無しなら exit 5 でも可）。
 test-benchmark:
