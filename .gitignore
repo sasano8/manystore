@@ -27,6 +27,7 @@ site/
 # Claude Code 個人ローカル設定（マシン固有・絶対パス等。共有しない）
 .claude/settings.local.json
 
-# coverage レポート（生成物）
+# coverage レポート（生成物）は .cache/coverage/ 配下（.cache/ で無視済）。
+# 旧デフォルト出力先も残置（直接 pytest を叩いた場合の保険）。
 htmlcov/
 .coverage

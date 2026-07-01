@@ -68,13 +68,13 @@ test-all:
 cov:
 	uv run pytest -m "not slow and not benchmark" --cov=manystore --cov-report=term-missing
 
-# カバレッジを HTML で出す（`htmlcov/index.html` をブラウザで開く。行単位の未到達を可視化）。
+# カバレッジを HTML で出す（出力は .cache/coverage/html＝pyproject の [tool.coverage.html]）。
 cov-html:
 	uv run pytest -m "not slow and not benchmark" --cov=manystore --cov-report=html
-	@echo "open htmlcov/index.html （WSL: explorer.exe htmlcov/index.html）"
+	@echo "open .cache/coverage/html/index.html （WSL: explorer.exe .cache/coverage/html/index.html）"
 
 cov-html-show:
-	@python -m http.server 8000 --directory htmlcov
+	@python -m http.server 8000 --directory .cache/coverage/html
 
 # 一括検証（format 確認 + fast test）＝内ループの「検証緑」判定
 check: format-check test

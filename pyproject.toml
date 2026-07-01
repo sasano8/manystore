@@ -98,6 +98,11 @@ filterwarnings = [
 [tool.coverage.run]
 source = ["manystore"]
 branch = true
+# 生成物（.coverage データ / HTML）は目につかない `.cache/coverage/` 配下へ（`.cache/` は gitignore 済）。
+data_file = ".cache/coverage/.coverage"
+
+[tool.coverage.html]
+directory = ".cache/coverage/html"
 
 [tool.coverage.report]
 show_missing = true
