@@ -252,7 +252,13 @@ class LocalFileStore(FileStoreBase):
                     continue
                 if limit is not None and len(out) >= limit:
                     break
-                out.append(FileInfo(filename=name, size=f.stat().st_size))
+                try:
+                    size = f.stat().st_size
+                except FileNotFoundError, NotADirectoryError:
+                    # 列挙〜stat の間に並行 delete で消えたファイルは一覧から除く（レース安全）。
+                    # 生 FileNotFoundError を漏らさず「消えた＝載せない」に正規化する（M072）。
+                    continue
+                out.append(FileInfo(filename=name, size=size))
             return out
 
         for info in await _offload(_scan):
@@ -262,11 +268,13 @@ class LocalFileStore(FileStoreBase):
         return await _offload((self._dir / filename).is_file)
 
     async def delete(self, filename: str) -> None:
-        # ファイルだけ消す（空になった親ディレクトリは残す）。無いキーは無視。
+        # ファイルだけ消す（空になった親ディレクトリは残す）。無いキー/並行 delete は no-op。
         def _del() -> None:
-            path = self._dir / filename
-            if path.is_file():
-                path.unlink()
+            # `missing_ok=True`＝「無い/並行 delete で先に消えた」を原子的に no-op（冪等）。
+            # 旧 is_file()→unlink() は TOCTOU で並行 delete が生 FNF を漏らした（M072）。
+            # IsADirectoryError＝キーがディレクトリ（ファイルでない）＝対象外（旧 is_file 相当）。
+            with contextlib.suppress(IsADirectoryError):
+                (self._dir / filename).unlink(missing_ok=True)
 
         await _offload(_del)
 

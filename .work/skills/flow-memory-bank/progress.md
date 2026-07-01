@@ -90,7 +90,6 @@
 | M069 | 名前 URL スキーマ取得（`s3://`/`nats://`/`local://.`/`manystore://`）＋ bucket 粒度統一 | normal | M068 の上に `open_store(url)` サーフェス。scheme→registry 解決、`netloc=bucket`・`path=bucket 内 prefix（任意）`・`local://.`=既定 cwd。全 backend「1 store=1 bucket/root」（既に概ね成立）を URL 規約に落とす。ここで prefix 付き flat kwargs（`s3_bucket=`）→ backend ネイティブ opts への整理を回収（M068 のシム廃止の出口）。要 doc-first（scheme 表・URL 文法） |
 | M070 | `manystore store init` ＋ 構成ファイルからストア復元 | normal | (a) CLI で雛形 `manystore.toml` 生成／(b) **上方向 discovery**（親を辿って構成発見）／(c) **local 相対パスを構成ファイルのディレクトリ基準で解決**（現 `_normalize_opts` は cwd 基準）。`serving/services/config.py` のパーサを neutral な場所へ昇格し client 側と共有。M068/M069 と組んで `open_store("mycontext")`（名前解決）と `open_store("s3://…")`（直 URL）を両立 |
 | M071 | 公開 IF 統合＝`KeyValueStore` 廃し 1 ストアへ（Buffering/Nobuffering 再編） | 相談 | ユーザー提案（2026-07-02）。**内部軸を「buffering（KV 本質）vs no-buffering（stream 本質）」に昇格**＝基底を `BufferingStore`/`NobufferingStore`（native がどちら向きか＝原則7 の「核は native 側」を型で表現・逆方向は合成）に再編。**公開は 1 インターフェースに畳む**＝put/get（KV API）と open_reader/open_writer（stream API）を同一 IF に載せ、独立した公開 `KeyValueStore` を落とす（実質 `FileStore=KVS+IO` を唯一の公開ストア〔名前は `Store` 等要再考〕へ昇格）。**思想整合**＝原則6「バッファ性が IF の本質」の昇格・fsspec `AbstractFileSystem`（cat/pipe＋open）先例・両方向合成は既存 `KeyValueFileStore`/`KeyValueFromFileStore` が実証済。**要 doc-first・大型**＝`protocols.py`/全 backend/全 surface（Safe*/sync/array）/conformancer/`docs/architecture.md` へ波及＋**公開 API 破壊**（`manystore.kv`/`manystore.file` の 2 facade 統合）ゆえ major bump 扱い。**命名確定（2026-07-02）＝`BufferedStore`/`StreamingStore`**。**未確定**＝(1) `KeyValueStore` を「put/get だけ見たい人向け view/型エイリアス」で残すか完全撤去か／(2) URL/registry 系（M068-70）が落ち着いた後に着手 |
-| M072 | local backend の並行 delete/get レース修正（flaky） | 中 | 既存 flaky（「既知の問題」参照）＝並行 delete 直後の get/list が生 `FileNotFoundError` を漏らす。M061 の nats 境界化と同型の対処を local に＝get_or_raise/list_all で欠損レースを NotFound に正規化（存在再確認で「消えた=NotFound／別要因=伝播」に振り分け）。conformance `concurrent.delete_safe[local]` を安定緑に |
 | M073 | 仕様の集約＝構造契約（Protocol）＋挙動契約（conformance カタログ）を 1 つの spec 面へ | 相談 | ユーザー提案（2026-07-02）＝北極星「conformance=仕様の単一源泉」の帰結。**要は protocols.py の 2 役を分離**＝(A) 純粋な**契約/型**（Protocol・FileInfo/IfMatch/Verify）と (B) **既定実装**（`*StoreBase`・両方向アダプタ・IO・`_kv_copy`/`_sha256_hex`）。(A) を conformance の**挙動契約カタログ**（`ContractSpec`＋`assert_*`）と同居させ **spec パッケージ**（例 `manystore/spec/` or 昇格 `manystore/conformance/`）に束ね、そこから doc 生成（kv_spec/file_storage_spec/conformance_spec は既にここ由来）。**境界厳守**＝(B) 既定実装（runtime・全 backend が import）と**検証ハーネス**（`FileStoreTester`・fault-injection＝test-time）は spec に取り込まず層を保つ（runtime が test 機構を import しない）。**要 doc-first・大型・API 破壊**＝protocols.py を全所から import＝blast radius 大。**M071 と同じく protocols.py を再構成するので M071 と一括設計**（IF 統合＝BufferedStore/StreamingStore と、置き場の再編を 1 パスで）。関連 M022b（spec 検出）/M042（transport 整理）|
 
 > **ゴール段階**: G1=配布できる（M005〜M008 完了）→ G2=安心して使える（M009〜M011・M016）→
@@ -98,6 +97,17 @@
 
 ### 完了マイルストーン（要点のみ・経緯は git 履歴）
 
+- **M072（2026-07-02・完了）＝local 並行 delete レース修正＋contract を確定的ゲートに**: fast フルスイートで
+  ~1/8 落ちる既存 flaky（`concurrent_delete_safe[local]`＝`FileNotFoundError: .../_conformance/cc/…`）を潰す。
+  **真因＝local `delete` の TOCTOU**（`if path.is_file(): path.unlink()`＝並行 double-delete で is_file 通過後に
+  別スレッドが消し `unlink` が生 FNF を漏らす）。修正＝`unlink(missing_ok=True)`（原子的・冪等。dir は
+  `contextlib.suppress(IsADirectoryError)`）。**併せて `iter_all._scan` の per-file `stat` も同型 race を
+  ガード**（走査〜stat 間に消えたファイルは一覧から除く）。**ユーザー方針「非一貫な挙動は確定的にテストを
+  赤に」に応え contract を反復強化**＝`assert_concurrent_delete_safe` を rounds 反復（deleters=20/readers=6/
+  rounds=40＝deleter と reader を分離し gated の並行 get 負荷を抑制）で TOCTOU 検出を ~12%→ほぼ確定（バグ版
+  in-process 40/40 検知・修正版は緑）。iter_all は monkeypatch で「is_file=1回目 OK／ループ stat=2回目で欠損」を
+  **確定的に再現**する white-box テスト（`test_local_iter_all_skips_file_vanished_mid_scan`・fix で緑/未fix で赤）。
+  `make check` 緑（231）・full fast x5 flake 0。
 - **M068（2026-07-02・完了）＝backend レジストリ / プラグイン機構（fsspec 風の土台）**: `storage/backends/
   __init__.py` の if/elif を `backends/registry.py` へ集約。**flat lookup ＋ tier/origin 分離 ＋ clobber 保護**
   ＝builtin（予約・shadow 不可）/ entry-point（group `manystore.stores`・遅延発見・既存名は拒否+warn）/
@@ -297,11 +307,6 @@ M025残 等）。拡張（M051/M039/M040/M026/M045）は方針どおり後回し
   ＝conformance では `S3_IMPLS` の `unsupported` で `xfail(非strict)` 宣言（flaky ゆえ strict 不可）。CAS が
   要るなら MinIO / 実 AWS S3 を使う（実機検証済）。
 - `make test`（fast）は lint を回さない＝format ドリフト（特に CJK 行の E501）は `make format` でしか出ない。
-- **【flaky・要修正 M072】local backend の並行 delete/get レース**＝`test_concurrent_delete_safe[local]`
-  （run_full 経由含む）が fast フルスイートで **~1/8** で `FileNotFoundError: .../_conformance/cc/<uuid>` を
-  生のまま送出して落ちる。並行 delete が消した直後に get/list が open/stat して**生の `FileNotFoundError` が
-  NotFound に正規化されず漏れる**（M061 で nats に施した境界化の local 版が未対応）。**M068/M013 とは無関係の
-  既存バグ**（M068 のみの素ツリーでも再現・2026-07-02 確認）。分離実行では出ない＝順序/タイミング依存。
 
 ## 意思決定の変遷
 
