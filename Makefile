@@ -16,7 +16,7 @@ E2E_S3_SECRET_KEY := manystoresecret123
 # （pytest-timeout・必要以上の待機を防ぐ backstop）。正規の最遅は ~10s なので CI ばらつき込みで 60s。
 TEST_HEAVY_TIMEOUT := 60
 
-.PHONY: format format-check lint pylint test test-heavy test-benchmark test-all cov check grep-todo ui e2e-up e2e-down conformance-docs docs docs-serve
+.PHONY: format format-check lint pylint test test-heavy test-benchmark test-all cov cov-html check grep-todo ui e2e-up e2e-down conformance-docs docs docs-serve
 
 # ストレージ UI / サーバを開発設定で起動（既定 http://127.0.0.1:8000）。
 # 既定ストレージは .cache/manystore_dev（使い捨て・起動時に自動作成）。PORT=xxxx で上書き可。
@@ -65,6 +65,11 @@ test-all:
 # カバレッジ計測（fast テストで未到達行を term に出す）。happy-path 偏重の穴を定量把握する（M059）。
 cov:
 	uv run pytest -m "not slow and not benchmark" --cov=manystore --cov-report=term-missing
+
+# カバレッジを HTML で出す（`htmlcov/index.html` をブラウザで開く。行単位の未到達を可視化）。
+cov-html:
+	uv run pytest -m "not slow and not benchmark" --cov=manystore --cov-report=html
+	@echo "open htmlcov/index.html （WSL: explorer.exe htmlcov/index.html）"
 
 # 一括検証（format 確認 + fast test）＝内ループの「検証緑」判定
 check: format-check test

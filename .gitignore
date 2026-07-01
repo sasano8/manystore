@@ -26,3 +26,7 @@ site/
 
 # Claude Code 個人ローカル設定（マシン固有・絶対パス等。共有しない）
 .claude/settings.local.json
+
+# coverage レポート（生成物）
+htmlcov/
+.coverage
