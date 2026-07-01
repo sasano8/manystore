@@ -312,6 +312,9 @@ M025残 等）。拡張（M051/M039/M040/M026/M045）は方針どおり後回し
   ＝conformance では `S3_IMPLS` の `unsupported` で `xfail(非strict)` 宣言（flaky ゆえ strict 不可）。CAS が
   要るなら MinIO / 実 AWS S3 を使う（実機検証済）。
 - `make test`（fast）は lint を回さない＝format ドリフト（特に CJK 行の E501）は `make format` でしか出ない。
+- **e2e の seaweedfs は `make e2e-up` 必須**（`docker compose up` 直叩きは不可）＝`weed shell` の S3 identity
+  登録ステップを含む。未登録だと接続時 `HeadBucket 403 Forbidden` で seaweedfs 系が総崩れ（2026-07-02 に遭遇）。
+  MinIO は既定資格情報（minioadmin）で動くのでこの手当て不要。
 
 ## 意思決定の変遷
 
