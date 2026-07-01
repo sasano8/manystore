@@ -1,16 +1,23 @@
-"""backends — backend 毎の具体実装（Local / S3 / NATS / HTTP）と KVS のファクトリ。
+"""backends — backend 毎の具体実装（Local / S3 / NATS / HTTP / manystore）と KVS のファクトリ。
 
-抽象（[KeyValueStore] / [FileStore]）は `stores` に、ここには backend 実装だけを置く。
-重い依存（aiobotocore / nats）は各 backend のメソッド内で遅延 import する。
+抽象は上位に、ここには backend 実装と**レジストリへの seed** を置く。「名前 → ストア生成」の解決は
+[registry]（builtin/entry-point/programmatic の 3 経路）へ集約し、`create_unsafe_*_store` はその薄い
+ラッパ（後方互換の入口）に留める。詳細は `docs/backend_registry.md`。重い依存（aiobotocore / nats /
+httpx / client）は factory 内で遅延 import。
 """
-
-from pathlib import Path
 
 from ...protocols import AsyncFileStore, AsyncKeyValueStore
 from .http_store import HttpFileStore, HttpKeyValueStore
 from .local import LocalFileObject, LocalFileStore, LocalKeyValueStore
 from .memory import DictFileStore, DictKeyValueStore
 from .nats import NatsFileStore, NatsObjectKeyValueStore
+from .registry import (
+    BackendSpec,
+    get_backend_spec,
+    list_backends,
+    register_backend,
+    register_builtin_backend,
+)
 from .s3 import S3FileStore, S3KeyValueStore
 
 __all__ = [
@@ -25,89 +32,126 @@ __all__ = [
     "NatsFileStore",
     "HttpKeyValueStore",
     "HttpFileStore",
+    "BackendSpec",
+    "register_backend",
+    "get_backend_spec",
+    "list_backends",
     "create_unsafe_key_value_store",
     "create_unsafe_file_store",
 ]
 
 
-def create_unsafe_key_value_store(
-    backend: str,
-    local_dir: Path | None = None,
-    s3_bucket: str = "",
-    s3_endpoint: str = "",
-    s3_region: str = "us-east-1",
-    s3_access_key: str = "",
-    s3_secret_key: str = "",
-    s3_addressing_style: str = "virtual",
-    nats_url: str = "",
-    nats_bucket: str = "manystore_files",
-    http_base_url: str = "",
-    http_headers: dict[str, str] | None = None,
-) -> AsyncKeyValueStore:
+# ── builtin backend の factory（未接続のストアを作る。opts は暫定の flat kwargs＝M069 で整理）──
+
+
+def _kv_memory(**opts: object) -> AsyncKeyValueStore:
+    return DictKeyValueStore()  # プロセス内 dict（揮発・接続不要）
+
+
+def _file_memory(**opts: object) -> AsyncFileStore:
+    return DictFileStore()
+
+
+def _kv_local(**opts: object) -> AsyncKeyValueStore:
+    local_dir = opts.get("local_dir")
+    if local_dir is None:
+        raise ValueError("local backend requires local_dir")
+    return LocalKeyValueStore(local_dir)  # type: ignore[arg-type]
+
+
+def _file_local(**opts: object) -> AsyncFileStore:
+    local_dir = opts.get("local_dir")
+    if local_dir is None:
+        raise ValueError("local backend requires local_dir")
+    return LocalFileStore(local_dir)  # type: ignore[arg-type]
+
+
+def _s3_kwargs(opts: dict[str, object]) -> dict[str, object]:
+    return dict(
+        bucket=opts.get("s3_bucket", ""),
+        endpoint_url=opts.get("s3_endpoint", ""),
+        region=opts.get("s3_region", "us-east-1"),
+        access_key=opts.get("s3_access_key", ""),
+        secret_key=opts.get("s3_secret_key", ""),
+        addressing_style=opts.get("s3_addressing_style", "virtual"),
+    )
+
+
+def _kv_s3(**opts: object) -> AsyncKeyValueStore:
+    return S3KeyValueStore(**_s3_kwargs(opts))  # type: ignore[arg-type]
+
+
+def _file_s3(**opts: object) -> AsyncFileStore:
+    return S3FileStore(**_s3_kwargs(opts))  # type: ignore[arg-type]
+
+
+def _kv_nats(**opts: object) -> AsyncKeyValueStore:
+    return NatsObjectKeyValueStore(
+        url=opts.get("nats_url", ""),  # type: ignore[arg-type]
+        bucket=opts.get("nats_bucket", "manystore_files"),  # type: ignore[arg-type]
+    )
+
+
+def _file_nats(**opts: object) -> AsyncFileStore:
+    return NatsFileStore(
+        url=opts.get("nats_url", ""),  # type: ignore[arg-type]
+        bucket=opts.get("nats_bucket", "manystore_files"),  # type: ignore[arg-type]
+    )
+
+
+def _kv_http(**opts: object) -> AsyncKeyValueStore:
+    return HttpKeyValueStore(
+        base_url=opts.get("http_base_url", ""),  # type: ignore[arg-type]
+        headers=opts.get("http_headers"),  # type: ignore[arg-type]
+    )
+
+
+def _file_http(**opts: object) -> AsyncFileStore:
+    return HttpFileStore(
+        base_url=opts.get("http_base_url", ""),  # type: ignore[arg-type]
+        headers=opts.get("http_headers"),  # type: ignore[arg-type]
+    )
+
+
+def _kv_manystore(**opts: object) -> AsyncKeyValueStore:
+    # manystore 自身の HTTP サービスを喋る client（`client/` 在中）を遅延 import。opts は暫定。
+    from ...client.remote import RemoteKeyValueStore
+
+    return RemoteKeyValueStore(
+        base_url=opts.get("base_url", ""),  # type: ignore[arg-type]
+        context=opts.get("context", ""),  # type: ignore[arg-type]
+        headers=opts.get("headers"),  # type: ignore[arg-type]
+    )
+
+
+# ── builtin を予約名として seed（import 時に一度）──
+register_builtin_backend("memory", kv_factory=_kv_memory, file_factory=_file_memory)
+register_builtin_backend("local", kv_factory=_kv_local, file_factory=_file_local)
+register_builtin_backend("s3", kv_factory=_kv_s3, file_factory=_file_s3)
+register_builtin_backend("nats", kv_factory=_kv_nats, file_factory=_file_nats)
+register_builtin_backend("http", kv_factory=_kv_http, file_factory=_file_http)
+# manystore は remote client を KVS として。FileStore は非対応（file_factory=None）。
+register_builtin_backend("manystore", kv_factory=_kv_manystore, file_factory=None)
+
+
+def create_unsafe_key_value_store(backend: str, **opts: object) -> AsyncKeyValueStore:
     """backend 名から生の（未接続・**キー検証なし**）[KeyValueStore] を作る低レベルファクトリ。
 
-    **unsafe**＝`../escape` 等を弾かない（パストラバーサル対策は呼び出し側責務）。安全に使うなら
-    [create_safe_key_value_store]（Safe 包装）か顔の `open_async_key_value_store`（Safe＋接続）。
+    [registry] の薄いラッパ。**unsafe**＝`../escape` 等を弾かない（対策は呼び出し側責務）。安全に
+    使うなら [create_safe_key_value_store]（Safe 包装）か顔の `open_async_key_value_store`
+    （Safe＋接続）。
+    opts は backend 固有（例: `local_dir=` / `s3_bucket=` / `http_base_url=`）。
     """
-    if backend == "memory":
-        return DictKeyValueStore()  # プロセス内 dict（揮発・接続不要）
-    elif backend == "local":
-        if local_dir is None:
-            raise ValueError("local backend requires local_dir")
-        return LocalKeyValueStore(local_dir)
-    elif backend == "s3":
-        return S3KeyValueStore(
-            bucket=s3_bucket,
-            endpoint_url=s3_endpoint,
-            region=s3_region,
-            access_key=s3_access_key,
-            secret_key=s3_secret_key,
-            addressing_style=s3_addressing_style,
-        )
-    elif backend == "nats":
-        return NatsObjectKeyValueStore(url=nats_url, bucket=nats_bucket)
-    elif backend == "http":
-        return HttpKeyValueStore(base_url=http_base_url, headers=http_headers)
-    else:
-        raise ValueError(f"unknown backend: {backend!r}")
+    return get_backend_spec(backend).kv_factory(**opts)
 
 
-def create_unsafe_file_store(
-    backend: str,
-    local_dir: Path | None = None,
-    s3_bucket: str = "",
-    s3_endpoint: str = "",
-    s3_region: str = "us-east-1",
-    s3_access_key: str = "",
-    s3_secret_key: str = "",
-    s3_addressing_style: str = "virtual",
-    nats_url: str = "",
-    nats_bucket: str = "manystore_files",
-    http_base_url: str = "",
-    http_headers: dict[str, str] | None = None,
-) -> AsyncFileStore:
+def create_unsafe_file_store(backend: str, **opts: object) -> AsyncFileStore:
     """[create_unsafe_key_value_store] の FileStore 版（backend → 完全な [FileStore]＝KVS + IO）。
 
-    http は read-only FileStore（書き込み・一覧は `io.UnsupportedOperation`）。引数は KVS 版と同形。
+    http は read-only（書き込み・一覧は `io.UnsupportedOperation`）。FileStore 非対応の
+    backend（例 `manystore`）は [ValueError]。opts は KVS 版と同形。
     """
-    if backend == "memory":
-        return DictFileStore()  # プロセス内 dict（揮発・接続不要）
-    elif backend == "local":
-        if local_dir is None:
-            raise ValueError("local backend requires local_dir")
-        return LocalFileStore(local_dir)
-    elif backend == "s3":
-        return S3FileStore(
-            bucket=s3_bucket,
-            endpoint_url=s3_endpoint,
-            region=s3_region,
-            access_key=s3_access_key,
-            secret_key=s3_secret_key,
-            addressing_style=s3_addressing_style,
-        )
-    elif backend == "nats":
-        return NatsFileStore(url=nats_url, bucket=nats_bucket)
-    elif backend == "http":
-        return HttpFileStore(base_url=http_base_url, headers=http_headers)
-    else:
-        raise ValueError(f"unknown backend: {backend!r}")
+    spec = get_backend_spec(backend)
+    if spec.file_factory is None:
+        raise ValueError(f"backend {backend!r} does not provide a FileStore")
+    return spec.file_factory(**opts)

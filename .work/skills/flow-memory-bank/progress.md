@@ -87,11 +87,26 @@
 | M042 | transport 層の整理 | low | `client/remote.py` の Safepath Client / RemoteKVS の所属切り分け（コード内 `# TODO(M042)`）。設計musing を backlog 化 |
 | M040 | ロードバランサーストレージ層 本実装 | 相談 | scaffold 配置済（`surfaces/loadbalancer.py`・本体 NotImplementedError・**facade 未公開**）。**負荷メトリクスで適切な1 backend を選ぶ**動的プレースメント（シャーディング/レプリケーションではない）。ネタ＝capability `SupportsLoadStats`/`LoadStats`＋`BalancePolicy`（RoundRobin/MostFreeSpace/LeastLoaded）。Array の兄弟。**未解決＝読みルーティング**（probe-all 既定 vs 配置インデックス）。local の free は `shutil.disk_usage`、cpu/mem は別途エージェント/エンドポイント要 |
 | M045 | `put2` ＝ error-as-value（Go 風 `(Error\|None, FileInfo)`） | 相談 | 別メソッド `put2(key, value) -> tuple[Error \| None, FileInfo]`＝成功は `(None, FileInfo)`／失敗は `(Error(...), FileInfo?)` で **エラー側に任意情報を載せられる**（“**半分** request/response 型”＝成功は FileInfo のまま・封筒は被せない。却下した full envelope とは別物）。要 doc-first。**未確定**＝(1) 例外ベース fail-loud（既存 put が raise）との二重化＝どの op が raise／どの op が tuple か、混在の指針／(2) `Error` 型の定義（共通基底 or 既存例外 `Exception\|None`／backend 固有情報の持たせ方）／(3) core IF に載せるか別系統 method か（載せるなら async↔sync lockstep ＋ conformancer parity ＝M043 前提）／(4) get/delete 等への波及。put→FileInfo（済）と request/response 封筒却下（projectbrief 非ターゲット）の中間地点 |
+| M069 | 名前 URL スキーマ取得（`s3://`/`nats://`/`local://.`/`manystore://`）＋ bucket 粒度統一 | normal | M068 の上に `open_store(url)` サーフェス。scheme→registry 解決、`netloc=bucket`・`path=bucket 内 prefix（任意）`・`local://.`=既定 cwd。全 backend「1 store=1 bucket/root」（既に概ね成立）を URL 規約に落とす。ここで prefix 付き flat kwargs（`s3_bucket=`）→ backend ネイティブ opts への整理を回収（M068 のシム廃止の出口）。要 doc-first（scheme 表・URL 文法） |
+| M070 | `manystore store init` ＋ 構成ファイルからストア復元 | normal | (a) CLI で雛形 `manystore.toml` 生成／(b) **上方向 discovery**（親を辿って構成発見）／(c) **local 相対パスを構成ファイルのディレクトリ基準で解決**（現 `_normalize_opts` は cwd 基準）。`serving/services/config.py` のパーサを neutral な場所へ昇格し client 側と共有。M068/M069 と組んで `open_store("mycontext")`（名前解決）と `open_store("s3://…")`（直 URL）を両立 |
+| M071 | 公開 IF 統合＝`KeyValueStore` 廃し 1 ストアへ（Buffering/Nobuffering 再編） | 相談 | ユーザー提案（2026-07-02）。**内部軸を「buffering（KV 本質）vs no-buffering（stream 本質）」に昇格**＝基底を `BufferingStore`/`NobufferingStore`（native がどちら向きか＝原則7 の「核は native 側」を型で表現・逆方向は合成）に再編。**公開は 1 インターフェースに畳む**＝put/get（KV API）と open_reader/open_writer（stream API）を同一 IF に載せ、独立した公開 `KeyValueStore` を落とす（実質 `FileStore=KVS+IO` を唯一の公開ストア〔名前は `Store` 等要再考〕へ昇格）。**思想整合**＝原則6「バッファ性が IF の本質」の昇格・fsspec `AbstractFileSystem`（cat/pipe＋open）先例・両方向合成は既存 `KeyValueFileStore`/`KeyValueFromFileStore` が実証済。**要 doc-first・大型**＝`protocols.py`/全 backend/全 surface（Safe*/sync/array）/conformancer/`docs/architecture.md` へ波及＋**公開 API 破壊**（`manystore.kv`/`manystore.file` の 2 facade 統合）ゆえ major bump 扱い。**命名確定（2026-07-02）＝`BufferedStore`/`StreamingStore`**。**未確定**＝(1) `KeyValueStore` を「put/get だけ見たい人向け view/型エイリアス」で残すか完全撤去か／(2) URL/registry 系（M068-70）が落ち着いた後に着手 |
 
 > **ゴール段階**: G1=配布できる（M005〜M008 完了）→ G2=安心して使える（M009〜M011・M016）→
 > G3=機能十分（M012〜M015）→ G4=広く使える（M017 判断）。
 
 ### 完了マイルストーン（要点のみ・経緯は git 履歴）
+
+- **M068（2026-07-02・完了）＝backend レジストリ / プラグイン機構（fsspec 風の土台）**: `storage/backends/
+  __init__.py` の if/elif を `backends/registry.py` へ集約。**flat lookup ＋ tier/origin 分離 ＋ clobber 保護**
+  ＝builtin（予約・shadow 不可）/ entry-point（group `manystore.stores`・遅延発見・既存名は拒否+warn）/
+  programmatic（`register_backend`・`clobber=True` のみ上書き）。`BackendSpec(name, kv_factory, file_factory,
+  origin)`。builtin 6 件を seed（memory/local/s3/nats/http＋**`manystore`＝`RemoteKeyValueStore` を seed**・
+  file_factory=None＝KVS のみ。`ManystoreClient` は横断 SDK ゆえ非登録・コードは `client/` 据え置き）。重い依存
+  （client 含む）は factory 内で遅延 import。`create_unsafe_*_store(backend, **opts)` は registry の薄いラッパへ
+  （後方互換＝flat kwargs `local_dir=`/`s3_bucket=`… 温存。ネイティブ opts 整理は M069）。トップに `register_
+  backend`/`BackendSpec`/`get_backend_spec`/`list_backends` を公開。core Protocol 変更なし。設計 `docs/backend_
+  registry.md`（nav 追加）。テスト `tests/test_backend_registry.py`（builtin 解決・由来・clobber・EP 非 shadow・
+  一覧）。`make check` 緑（230）・mkdocs --strict 緑。
 
 - **M067（2026-06-30・完了）＝download の整合性検証（size 必須・hash あれば追加）**: client/download に
   検証が無かった（`DownloadCache.download` は whole get→書込のみ・client get も `r.content` 素通し）。

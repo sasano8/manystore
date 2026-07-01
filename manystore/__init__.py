@@ -20,6 +20,10 @@ from .exceptions import ReadOnlyContext as ReadOnlyContext
 from .exceptions import UnsafePathError as UnsafePathError
 from .exceptions import to_problem as to_problem
 from .storage import file, kv
+from .storage.backends import BackendSpec as BackendSpec
+from .storage.backends import get_backend_spec as get_backend_spec
+from .storage.backends import list_backends as list_backends
+from .storage.backends import register_backend as register_backend
 from .storage.file import *  # noqa: F403  （後方互換: ファイル群をトップにフラット再エクスポート）
 from .storage.kv import *  # noqa: F403  （後方互換: KV 群をトップにフラット再エクスポート）
 
@@ -41,6 +45,10 @@ __all__ = list(
             "NoSuchUpload",
             "UnsafePathError",
             "IntegrityError",
+            "BackendSpec",
+            "register_backend",
+            "get_backend_spec",
+            "list_backends",
         ]
     )
 )

@@ -17,7 +17,10 @@
 
 - **`manystore/storage/` ＝ ストレージ・ライブラリ本体**。`backends/`（具象 backend）/ `surfaces/`（コアへの
   ラッパ・合成＝`Safe*`・`ArrayKeyValueStore`・`AsyncToSyncKeyValueStore`）/ facade `kv.py`・`file.py`。backend は
-  `create_key_value_store`/`create_file_store`（"memory"/"local"/"s3"/"nats"/"http"）。http は read-only
+  `create_unsafe_{key_value,file}_store`。**「名前→ストア生成」の解決は `backends/registry.py` に集約**（M068・
+fsspec 風＝builtin 予約 / entry-point group `manystore.stores` 遅延発見 / programmatic `register_backend`＋clobber
+保護・flat lookup・`BackendSpec` に出自 origin）。builtin= "memory"/"local"/"s3"/"nats"/"http"＋"manystore"
+（`RemoteKeyValueStore` を seed・KVS のみ）。http は read-only
   （write/list は `io.UnsupportedOperation`）、memory は依存ゼロ・揮発の参照 backend。
 - **`manystore/serving/`（`manystore[server]` extra）＝ コアを HTTP で公開する層**。`services/`（旧 implement＝
   backend 非依存の中核：`StorageService`・protocol 契約 dataclass・config・`PollingWatcher`・s3map）/ `server/`
