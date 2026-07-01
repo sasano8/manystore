@@ -71,6 +71,9 @@ cov-html:
 	uv run pytest -m "not slow and not benchmark" --cov=manystore --cov-report=html
 	@echo "open htmlcov/index.html （WSL: explorer.exe htmlcov/index.html）"
 
+cov-html-show:
+	@python -m http.server 8000 --directory htmlcov
+
 # 一括検証（format 確認 + fast test）＝内ループの「検証緑」判定
 check: format-check test
 
