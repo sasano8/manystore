@@ -103,11 +103,13 @@
   別スレッドが消し `unlink` が生 FNF を漏らす）。修正＝`unlink(missing_ok=True)`（原子的・冪等。dir は
   `contextlib.suppress(IsADirectoryError)`）。**併せて `iter_all._scan` の per-file `stat` も同型 race を
   ガード**（走査〜stat 間に消えたファイルは一覧から除く）。**ユーザー方針「非一貫な挙動は確定的にテストを
-  赤に」に応え contract を反復強化**＝`assert_concurrent_delete_safe` を rounds 反復（deleters=20/readers=6/
-  rounds=40＝deleter と reader を分離し gated の並行 get 負荷を抑制）で TOCTOU 検出を ~12%→ほぼ確定（バグ版
-  in-process 40/40 検知・修正版は緑）。iter_all は monkeypatch で「is_file=1回目 OK／ループ stat=2回目で欠損」を
-  **確定的に再現**する white-box テスト（`test_local_iter_all_skips_file_vanished_mid_scan`・fix で緑/未fix で赤）。
-  `make check` 緑（231）・full fast x5 flake 0。**併せて e2e ゲートを締めた**＝`make test-heavy` に
+  赤に」への対応の要点**＝当初は cross-backend 契約 `assert_concurrent_delete_safe` を rounds=40 反復で強化
+  したが、**実 gated backend で nats が 390s→60s timeout を割る回帰**（1 round ~10s＝並行 get が M061 の
+  bounded-get を踏む×40）。→**契約は単発・軽量に戻し（gated-safe）**、local 固有の TOCTOU/stat race は
+  **決定的な white-box 単体テストを local 側に**置く方針に修正（probabilistic 多数反復に頼らない）:
+  `test_local_delete_idempotent_under_toctou`（is_file を True 固定＋ファイルを先に消す＝旧は生 FNF・fix は no-op）/
+  `test_local_iter_all_skips_file_vanished_mid_scan`（os.stat を「is_file=1回目 OK／ループ=2回目で欠損」に）。
+  いずれも fix で緑・未fix で赤を実証。`make check` 緑（232）・full fast x5 flake 0・実 nats delete 10s。**併せて e2e ゲートを締めた**＝`make test-heavy` に
   `MANYSTORE_E2E_REQUIRED=1` を焼き込み（docker 未起動なら番兵が**赤**＝silent skip で緑を素通りさせない）。
   CI は step env を削除し e2e-up→test-heavy を叩くだけ＝local==CI。docker 無しで slow を見たいだけなら
   `uv run pytest -m slow` を直接叩く（fast/`make check` は従来どおり docker 不要・緑）。

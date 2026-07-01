@@ -864,6 +864,19 @@ async def test_local_iter_all_skips_file_vanished_mid_scan(
     assert "gone.bin" not in names  # 走査中に消えたファイルは除外（例外を漏らさない）
 
 
+async def test_local_delete_idempotent_under_toctou(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # 並行 delete の TOCTOU（is_file()=True 直後に別 delete が消し unlink が欠損）を確定再現。
+    # is_file を True 固定＋ファイルを先に消す＝旧 is_file()→unlink() は生 FNF を漏らし、
+    # 修正版 unlink(missing_ok=True) は no-op（冪等）。多数反復に頼らず決定的に検査（M072）。
+    store = LocalKeyValueStore(tmp_path)
+    await store.put("k", b"x")
+    os.unlink(tmp_path / "k")  # 並行 delete が先に消した状況を作る
+    monkeypatch.setattr(Path, "is_file", lambda self: True)  # is_file=True（TOCTOU の窓を固定）
+    await store.delete("k")  # 例外を出さない＝生 FileNotFoundError を漏らさない（冪等）
+
+
 class _FakeMetaStore:
     """`get_or_raise`/`head` だけ持つストア。head の返すメタを自由に固定して検証分岐を突く。"""
 

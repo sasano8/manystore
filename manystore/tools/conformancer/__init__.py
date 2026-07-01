@@ -383,7 +383,7 @@ async def assert_concurrent_overwrite_atomic(
 
 
 async def assert_concurrent_delete_safe(
-    store: object, *, deleters: int = 20, readers: int = 6, rounds: int = 40, size: int = 4096
+    store: object, *, fanout: int = 8, size: int = 4096
 ) -> None:
     """**並行 delete/get の安全性**: 同一キーへ並行 delete を撃っても、(1) どの delete も**例外を
     出さず冪等**（欠損は no-op・障害だけ伝播）、(2) 同時並行の get は **seed 値か NotFound**だけを
@@ -391,48 +391,43 @@ async def assert_concurrent_delete_safe(
 
     delete の冪等は run_middle が単発で見るが、こちらは**並行多重 delete＋並行 get**で握り潰し
     （M054 級＝nats `delete` の `suppress(Exception)` バグの並行版）と torn read を炙り出す。
+    read-only は `delete`/`put` が `UnsupportedOperation`＝呼ばない。違反は `AssertionError`。
 
-    **timing 依存の非決定を確定化するため rounds 回反復する**（単発 fanout では並行 double-delete の
-    TOCTOU レース〔例: local の is_file→unlink で生 FNF を漏らす・M072〕を ~1/8 でしか踏まず、
-    非準拠が**flaky に緑をすり抜ける**。反復＋多数 deleter で踏破率を上げ「非一貫＝確定的に赤」に。
-    round 内で deleter が例外を出せば `asyncio.gather` が伝播＝そのまま契約違反（握り潰し/leak）。
-    `deleters` は TOCTOU 検出を駆動し、`readers` は torn read 検出（gated backend の並行 get 負荷を
-    抑えるため deleter と分離）。read-only は `delete`/`put` が `UnsupportedOperation`＝呼ばない。
-    違反は `AssertionError`。
+    **単発・軽量に保つ**（gated 実 backend で回すため＝nats は並行 get が M061 の bounded-get を踏み
+    1 round でも ~10s。反復すると分オーダーで 60s timeout を割る）。local 固有の TOCTOU レース
+    （is_file→unlink＝M072）は timing 依存で単発では踏みにくいので、**確定的な white-box テストを
+    local 側に別途置く**（`test_local_delete_idempotent_under_toctou`）＝probabilistic な多数反復に
+    頼らず backend 非依存の契約はここで軽く、実装固有の race は決定的な単体で担保する。
     """
+    key = f"_conformance/cc/{uuid.uuid4().hex}"
+    seed = b"S" * size
+    await store.put(key, seed)
 
-    async def _reader(key: str) -> bytes | None:
+    async def _deleter() -> None:
+        await store.delete(key)  # 並行多重・欠損 no-op（fault のみ伝播＝leak はここで露見）
+
+    async def _reader() -> bytes | None:
         try:
             return await store.get_or_raise(key)  # 値か NotFound（torn/別値は不可）
         except NotFoundError:
             return None
 
-    seed = b"S" * size
-    for _ in range(rounds):
-        key = f"_conformance/cc/{uuid.uuid4().hex}"
-        await store.put(key, seed)
-
-        async def _deleter(k: str = key) -> None:
-            await store.delete(k)  # 並行多重・欠損 no-op（fault のみ伝播＝leak はここで露見）
-
-        delete_tasks = [_deleter() for _ in range(deleters)]
-        read_tasks = [_reader(key) for _ in range(readers)]
-        results = await asyncio.gather(
-            *delete_tasks, *read_tasks
-        )  # deleter の生例外は伝播＝leak 検知
-        observed = [v for v in results[deleters:] if v is not None]
-        bad = [v for v in observed if v != seed]
-        if bad:
-            raise AssertionError(
-                "並行 delete/get 安全性違反: get が seed でも NotFound でもない値を観測"
-                f"（torn/別値・{len(bad)} 件・例 len={len(bad[0])} 期待={size}）"
-            )
-        if await store.exists(key):
-            with contextlib.suppress(Exception):
-                await store.delete(key)
-            raise AssertionError(
-                "並行 delete/get 安全性違反: 全 delete 完了後もキー残存（冪等 delete が未実装）"
-            )
+    deleters = [_deleter() for _ in range(fanout)]
+    readers = [_reader() for _ in range(fanout)]
+    results = await asyncio.gather(*deleters, *readers)  # deleter の生例外は伝播＝leak 検知
+    observed = [v for v in results[fanout:] if v is not None]
+    bad = [v for v in observed if v != seed]
+    if bad:
+        raise AssertionError(
+            "並行 delete/get 安全性違反: get が seed でも NotFound でもない値を観測"
+            f"（torn/別値・{len(bad)} 件・例 len={len(bad[0])} 期待={size}）"
+        )
+    if await store.exists(key):
+        with contextlib.suppress(Exception):
+            await store.delete(key)
+        raise AssertionError(
+            "並行 delete/get 安全性違反: 全 delete 完了後もキー残存（冪等 delete が未実装）"
+        )
 
 
 async def assert_head_sha256_correct(store: object, *, size: int = 4096) -> None:
