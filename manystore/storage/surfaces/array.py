@@ -114,12 +114,13 @@ class ArrayKeyValueStore(KeyValueStoreBase):
     async def head(self, key: str) -> FileInfo:
         store, subkey = self._route(key)  # 不明な mount は KeyError（欠損ではない）
         info = await store.head(subkey)
-        # version トークン（modified_at/etag）は下層のまま透過し、filename だけ論理名へ。
+        # version トークン（modified_at/etag）と sha256 は下層のまま透過し、filename だけ論理名へ。
         return FileInfo(
             filename=key,
             size=info["size"],
             modified_at=info.get("modified_at"),
             etag=info.get("etag"),
+            sha256=info.get("sha256"),
         )
 
     async def get_or_raise(self, key: str) -> bytes:

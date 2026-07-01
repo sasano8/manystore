@@ -7,7 +7,7 @@ import contextlib
 from collections.abc import AsyncIterator
 
 from ...exceptions import ConflictError, NotFoundError, UnsupportedOperation
-from ...protocols import AsyncFileObject, FileInfo, IfMatch, KeyValueStoreBase
+from ...protocols import AsyncFileObject, FileInfo, IfMatch, KeyValueStoreBase, _sha256_hex
 
 
 class _S3Base:
@@ -59,7 +59,9 @@ class S3KeyValueStore(_S3Base, KeyValueStoreBase):
         # 他 FileInfo=IfMatch=etag（update CAS）。412/409 は ConflictError へ正規化。
         from botocore.exceptions import ClientError
 
-        extra: dict = {}
+        extra: dict = {
+            "Metadata": {"sha256": _sha256_hex(value)}
+        }  # 内容ハッシュを native メタへ（M013）
         if if_match is not None and if_match.is_absent():
             extra["IfNoneMatch"] = "*"
         elif if_match is not None and if_match.get("etag"):
@@ -87,11 +89,15 @@ class S3KeyValueStore(_S3Base, KeyValueStoreBase):
         etag = (resp.get("ETag") or "").strip('"') or None
         last_modified = resp.get("LastModified")
         modified_at = last_modified.timestamp() if last_modified is not None else None
+        # x-amz-meta-sha256（botocore は Metadata の小文字キーで返す）。put 経由でないオブジェクト
+        # （multipart writer 等）はメタ無し＝None（best-effort・M013）。
+        sha256 = (resp.get("Metadata") or {}).get("sha256")
         return FileInfo(
             filename=key,
             size=resp.get("ContentLength", 0),
             modified_at=modified_at,
             etag=etag,
+            sha256=sha256,
         )
 
     async def get_or_raise(self, key: str) -> bytes:

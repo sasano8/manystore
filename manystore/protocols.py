@@ -58,8 +58,8 @@ class FileInfo(dict):
     キー: `filename:str` / `size:int|None`（None=不在） / `modified_at:float|None`（任意） /
     `etag:str|None`（任意・CAS 用の不透明トークン＝S3=ETag/local=mtime_ns+size/dict=世代） /
     `sha256:str|None`（任意・**内容ハッシュ**＝download の整合性検証に使う。`etag` は backend ごと
-    意味が違い横断ハッシュにできないので別フィールド。現状どの backend も未設定＝将来 M013 で
-    put 時に埋める。`Verify` 参照）。
+    意味が違い横断ハッシュにできないので別フィールド。S3/NATS/dict は put 時に埋め head で返す／
+    native メタを持たない local 等は None＝best-effort〔M013〕。`Verify` 参照）。
     **`size=None` は不在**（存在しないキー）を表す＝`is_absent()` が True。put の `if_match` には
     head/head_or_absent の戻り（存在なら版一致を要求／不在 FileInfo（`FileInfo.absent()`）なら
     create-only）を渡す。
@@ -114,6 +114,13 @@ class Verify(IntFlag):
     REQUIRE_HASH = 4
     DEFAULT = SIZE | HASH
     STRICT = SIZE | HASH | REQUIRE_HASH
+
+
+def _sha256_hex(value: bytes) -> str:
+    """値の sha256 を 16 進文字列で返す（`FileInfo.sha256` の正準形・M013／download 検証 M067）。"""
+    import hashlib
+
+    return hashlib.sha256(value).hexdigest()
 
 
 # ── async（一次） ──

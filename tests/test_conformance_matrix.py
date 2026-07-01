@@ -35,6 +35,7 @@ from manystore.tools.conformancer import (
     assert_concurrent_delete_safe,
     assert_concurrent_overwrite_atomic,
     assert_fail_loud_over_transport,
+    assert_head_sha256_correct,
     assert_put_if_absent_concurrency_safe,
     assert_put_if_match_concurrency_safe,
     assert_writer_aborts_on_error,
@@ -146,6 +147,13 @@ async def test_concurrent_delete_safe(provider: Provider) -> None:
     # 並行 delete/get の安全性（冪等 delete・get は seed か NotFound・完了後 不在）。uuid キーのみ。
     async with _store(provider) as fs:
         await assert_concurrent_delete_safe(fs)
+
+
+@pytest.mark.parametrize("provider", _params(_ALL))
+async def test_head_sha256_correct(provider: Provider) -> None:
+    # head().sha256 を報告するなら実際の sha256 と一致（報告しない backend は免除）。uuid キーのみ。
+    async with _store(provider) as fs:
+        await assert_head_sha256_correct(fs)
 
 
 # ── native streaming IO（S3 multipart writer / range reader）の直接検証（M066③） ──

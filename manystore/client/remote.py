@@ -28,9 +28,10 @@ from ..protocols import (
 )
 from ..serving.services.protocol import ContextInfo, EntryInfo
 
-# server 側 routes.py と対の独自メタヘッダ（size/modified_at）。ETag は標準ヘッダ。
+# server 側 routes.py と対の独自メタヘッダ（size/modified_at/sha256）。ETag は標準ヘッダ。
 _SIZE_HEADER = "X-Manystore-Size"
 _MODIFIED_AT_HEADER = "X-Manystore-Modified-At"
+_SHA256_HEADER = "X-Manystore-Sha256"
 
 
 def _quote_key(key: str) -> str:
@@ -91,7 +92,7 @@ class ManystoreClient:
         return True
 
     async def head_meta(self, context: str, key: str) -> dict | None:
-        """HEAD でメタ（etag/size/modified_at）を読む。欠損（404）は None。"""
+        """HEAD でメタ（etag/size/modified_at/sha256）を読む。欠損（404）は None。"""
         r = await self._client.head(f"{context}/{_quote_key(key)}")
         if r.status_code == 404:
             return None
@@ -103,6 +104,7 @@ class ManystoreClient:
             "etag": etag.strip('"') if etag is not None else None,
             "size": int(size) if size is not None else None,
             "modified_at": float(modified_at) if modified_at is not None else None,
+            "sha256": r.headers.get(_SHA256_HEADER),
         }
 
     async def put(
@@ -158,7 +160,11 @@ class RemoteKeyValueStore(KeyValueStoreBase):
         if meta is None:
             raise NotFoundError(key)
         return FileInfo(
-            filename=key, size=meta["size"], modified_at=meta["modified_at"], etag=meta["etag"]
+            filename=key,
+            size=meta["size"],
+            modified_at=meta["modified_at"],
+            etag=meta["etag"],
+            sha256=meta.get("sha256"),
         )
 
     async def get_or_raise(self, key: str) -> bytes:

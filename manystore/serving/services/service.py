@@ -164,6 +164,7 @@ class StorageService:
             size=info.get("size"),
             modified_at=info.get("modified_at"),
             etag=info.get("etag"),
+            sha256=info.get("sha256"),  # 内容ハッシュも透過（M013・client が読む）
         )
 
     async def head_or_absent(self, context: str, key: str) -> FileInfo:

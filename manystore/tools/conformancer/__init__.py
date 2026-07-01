@@ -424,6 +424,31 @@ async def assert_concurrent_delete_safe(
         )
 
 
+async def assert_head_sha256_correct(store: object, *, size: int = 4096) -> None:
+    """**head().sha256 の正しさ**: 内容ハッシュを報告するなら実際の sha256 と一致すること。
+
+    報告しない backend（local 等・native メタ無し）は `None`＝免除（best-effort）。
+    一致しない hash は壊れた整合性メタ＝download 検証（M067 `Verify.HASH`）を誤らせる。
+    オラクル非依存（自分の get と突合）の絶対契約として検査。uuid キーのみ（非破壊）。
+    """
+    import hashlib
+
+    key = f"_conformance/sha/{uuid.uuid4().hex}"
+    value = bytes((i * 7 + 3) % 256 for i in range(size))  # 決定的な非自明バイト列
+    await store.put(key, value)
+    try:
+        reported = (await store.head(key)).get("sha256")
+        if reported is not None:
+            want = hashlib.sha256(value).hexdigest()
+            if reported != want:
+                raise AssertionError(
+                    f"head().sha256 不一致: 報告 {reported} / 実際 {want}（壊れた整合性メタ）"
+                )
+    finally:
+        with contextlib.suppress(Exception):
+            await store.delete(key)
+
+
 class _ConformanceProbeError(Exception):
     """conformance が**意図的に注入する故障**用の番兵例外（本物の障害と区別するための専用型）。"""
 
@@ -625,6 +650,13 @@ ABSOLUTE_CONTRACTS: list[ContractSpec] = [
         level="absolute",
         summary="並行 delete は冪等（障害のみ伝播）・並行 get は seed か NotFound・完了後は不在。",
         check="assert_concurrent_delete_safe",
+    ),
+    ContractSpec(
+        id="meta.sha256_correct",
+        title="head().sha256 の正しさ",
+        level="absolute",
+        summary="内容ハッシュを報告するなら実際の sha256 と一致（報告しない backend は免除）。",
+        check="assert_head_sha256_correct",
     ),
 ]
 
@@ -1159,3 +1191,4 @@ class FileStoreTester:
             lambda s: assert_concurrent_overwrite_atomic(s, size=4096),
         )
         await self._run_absolute(report, "concurrent.delete_safe", assert_concurrent_delete_safe)
+        await self._run_absolute(report, "meta.sha256_correct", assert_head_sha256_correct)

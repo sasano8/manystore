@@ -42,10 +42,11 @@ from ..services.service import StorageService
 #   `If-Match: "<etag>"`(update CAS)。不一致は backend が ConflictError→_on_error が problem(409)。
 _SIZE_HEADER = "X-Manystore-Size"
 _MODIFIED_AT_HEADER = "X-Manystore-Modified-At"
+_SHA256_HEADER = "X-Manystore-Sha256"
 
 
 def _meta_headers(info: FileInfo) -> dict[str, str]:
-    """[FileInfo] を HEAD 応答のメタヘッダ（ETag/size/modified_at）に写す（None は省く）。"""
+    """[FileInfo] を HEAD 応答のメタヘッダ（ETag/size/modified_at/sha256）に写す（None は省く）。"""
     headers: dict[str, str] = {}
     etag = info.get("etag")
     if etag is not None:
@@ -56,6 +57,9 @@ def _meta_headers(info: FileInfo) -> dict[str, str]:
     modified_at = info.get("modified_at")
     if modified_at is not None:
         headers[_MODIFIED_AT_HEADER] = repr(modified_at)  # float の往復精度を保つ
+    sha256 = info.get("sha256")
+    if sha256 is not None:
+        headers[_SHA256_HEADER] = sha256  # 内容ハッシュ（M013・client の download 検証メタ）
     return headers
 
 

@@ -18,6 +18,7 @@ from ...protocols import (
     _kv_move,
     _KvReadFileObject,
     _KvWriteFileObject,
+    _sha256_hex,
 )
 
 
@@ -38,6 +39,7 @@ class DictKeyValueStore(KeyValueStoreBase):
         self._data: dict[str, bytes] = data if data is not None else {}
         self._etag: dict[str, str] = {}  # key -> 不透明な版トークン（通し番号の文字列）
         self._mtime: dict[str, float] = {}  # key -> 更新時刻（epoch 秒）
+        self._sha256: dict[str, str] = {}  # key -> 内容 sha256（hex・M013／download 検証メタ）
         self._seq = 0  # put ごとに単調増加（版トークンの源・ABA 回避）
 
     def _bump_meta(self, key: str) -> None:
@@ -56,6 +58,7 @@ class DictKeyValueStore(KeyValueStoreBase):
         if is_update_cas and (not exists or if_match.get("etag") != self._etag.get(key)):
             raise ConflictError(f"version mismatch: {key}")
         self._data[key] = value
+        self._sha256[key] = _sha256_hex(value)  # 内容ハッシュも同時更新（head で露出・M013）
         self._bump_meta(key)
         return FileInfo(filename=key, size=len(value))
 
@@ -67,6 +70,7 @@ class DictKeyValueStore(KeyValueStoreBase):
             size=len(self._data[key]),
             modified_at=self._mtime.get(key),
             etag=self._etag.get(key),
+            sha256=self._sha256.get(key),  # 外部直挿入キーは None（メタ無し）
         )
 
     async def get_or_raise(self, key: str) -> bytes:
@@ -94,6 +98,7 @@ class DictKeyValueStore(KeyValueStoreBase):
         self._data.pop(key, None)  # 無いキーは無視
         self._etag.pop(key, None)  # メタも掃除（再作成は新しい通し番号で版を振り直す）
         self._mtime.pop(key, None)
+        self._sha256.pop(key, None)
 
     async def cp(self, src: str, dst: str) -> None:
         await _kv_copy(self, src, dst)

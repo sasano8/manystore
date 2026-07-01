@@ -18,6 +18,7 @@
 | `errors.fail_loud` | 下層障害を None/False/default/NotFound に化けさせず伝播（欠損のみ NotFound）。 | `assert_fail_loud_propagation` |
 | `concurrent.overwrite_atomic` | if_match 無しの並行 put でも最終値はどちらか一方の完全値（torn/混在/空なし）。 | `assert_concurrent_overwrite_atomic` |
 | `concurrent.delete_safe` | 並行 delete は冪等（障害のみ伝播）・並行 get は seed か NotFound・完了後は不在。 | `assert_concurrent_delete_safe` |
+| `meta.sha256_correct` | 内容ハッシュを報告するなら実際の sha256 と一致（報告しない backend は免除）。 | `assert_head_sha256_correct` |
 
 ## 差分契約（辞書ストアをオラクルに観測一致を検査）
 

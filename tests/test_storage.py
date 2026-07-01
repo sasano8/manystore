@@ -366,6 +366,7 @@ class _FakeS3:
 
     def __init__(self) -> None:
         self.objects: dict[str, bytes] = {}
+        self.meta: dict[str, dict] = {}  # key -> x-amz-meta-*（M013 の sha256 等）
         self._uploads: dict[str, dict] = {}
         self._uid = 0
         self.head_error_code: str | None = None  # set して head_object のエラー Code を差し替える
@@ -377,7 +378,7 @@ class _FakeS3:
             raise ClientError({"Error": {"Code": self.head_error_code}}, "HeadObject")
         if Key not in self.objects:
             raise ClientError({"Error": {"Code": "404"}}, "HeadObject")  # 実 client と同形
-        return {"ContentLength": len(self.objects[Key])}
+        return {"ContentLength": len(self.objects[Key]), "Metadata": self.meta.get(Key, {})}
 
     async def __aenter__(self) -> _FakeS3:
         return self
@@ -401,8 +402,9 @@ class _FakeS3:
         self.objects[Key] = b"".join(up["parts"][n] for n in order)
         return {}
 
-    async def put_object(self, Bucket, Key, Body) -> dict:
+    async def put_object(self, Bucket, Key, Body, Metadata=None, **_kw) -> dict:
         self.objects[Key] = bytes(Body)
+        self.meta[Key] = dict(Metadata or {})  # x-amz-meta-* を保持（head で返す・M013）
         return {}
 
     async def get_object(self, Bucket, Key) -> dict:
@@ -807,6 +809,31 @@ async def test_download_cache_rejects_unsafe_key(tmp_path: Path) -> None:
 
     with pytest.raises(UnsafePathError):
         await cache.download("../evil")  # キャッシュ外へ書かせない
+
+
+async def test_head_sha256_metadata(tmp_path: Path) -> None:
+    import hashlib
+
+    value = b"weights-123"
+    want = hashlib.sha256(value).hexdigest()
+
+    # dict（native メタを並列 dict で持つ）は put 時に sha256 を埋め head で返す（M013）。
+    d = DictKeyValueStore()
+    await d.put("a.bin", value)
+    assert (await d.head("a.bin")).get("sha256") == want
+    # 更新で hash も追従。
+    await d.put("a.bin", b"x")
+    assert (await d.head("a.bin")).get("sha256") == hashlib.sha256(b"x").hexdigest()
+    # 外部から直接 dict に挿入したキーはメタ無し＝None（best-effort）。
+    shared: dict[str, bytes] = {}
+    ext = DictKeyValueStore(shared)
+    shared["raw"] = b"zzz"
+    assert (await ext.head("raw")).get("sha256") is None
+
+    # local は native メタを持たない＝非永続で head は sha256=None（size 検証は有効・M013 方針）。
+    loc = LocalKeyValueStore(tmp_path / "r")
+    await loc.put("k", value)
+    assert (await loc.head("k")).get("sha256") is None
 
 
 class _FakeMetaStore:

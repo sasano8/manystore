@@ -30,6 +30,23 @@ from ...protocols import (
 # JetStream が「期待した最終 subject シーケンスと不一致」を返すときの err_code（CAS 失敗の判別）。
 _WRONG_LAST_SEQ_ERR = 10071
 
+
+def _nats_digest_to_hex(digest: str | None) -> str | None:
+    """ObjectInfo の digest（`SHA-256=<base64url>`）を sha256 hex に直す（無効は None・M013）。"""
+    if not digest:
+        return None
+    import base64
+
+    raw = digest
+    for tag in ("SHA-256=", "sha-256="):  # nats-py の digest プレフィックス（大小双方を許容）
+        if raw.startswith(tag):
+            raw = raw[len(tag) :]
+            break
+    with contextlib.suppress(Exception):  # 想定外の形式は None（best-effort）
+        return base64.urlsafe_b64decode(raw).hex()
+    return None
+
+
 # whole get（`obs.get`）の境界。nats-py の `obs.get` はメタ参照後にチャンク subject を購読し
 # `OBJ_NO_PENDING` マーカーまで待つが read timeout を持たない＝並行 delete がチャンクを purge すると
 # 「来ないチャンク」を無期限に待ってハングする。バッファ get（値＝メモリ常駐 bytes）の正常読みは
@@ -212,7 +229,15 @@ class NatsObjectKeyValueStore(_NatsBase, KeyValueStoreBase):
         seq, info = await self._seq_and_info(key)
         if seq is None or info is None or info.get("deleted"):
             raise NotFoundError(key)
-        return FileInfo(filename=key, size=info.get("size") or 0, modified_at=None, etag=str(seq))
+        return FileInfo(
+            filename=key,
+            size=info.get("size") or 0,
+            modified_at=None,
+            etag=str(seq),
+            sha256=_nats_digest_to_hex(
+                info.get("digest")
+            ),  # ObjectInfo の sha256 digest を露出（M013）
+        )
 
     async def get_or_raise(self, key: str) -> bytes:
         from nats.js.errors import NotFoundError as JSNotFound

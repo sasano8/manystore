@@ -72,7 +72,7 @@
 |----|--------|------|------|
 | M051 | kubernetes backend（M050 の具体 sink） | 相談 | ユーザー要望（2026-06-27・討議中・doc-first）＝put=server-side apply / get=補完済み live（put≠get）。キー=`namespace/resource_type/name`（`.yml` 含めず・group/version は discovery 補完・衝突時 `type.group`）。**FileInfo に世代情報**（resourceVersion/generation/uid/creationTimestamp）。**resourceVersion CAS を M046 の参照実装**に（`if_version` 不一致は ConflictError）。ローカル側=`KubeManifestStore` ラッパ（パス↔内容の同一性検証＝Safe 風 1 枚）。依存=`kubernetes-asyncio` を extra `[k8s]`（遅延 import）。cluster-scoped は後回し。詳細は interrupt |
 | M012 | `list(prefix=...)` / pagination | 中 | prefix は core `iter_all(prefix=…)` 引数化済（M030 capability は 2026-06-26 廃止）。**pagination 未対応**。設計案（2026-06-26 対話・要 doc-first）＝(a) `iter_all`/`list_all` に **offset+limit** を足す（単純・全 backend で scan 可だが大 offset は O(n)）／(b) **cursor/continuation-token** 形式（S3 ContinuationToken・NATS 等の native と整合・M021 の continuation と同一機構）。加えて **返り値を range メタ付きの独自型**にする案＝iter は「何件目〜何件目」を、list は from/to 件数属性を持つ（pagination メタ＝**file/value パラダイム内**。却下した transport の request/response 封筒とは別物）。未確定＝offset/limit vs cursor の二択と、独自結果型を入れるか。M021（S3 GW continuation）・M044（limit 既定の定数化）と連動 |
-| M013 | メタデータ / content-type | 中 | S3・NATS は native 対応だが共通 IF に無い。**M067 連動**＝put 時に sha256 を計算してメタ保存すれば `FileInfo.sha256` が埋まり download の hash 検証が自動で効く（`Verify.HASH`/`STRICT`） |
+| M013残 | メタデータ / content-type | 中 | **sha256 メタ充填は完了**（2026-07-02＝M067 残B。put 時 `_sha256_hex` を native メタへ〔dict/s3=x-amz-meta/nats=ObjectInfo digest〕→head 露出→HTTP ヘッダ透過→array 透過。native メタ無しの local は None=best-effort。conformance `meta.sha256_correct` 追加）。**残＝content-type と汎用 user metadata dict**（first-class にするか汎用 dict か未確定・doc-first） |
 | M016 | テスト拡充（エラーパス/並行/大容量） | 中 | fake は happy path 中心 |
 | M014 | 操作レベル retry/timeout | 低 | 現状 connect のみ |
 | M015 | logging（操作・リトライ可視化） | 低 | 観測性なし |
@@ -90,6 +90,7 @@
 | M069 | 名前 URL スキーマ取得（`s3://`/`nats://`/`local://.`/`manystore://`）＋ bucket 粒度統一 | normal | M068 の上に `open_store(url)` サーフェス。scheme→registry 解決、`netloc=bucket`・`path=bucket 内 prefix（任意）`・`local://.`=既定 cwd。全 backend「1 store=1 bucket/root」（既に概ね成立）を URL 規約に落とす。ここで prefix 付き flat kwargs（`s3_bucket=`）→ backend ネイティブ opts への整理を回収（M068 のシム廃止の出口）。要 doc-first（scheme 表・URL 文法） |
 | M070 | `manystore store init` ＋ 構成ファイルからストア復元 | normal | (a) CLI で雛形 `manystore.toml` 生成／(b) **上方向 discovery**（親を辿って構成発見）／(c) **local 相対パスを構成ファイルのディレクトリ基準で解決**（現 `_normalize_opts` は cwd 基準）。`serving/services/config.py` のパーサを neutral な場所へ昇格し client 側と共有。M068/M069 と組んで `open_store("mycontext")`（名前解決）と `open_store("s3://…")`（直 URL）を両立 |
 | M071 | 公開 IF 統合＝`KeyValueStore` 廃し 1 ストアへ（Buffering/Nobuffering 再編） | 相談 | ユーザー提案（2026-07-02）。**内部軸を「buffering（KV 本質）vs no-buffering（stream 本質）」に昇格**＝基底を `BufferingStore`/`NobufferingStore`（native がどちら向きか＝原則7 の「核は native 側」を型で表現・逆方向は合成）に再編。**公開は 1 インターフェースに畳む**＝put/get（KV API）と open_reader/open_writer（stream API）を同一 IF に載せ、独立した公開 `KeyValueStore` を落とす（実質 `FileStore=KVS+IO` を唯一の公開ストア〔名前は `Store` 等要再考〕へ昇格）。**思想整合**＝原則6「バッファ性が IF の本質」の昇格・fsspec `AbstractFileSystem`（cat/pipe＋open）先例・両方向合成は既存 `KeyValueFileStore`/`KeyValueFromFileStore` が実証済。**要 doc-first・大型**＝`protocols.py`/全 backend/全 surface（Safe*/sync/array）/conformancer/`docs/architecture.md` へ波及＋**公開 API 破壊**（`manystore.kv`/`manystore.file` の 2 facade 統合）ゆえ major bump 扱い。**命名確定（2026-07-02）＝`BufferedStore`/`StreamingStore`**。**未確定**＝(1) `KeyValueStore` を「put/get だけ見たい人向け view/型エイリアス」で残すか完全撤去か／(2) URL/registry 系（M068-70）が落ち着いた後に着手 |
+| M072 | local backend の並行 delete/get レース修正（flaky） | 中 | 既存 flaky（「既知の問題」参照）＝並行 delete 直後の get/list が生 `FileNotFoundError` を漏らす。M061 の nats 境界化と同型の対処を local に＝get_or_raise/list_all で欠損レースを NotFound に正規化（存在再確認で「消えた=NotFound／別要因=伝播」に振り分け）。conformance `concurrent.delete_safe[local]` を安定緑に |
 
 > **ゴール段階**: G1=配布できる（M005〜M008 完了）→ G2=安心して使える（M009〜M011・M016）→
 > G3=機能十分（M012〜M015）→ G4=広く使える（M017 判断）。
@@ -115,8 +116,8 @@
   ＝取得 bytes を `head()` の期待メタと照合し**検証してから書く**（cache に入るのは検証済みのみ・
   cache hit は再検証しない・`Verify.NONE` は head() も引かない）。size は全 backend の `head().size` で
   完結／hash は `FileInfo.sha256`（best-effort＝無ければスキップ・REQUIRE_HASH なら失敗）。不一致は
-  新例外 `IntegrityError`（status 422）。`Verify`/`IntegrityError` をトップ export。**残（B・M013 連動）＝
-  hash メタを実際に埋める**（put 時 sha256 計算→メタ保存）と client get への verify 適用。fast 217 passed。
+  新例外 `IntegrityError`（status 422）。`Verify`/`IntegrityError` をトップ export。**残 B＝hash メタ充填は
+  2026-07-02 完了**（put 時 sha256 を native メタへ→head 露出→conformance `meta.sha256_correct`。M013残 参照）。
 - **M061（2026-06-30・完了）＝実 backend e2e を CI で gated 実走（skip 許容やめ）**: docker compose で nats /
   seaweedfs / **minio** を起こし、`ci.yml` に e2e ジョブ追加（`make e2e-up`→`MANYSTORE_E2E_REQUIRED=1
   make test-heavy`→`make e2e-down`。ubuntu runner 同梱の docker+compose を直接叩く＝local==CI）。**核は
@@ -295,6 +296,11 @@ M025残 等）。拡張（M051/M039/M040/M026/M045）は方針どおり後回し
   ＝conformance では `S3_IMPLS` の `unsupported` で `xfail(非strict)` 宣言（flaky ゆえ strict 不可）。CAS が
   要るなら MinIO / 実 AWS S3 を使う（実機検証済）。
 - `make test`（fast）は lint を回さない＝format ドリフト（特に CJK 行の E501）は `make format` でしか出ない。
+- **【flaky・要修正 M072】local backend の並行 delete/get レース**＝`test_concurrent_delete_safe[local]`
+  （run_full 経由含む）が fast フルスイートで **~1/8** で `FileNotFoundError: .../_conformance/cc/<uuid>` を
+  生のまま送出して落ちる。並行 delete が消した直後に get/list が open/stat して**生の `FileNotFoundError` が
+  NotFound に正規化されず漏れる**（M061 で nats に施した境界化の local 版が未対応）。**M068/M013 とは無関係の
+  既存バグ**（M068 のみの素ツリーでも再現・2026-07-02 確認）。分離実行では出ない＝順序/タイミング依存。
 
 ## 意思決定の変遷
 
