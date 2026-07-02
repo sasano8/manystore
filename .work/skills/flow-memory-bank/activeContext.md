@@ -5,6 +5,10 @@
 
 ## 現在のフォーカス
 
+**M075 完了（2026-07-02）＝CLI を Typer へ**（`manystore serve` / `manystore store init`・console script・typer は
+core だが `import manystore` では非 import・旧 `--config` は serve 後方互換）。次は **M074（conformance real/fake/fault
+切替＝計画合意済み P1-P5）** または **M051（k8s）**。
+
 **M070 完了（2026-07-02）＝構成ファイルからストア復元**（`manystore store init`＋`open_store("ctx")` 名前解決・
 local 相対は構成 dir 基準・上方向 discovery・serving と neutral `storage/config.py` を共有）。**URL/registry/config の
 一次シリーズ（M068→M069→M070）完了**。次サイクル候補＝**M051（k8s secrets backend）**／**M074（conformance を

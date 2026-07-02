@@ -25,7 +25,13 @@ dependencies = [
     # local backend の同期 IO をスレッドへオフロードして event loop を塞がない（M010）。
     # スレッドプール系（真の async disk IO ではない＝移植性・最小を優先）。httpx 経由で在中だが直接使うので明示。
     "anyio>=4.0.0",
+    # CLI（`manystore` / `python -m manystore`）の実装。`import manystore`（ライブラリ利用）では
+    # __main__ を読み込まないので typer は import されない＝実行時コストは CLI 起動時のみ。
+    "typer>=0.12.0",
 ]
+
+[project.scripts]
+manystore = "manystore.__main__:main"
 
 [project.urls]
 Homepage = "https://github.com/sasano8/manystore"

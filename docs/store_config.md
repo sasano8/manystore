@@ -7,9 +7,13 @@
 ## 生成（`manystore store init`）
 
 ```console
-$ python -m manystore store init          # cwd に manystore.toml を生成（--force で上書き）
-$ python -m manystore store init path/to  # 生成先を指定
+$ manystore store init          # cwd に manystore.toml を生成（--force で上書き）
+$ manystore store init path/to  # 生成先を指定
+# `python -m manystore store init …` でも同じ（console script が無い環境向け）
 ```
+
+CLI は Typer 製（`manystore --help` でサブコマンド一覧）。統合サーバは `manystore serve --config <toml>`
+（旧 `python -m manystore --config <toml>` も後方互換で serve に振られる）。
 
 生成される雛形（抜粋）:
 

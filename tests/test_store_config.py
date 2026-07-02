@@ -108,6 +108,13 @@ def test_cli_store_init_creates_config(tmp_path: Path) -> None:
     cli_main(["store", "init", str(tmp_path), "--force"])  # --force で上書き OK
 
 
+def test_cli_backcompat_config_routes_to_serve(tmp_path: Path) -> None:
+    # 旧 `manystore --config X`（先頭 --config）は serve に振られる＝load_config へ到達する。
+    # 存在しない config を渡すと uvicorn 起動前に FileNotFoundError＝振り分けが効いている証拠。
+    with pytest.raises(FileNotFoundError):
+        cli_main(["--config", str(tmp_path / "nope.toml")])
+
+
 def _write(d: Path, body: str) -> Path:
     p = d / CONFIG_FILENAME
     p.write_text(body, encoding="utf-8")
