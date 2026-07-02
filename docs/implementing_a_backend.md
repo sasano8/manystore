@@ -11,20 +11,21 @@ manystore の **conformance（挙動契約）を仕様の単一源泉**とし、
    [Conformance spec](conformance_spec.md)。
 2. **雛形を起こす** — `python -m manystore.spec.conformancer --scaffold MyStore --kind kv|file` が
    実装 TODO 付きの skeleton を出力する（契約が実装の TODO リストになる）。
-3. **実装する** — 参照実装 `DictKeyValueStore`（`backends/memory.py`＝in-memory・依存ゼロ）を手本に。
-   核（真の実装）は native primitive 側に置く（kv 寄り/file 寄りの見極めは architecture.md）。
-4. **登録する** — [registry](backend_registry.md) に `register_backend("mybackend", kv_factory=…)`
+3. **実装する** — 参照実装 `DictStore`（`backends/memory.py`＝in-memory・依存ゼロ）を手本に。
+   核（真の実装）は native primitive 側に置く（値寄り/IO 寄りの見極めは architecture.md）。
+4. **登録する** — [registry](backend_registry.md) に `register_backend("mybackend", factory=…)`
    （同梱なら builtin seed／プラグインは entry-point group `manystore.stores`）。
 5. **契約を通す** — conformance matrix に provider を 1 行足し、`assert_*` / `run_light·middle·heavy·full`
    を流す。緑になれば「他 backend と同じ観測契約を満たす」ことが機械的に保証される。
 
 ## 参照実装とオラクル
 
-- **`DictKeyValueStore`＝参照 backend**。Protocol を最小・素直に実装した in-memory 版で、conformance の
+- **`DictStore`＝参照 backend**。Protocol を最小・素直に実装した in-memory 版で、conformance の
   **オラクル**（run_light/middle/heavy が「辞書ストアと同じ観測になるか」で判定）。「どう実装すべきか」に
   迷ったらまずこれを読む。
-- 逆向き合成の実例＝`KeyValueFileStore`（KVS→FileStore）/ `KeyValueFromFileStore`（FileStore→KVS）。
-  put/get しか native に無くても FileStore を、open しか無くても KVS を、合成で満たせる（原則6）。
+- 逆向き合成は**基底の既定合成**が担う。put/get しか native に無くても IO API（open_*）を、open しか
+  native に無くても値 API（put/get）を、基底クラス（`BufferedStoreBase` / `StreamingStoreBase`）が
+  合成で満たせる（原則6）。どの backend も 1 つの full Store になる。
 
 ## テストの 3 レイヤ（real / fake / fault）と**権威の所在**
 
@@ -61,7 +62,7 @@ BackendProfile(
 ```
 
 `_profile_opener` が **registry（`get_backend_spec`）で store を構築 → connect → cleanup** を一元化する
-（`_build_filestore` が `file_factory`／KVS を wrap）。ベタな construct/connect は書かない。
+（`_build_filestore` が単一 `factory` から未接続の full Store を作る）。ベタな construct/connect は書かない。
 
 - `gated=True` … 実 backend（未到達なら skip・`slow`）。docker 無しで回したいなら **fake provider**
   （低層 client を fake に差し替え・非 gated）を併せて足す。

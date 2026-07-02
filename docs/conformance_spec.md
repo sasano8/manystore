@@ -22,7 +22,7 @@
 
 ## 差分契約（辞書ストアをオラクルに観測一致を検査）
 
-`FileStoreTester` が辞書ストア（正）と対象に同じ操作を適用し、返り値と適用後状態の一致を
+`StoreTester` が辞書ストア（正）と対象に同じ操作を適用し、返り値と適用後状態の一致を
 観点ごとに検証する。下記の観点一覧は **run_* の実行から導出**（実態が正）。
 
 ### run_light
@@ -85,10 +85,10 @@
 
 0. 雛形生成: `python -m manystore.spec.conformancer --scaffold MyStore --kind kv|file`
    ＝未実装メソッド（`raise NotImplementedError`）＋満たすべき契約 TODO＋配線手順が出る。
-1. `KeyValueStore` / `FileStore` の Protocol メソッドを実装（`kv_spec.md` /
-   `file_storage_spec.md` の ✅ を埋める）。`assert_key_value_store` 等で存在チェック。
+1. `Store` の値 API / IO API の Protocol メソッドを実装（`kv_spec.md` /
+   `file_storage_spec.md` の ✅ を埋める）。`assert_buffered_store` 等で存在チェック。
 2. 上記**絶対契約**の assert を接続済みストアに対して呼び、全て緑にする。
-3. `FileStoreTester(DictStore(), <your_store>)` の `run_light`/`run_middle`/
+3. `StoreTester(DictStore(), <your_store>)` の `run_light`/`run_middle`/
    `run_heavy` を回し差分観点をオラクルに一致させる（run_* は非破壊）。
    `run_full` は差分（light+middle+heavy）＋絶対契約を 1 レポートに集約する一括実行。
 

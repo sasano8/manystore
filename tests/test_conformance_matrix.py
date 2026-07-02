@@ -161,7 +161,7 @@ async def test_head_sha256_correct(provider: Provider) -> None:
 
 @pytest.mark.parametrize("provider", _params(_NATIVE_FILE))
 async def test_native_writer_aborts_on_error(provider: Provider) -> None:
-    # native FileStore の open_writer（S3=multipart）が例外時に確定しない（all-or-nothing）。
+    # native Store の open_writer（S3=multipart）が例外時に確定しない（all-or-nothing）。
     # 包んだ KVS バッファ writer ではなく native streaming writer 自身を検査する。
     async with _store(provider) as fs:
         await assert_writer_aborts_on_error(fs)

@@ -40,10 +40,10 @@ def _sha256_hex(value: bytes) -> str:
 
 
 class _StoreBase(abc.ABC):
-    """KVS / FileStore どちらの backend にも共通する store 操作の基底（[KeyValueStore] の表面）。
+    """どの backend にも共通する store 操作の基底（[Store] の値 API の表面）。
 
-    kv 寄り（[BufferedStoreBase]）と file 寄り（[StreamingStoreBase]）の差は「どれを native と
-    するか」だけで、**[KeyValueStore] Protocol の表面（put/get/iter_all/list_all/exists/delete/
+    値寄り（[BufferedStoreBase]）と IO 寄り（[StreamingStoreBase]）の差は「どれを native と
+    するか」だけで、**[Store] の値 API の表面（put/get/iter_all/list_all/exists/delete/
     cp/mv/connect/aclose）は両者で同一**。その共通表面をここに 1 か所だけ定義する:
 
     - **abstract primitive**（派生が必ず実装＝未実装はインスタンス化時点で `TypeError`／fail-loud）:
@@ -165,12 +165,12 @@ class BufferedStoreBase(_StoreBase):
 
 
 class StreamingStoreBase(_StoreBase):
-    """**file 寄り** ([FileStore]) backend の基底＝primitive は `open_reader`/`open_writer`。
+    """**IO 寄り**（Store の IO API）backend の基底＝primitive は `open_reader`/`open_writer`。
 
-    KVS 面（get_or_raise/put）は **IO から導出**する＝get_or_raise は open_reader で全体読み、put は
-    open_writer で全体書き（**値境界でのみバッファ**。ストリーム性能は open_reader/open_writer を
-    直接使えば得られる）。`LocalStore` 等「真実が IO 側」の backend が継ぐ。
-    iter_all/exists/delete/connect/aclose は依然 [_StoreBase] の abstract（backend が実装）。
+    値 API 面（get_or_raise/put）は **IO から導出**する＝get_or_raise は open_reader で全体読み、
+    put は open_writer で全体書き（**値境界でのみバッファ**。ストリーム性能は
+    open_reader/open_writer を直接使えば得られる）。`LocalStore` 等「真実が IO 側」の backend が
+    継ぐ。iter_all/exists/delete/connect/aclose は依然 [_StoreBase] の abstract（backend が実装）。
 
     対して **kv 寄り** backend は [BufferedStoreBase] を継承し IO は whole の上に buffer 合成する。
     `open_reader`/`open_writer` は **`@abstractmethod`**＝未実装なら生成時に `TypeError`。
@@ -312,7 +312,7 @@ async def _aclose_all(stores: Iterable[AsyncBufferedStore]) -> None:
 
 
 # ════════════════════════════════════════════════════════════════════════════
-# 汎用アダプタ ── KVS↔FileStore（共有 FileObject を合成して IO を埋め合わせ／落とす）
+# 共有 FileObject ── 基底が IO API を値 API から buffer 合成するための材（open_reader/open_writer）
 # ════════════════════════════════════════════════════════════════════════════
 
 

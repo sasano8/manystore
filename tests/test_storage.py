@@ -43,7 +43,7 @@ from manystore.storage.surfaces.safe import SafeStore
 
 
 def test_async_to_sync_kvs_roundtrip(tmp_path: Path) -> None:
-    # 非同期 KeyValueStore を同期ブリッジで被せ、ループ無しの同期コードから put/get できる。
+    # 非同期の Store を同期ブリッジで被せ、ループ無しの同期コードから put/get できる。
     with AsyncToSyncStore(LocalStore(tmp_path)) as store:
         assert store.exists("a.txt") is False
         store.put("a.txt", b"hello")
@@ -225,7 +225,7 @@ async def test_kvs_get_default_and_get_or_raise(tmp_path: Path) -> None:
 
 
 async def test_local_file_store_is_full_kvs(tmp_path: Path) -> None:
-    # FileStore = KeyValueStore + IO。LocalStore は IO を持ちつつ KVS としても完全に働く。
+    # Store = 値 API(put/get) + IO API(open_*)。LocalStore は IO を持ちつつ KVS としても完全に働く。
     fs = LocalStore(tmp_path)
 
     # KVS 面: put / get(default) / get_or_raise / iter
@@ -242,7 +242,7 @@ async def test_local_file_store_is_full_kvs(tmp_path: Path) -> None:
 
 
 async def test_buffered_backend_gets_io_via_base(tmp_path: Path) -> None:
-    # 旧アダプタ KeyValueFileStore は撤去（M071）＝kv 寄り backend も基底 [BufferedStoreBase] の
+    # 旧アダプタ KeyValueFileStore は撤去（M071）＝値寄り backend も基底 [BufferedStoreBase] の
     # 既定合成で open_reader/open_writer を備える。DictStore（KVS-only 相当）で write→read を確認。
     store = DictStore()
 
@@ -341,7 +341,7 @@ async def test_s3_file_store_streams_multipart_write_and_read() -> None:
 
 
 async def test_s3_file_store_is_full_kvs() -> None:
-    # S3Store = S3Store + streaming IO。KVS 面（whole get/put）も持つ完全 FileStore。
+    # S3Store = S3Store + streaming IO。KVS 面（whole get/put）も持つ完全な Store。
     fake = _FakeS3()
     store = S3Store("bucket")
     store._session = lambda: fake
@@ -398,7 +398,7 @@ async def test_nats_file_store_buffered_read_write() -> None:
 
 
 async def test_nats_file_store_is_full_kvs() -> None:
-    # NatsStore = NatsStore + buffer 合成 IO。KVS 面も使える完全な FileStore。
+    # NatsStore = NatsStore + buffer 合成 IO。KVS 面も使える完全な Store。
     store = NatsStore("nats://x", "bucket")
     fake = _FakeNatsObs()
     _patch_obs(store, fake)
@@ -608,7 +608,7 @@ async def test_retry_verify_false_ignores_after_exhaustion() -> None:
     assert flaky.attempts == 2
 
 
-# ── download cache（KeyValueStore → ローカルキャッシュ） ──
+# ── download cache（Store → ローカルキャッシュ） ──
 
 
 async def test_download_cache_fetches_caches_and_force(tmp_path: Path) -> None:
@@ -947,7 +947,7 @@ async def test_http_kvs_get_and_exists() -> None:
 
 
 async def test_http_file_store_is_full_read_only_kvs() -> None:
-    # HttpStore = HttpStore + read IO。KVS 面（read-only）も持つ完全な FileStore。
+    # HttpStore = HttpStore + read IO。KVS 面（read-only）も持つ完全な Store。
     objects = {"a.txt": b"hello"}
     store = HttpStore(base_url=_HTTP_BASE)
     store._client = lambda: _FakeHttpClient(objects, _HTTP_BASE)
@@ -1122,7 +1122,7 @@ async def test_open_async_store_is_safe_and_connected(tmp_path: Path) -> None:
 
 
 async def test_open_async_store_is_safe_full_filestore(tmp_path: Path) -> None:
-    # 顔: Safe 包装＋接続済みの完全な FileStore（= KVS + IO）。
+    # 顔: Safe 包装＋接続済みの完全な Store（= KVS + IO）。
     async with open_async_store("local", local_dir=tmp_path) as fs:
         assert isinstance(fs, SafeStore)
         # IO 面（filename 検証付き）
@@ -1130,7 +1130,7 @@ async def test_open_async_store_is_safe_full_filestore(tmp_path: Path) -> None:
             await w.write(b"data")
         async with await fs.open_reader("k/v.bin") as r:
             assert await r.read() == b"data"
-        # KVS 面も使える（FileStore = KVS + IO）＋キー検証
+        # KVS 面も使える（Store = KVS + IO）＋キー検証
         assert await fs.get("k/v.bin") == b"data"
         assert await fs.exists("k/v.bin") is True
         with pytest.raises(UnsafePathError):
@@ -1148,7 +1148,7 @@ async def test_open_async_uses_memory_backend_without_connect() -> None:
 
 
 def test_create_unsafe_store_maps_backends(tmp_path: Path) -> None:
-    # FileStore 版ファクトリ（生・未包装・未接続）。backend→FileStore のマッピング。
+    # Store 版ファクトリ（生・未包装・未接続）。backend→Store のマッピング。
     assert isinstance(create_unsafe_store("memory"), DictStore)
     assert isinstance(create_unsafe_store("local", local_dir=tmp_path), LocalStore)
     assert isinstance(create_unsafe_store("http", http_base_url="http://x"), HttpStore)

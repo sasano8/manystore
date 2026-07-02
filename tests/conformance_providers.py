@@ -1,6 +1,6 @@
-"""挙動契約を流す FileStore プロバイダの**単一宣言**（Dict / Local / Remote / 実 backend）。
+"""挙動契約を流す Store プロバイダの**単一宣言**（Dict / Local / Remote / 実 backend）。
 
-`KeyValueStore` / `FileStore` の IF が揃うので、同一の契約 body（run_light / run_middle /
+Store は値 API(put/get) も IO API(open_*) も揃うので、同一の契約 body（run_light / run_middle /
 writer all-or-nothing / 並行 CAS / CRUD）を**注入するストアだけ変えて**全実装で回せる。ここに
 backend を 1 か所だけ宣言し、`test_conformance_matrix` が各契約を全 provider に流す。
 
@@ -339,10 +339,10 @@ def _open_s3_faulty(impl: S3Impl, addressing_style: str) -> Callable[[], object]
 
 @dataclass
 class Provider:
-    """1 つの被テスト実装。`open()` が接続済み FileStore を yield する async CM を返す。"""
+    """1 つの被テスト実装。`open()` が接続済み full Store を yield する async CM を返す。"""
 
     id: str
-    open: Callable[[], object]  # () -> async context manager（FileStore を yield）
+    open: Callable[[], object]  # () -> async context manager（full Store を yield）
     gated: bool = (
         False  # 実 backend（未到達なら skip・slow）。到達できる限り実走＝失敗は skip にしない
     )

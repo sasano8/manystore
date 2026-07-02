@@ -1,4 +1,4 @@
-"""service — protocol を manystore の [KeyValueStore] へ写す中核（[StorageService]）。
+"""service — protocol を manystore の [Store] へ写す中核（[StorageService]）。
 
 HTTP の **context（第一階層）は [ArrayStore] の mount に対応**する。config の各 context を
 `create_unsafe_store` で生成 → [SafeStore]（キー検証）で包み ArrayStorage に
@@ -28,7 +28,7 @@ __all__ = ["StorageService", "ContextNotFound", "ReadOnlyContext"]
 
 
 class StorageService:
-    """公開 context 群を保持し、protocol の操作を KeyValueStore に写すアプリ中核。"""
+    """公開 context 群を保持し、protocol の操作を Store に写すアプリ中核。"""
 
     def __init__(self, config: AppConfig, *, watch_interval: float = 1.0) -> None:
         self._config = config

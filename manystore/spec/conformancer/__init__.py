@@ -733,7 +733,7 @@ def scaffold_backend(class_name: str, *, kind: str = "file") -> str:
     北極星④＝「契約一覧が実装の TODO になる」。基底（`StreamingStoreBase`/`BufferedStoreBase`）の
     `__abstractmethods__`（=著者が必ず実装すべき primitive）だけを `raise NotImplementedError` で
     stub し、`get`/`list_all`/`cp`/`mv`/`head` 等の既定実装は基底から継承する。ヘッダに満たすべき
-    絶対契約（[ABSOLUTE_CONTRACTS]）と配線手順を書く。`kind`＝"file"（FileStore）/"kv"（KeyValueStore）。
+    絶対契約（[ABSOLUTE_CONTRACTS]）と配線手順を書く。`kind`＝"file"（IO 寄り）/"kv"（値寄り）。
     生成物を conformancer（matrix の provider）に通すだけで実装漏れが loud に落ちる状態が出発点。
     """
     if kind == "file":
@@ -786,12 +786,12 @@ def scaffold_backend(class_name: str, *, kind: str = "file") -> str:
 
 
 def assert_buffered_store(obj: object) -> None:
-    """`obj` が [KeyValueStore] の全メソッドを持つことを表明する。"""
+    """`obj` が [Store] の値 API view の全メソッドを持つことを表明する。"""
     assert_implements(obj, AsyncBufferedStore)
 
 
 def assert_store(obj: object) -> None:
-    """`obj` が [FileStore]（= KeyValueStore + open_reader/open_writer）を持つことを表明する。"""
+    """`obj` が full [Store]（= 値 API + open_reader/open_writer）を持つことを表明する。"""
     assert_implements(obj, AsyncStreamingStore)
 
 
@@ -907,7 +907,7 @@ def save_report(report: list, path: str | Path) -> None:
 
 
 class StoreTester:
-    """辞書ストアを**正（オラクル）**とし、対象 [FileStore] の挙動を差分比較するテストツール。
+    """辞書ストアを**正（オラクル）**とし、対象 [Store] の挙動を差分比較するテストツール。
 
     run 系（run_light 等）に**レポート（list）を渡す**と、同じ操作を reference（辞書）と target に
     適用し操作順に観測結果（[StepResult] を dict 化）を**追記**する。

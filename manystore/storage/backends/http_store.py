@@ -1,6 +1,6 @@
 """http backend — HTTP/HTTPS 越しの read-only ストア。
 
-KVS の get/exists と FileStore の read のみ実装する。httpx はメソッド内で遅延 import する。
+値 API の get/exists と IO API の read のみ実装する。httpx はメソッド内で遅延 import する。
 書き込み系（put/delete/cp/mv）と一覧（list/iter）は read-only ゆえ非対応
 （`io.UnsupportedOperation`）。キーは `base_url` への相対パスとして URL を組み立てる
 （`base_url + "/" + key`）。認証等が要るときは `headers` を渡す。

@@ -1,4 +1,4 @@
-"""s3 backend — S3 互換のオブジェクトストア（KVS / 真のストリーミング FileStore）。
+"""s3 backend — S3 互換のオブジェクトストア（値 API / 真のストリーミング IO API）。
 
 aiobotocore はメソッド内で遅延 import する（依存を __init__ 直下に持ち込まない）。
 """
@@ -192,7 +192,7 @@ class S3Store(_S3Base, StreamableBufferedStoreBase):
         await self.delete(src)
 
 
-# ── 真のストリーミング FileStore（全体バッファしない） ──
+# ── 真のストリーミング IO API（全体バッファしない） ──
 
 
 class _S3StreamReader:

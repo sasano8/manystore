@@ -1,6 +1,6 @@
 """mirror — source → sink の **片方向同期（one-way mirror）**。
 
-2 つの [KeyValueStore] を扱い、**source を常に正**として sink を完全同期する。方式は
+2 つの [Store] を扱い、**source を常に正**として sink を完全同期する。方式は
 **集合差 reconcile**（両側を `iter_all` で列挙し、ファイルの存在有無を突き合わせる）:
 
 - source にあり sink に無い … **create**（新規コピー）
@@ -58,7 +58,7 @@ class SyncResult:
 
 
 class StorageMirror:
-    """2 つの [KeyValueStore]（source / sink）を扱い、source → sink を片方向同期する。
+    """2 つの [Store]（source / sink）を扱い、source → sink を片方向同期する。
 
     `source` を正とし、`sink` を source に一致させる。`compare` で無駄な更新をスキップする
     （既定 [size_differs]）。`plan()` で計画だけ算出（dry-run）、`sync()` で適用する。

@@ -4,7 +4,7 @@
 > `NotImplementedError`。本実装は別タスクで詰める。**facade（kv.py）には未公開**（未完成のため）。
 
 ## [ArrayStore] との関係（兄弟であって素直な派生ではない）
-共通点は「複数 [KeyValueStore] ＋ ルーティング ＋ 横断列挙」。だが [ArrayStore] とは 2 点で
+共通点は「複数 [Store] ＋ ルーティング ＋ 横断列挙」。だが [ArrayStore] とは 2 点で
 本質的に違う:
 
 1. **行き先が鍵に出ない**。Array は鍵 `<mount>/<sub>` に行き先が書いてある（決定的・明示）。LB は
@@ -55,7 +55,7 @@ class LoadStats(TypedDict, total=False):
 class SupportsLoadStats(Protocol):
     """負荷メトリクスをネイティブに報告できる backend の **optional capability**。
 
-    core IF（[KeyValueStore]）には載せない（最小・汎用）。報告できる backend だけが実装し、
+    core IF（[Store]）には載せない（最小・汎用）。報告できる backend だけが実装し、
     [LoadBalancedStore] は capability を持つ member からのみ [LoadStats] を集める
     （持たない member は「不明」として policy が扱う）。
     """
@@ -106,7 +106,7 @@ class LeastLoadedPolicy:
 
 
 class LoadBalancedStore(BufferedStoreBase):
-    """匿名の member 群を負荷で選んで束ねる合成 [KeyValueStore]（[ArrayStore] の兄弟）。
+    """匿名の member 群を負荷で選んで束ねる合成 [Store]（[ArrayStore] の兄弟）。
 
     本体は未実装（`NotImplementedError`）。書きは [BalancePolicy] で 1 member を選び、読み系は
     probe-all（既定）。詳細はモジュール docstring 参照。

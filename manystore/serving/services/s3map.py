@@ -1,4 +1,4 @@
-"""s3map — S3 protocol ⇄ KeyValueStore のマッピング補助（HTTP 非依存）。
+"""s3map — S3 protocol ⇄ Store のマッピング補助（HTTP 非依存）。
 
 gateway 層（FastAPI）から切り離した純ロジックを置く＝HTTP を立てずに単体テストできる:
 

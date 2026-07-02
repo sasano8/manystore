@@ -90,7 +90,7 @@ class Verify(IntFlag):
 
 
 class AsyncFileObject(Protocol):
-    """`FileStore.open_reader`/`open_writer` が返すファイルオブジェクト（ストリーム）。"""
+    """`Store.open_reader`/`open_writer` が返すファイルオブジェクト（ストリーム）。"""
 
     async def read(self, size: int = -1) -> bytes: ...
     async def write(self, data: bytes) -> int: ...
@@ -168,7 +168,7 @@ class SyncFileObject(Protocol):
 
 
 class SyncBufferedStore(Protocol):
-    """[KeyValueStore] の同期版（put/get がメイン）。teardown は async `aclose` ↔ sync `close`。"""
+    """[Store] の値 API の同期版（put/get）。teardown は async `aclose` ↔ sync `close`。"""
 
     def put(
         self, key: str, value: bytes, *, if_match: IfMatch = None

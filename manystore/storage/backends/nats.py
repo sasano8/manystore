@@ -1,6 +1,6 @@
-"""nats backend — NATS JetStream Object Store（KVS / FileStore）。
+"""nats backend — NATS JetStream Object Store（1 つの Store）。
 
-nats-py はメソッド内で遅延 import する。FileStore は read=全体取得 / write=close で put。
+nats-py はメソッド内で遅延 import する。IO API は read=全体取得 / write=close で put。
 
 **conditional put（CAS・M046）**: NATS Object Store の高レベル `obs.put` は OCC を露出しないため、
 version トークン＝**オブジェクトのメタ subject（`$O.<bucket>.M.<b64(name)>`）の最終ストリーム
@@ -315,4 +315,4 @@ class NatsStore(_NatsBase, BufferedStoreBase):
         await _kv_move(self, src, dst)
 
 
-# ── FileStore（= KVS ＋ buffer 合成 IO） ──
+# ── IO API（= 値 API ＋ buffer 合成 IO） ──

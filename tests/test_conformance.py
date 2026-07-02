@@ -1,6 +1,6 @@
 """横断的な準拠テスト。
 
-(1) 全 backend が `KeyValueStore` / `FileStore` Protocol のメソッドを揃えているか（存在チェック）、
+(1) 全 backend が Store（値 API＋IO API）の Protocol メソッドを揃えているか（存在チェック）、
 (2) `StoreTester` が辞書ストアをオラクルに対象の挙動（run_light）を差分検証できるか、を確認。
 サードパーティ backend も `manystore.conformancer` を import すれば同じ検査を回せる。
 """
@@ -82,13 +82,13 @@ def test_all_key_value_stores_have_required_methods(tmp_path) -> None:
 
 
 def test_all_file_stores_have_required_methods(tmp_path) -> None:
-    # FileStore は KVS + open_reader/open_writer。全 FileStore がそれを満たす。
+    # full Store は KVS + open_reader/open_writer。全 Store がそれを満たす。
     for store in _file_store_instances(tmp_path):
         assert_store(store)
 
 
 def test_file_store_requires_io_on_top_of_kvs() -> None:
-    # 包含関係の確認: FileStore のメンバ ⊇ KVS のメンバ ＋ open_reader/open_writer。
+    # 包含関係の確認: full Store のメンバ ⊇ KVS のメンバ ＋ open_reader/open_writer。
     kvs = required_members(AsyncBufferedStore)
     fs = required_members(AsyncStreamingStore)
     assert kvs <= fs

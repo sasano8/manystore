@@ -1,6 +1,6 @@
 """client 層のテスト（in-process ASGITransport で server と往復）。
 
-RemoteStore が [KeyValueStore] 準拠でサーバ越しに put/get/list/exists/delete/cp/mv できる。
+RemoteStore が Store の値 API（put/get）準拠でサーバ越しに put/get/list/exists/delete/cp/mv できる。
 pytest-asyncio（asyncio_mode=auto）で `async def test_*` をそのまま回す。
 """
 
@@ -36,9 +36,9 @@ async def _remote_store(tmp_path: Path) -> tuple[StorageService, RemoteStore]:
 
 
 def test_remote_kvs_signature_parity() -> None:
-    """RemoteStore が KeyValueStore Protocol を署名レベルで満たすこと（HTTP 越し前提）。
+    """RemoteStore が Store の値 API（put/get）を署名レベルで満たすこと（HTTP 越し前提）。
 
-    挙動（roundtrip）の前に「remote が KeyValueStore の顔を被れているか」を機械検証する。
+    挙動（roundtrip）の前に「remote が Store の値 API の顔を被れているか」を機械検証する。
     存在＋パラメータ署名の一致を見る（`put` の `if_match` や `head`/`create` の drift を検出）。
     戻り注釈の narrowing（`iter_all` の AsyncIterable→AsyncIterator）は全 backend 共通の慣習ゆえ
     許容＝`concrete_store_signature_errors` の方針。strict な base↔Protocol parity は誤検出する。

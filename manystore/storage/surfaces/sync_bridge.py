@@ -1,13 +1,13 @@
 """async-to-sync storage — 非同期ストアを同期として被せるブリッジ。
 
-[AsyncToSyncStore] は非同期 [KeyValueStore] を同期 [SyncBufferedStore] として被せる。
+[AsyncToSyncStore] は非同期 [Store] の値 API を同期 [SyncBufferedStore] として被せる。
 ストレージの一次実装は async に保ち、同期版はこのブリッジだけで得る
 （手書きの二重実装を避ける）。専属のイベントループを 1 つ保持し、各呼び出しを
 `run_until_complete` で同期化する（接続を保持する nats 等のため、呼び出し毎にループを作らず
 使い回す）。実行中のイベントループからは呼べない（同期 CLI 等、ループ外の同期コードから使う前提）。
 
-注: FileStore（open でファイルオブジェクト）の async→sync ブリッジは、ファイルオブジェクト境界の
-扱いが別途必要なため未実装（必要になってから）。
+注: Store の IO API（open でファイルオブジェクト）の async→sync ブリッジは、ファイルオブジェクト
+境界の扱いが別途必要なため未実装（必要になってから）。
 """
 
 import asyncio
@@ -17,7 +17,7 @@ from ...spec import AsyncBufferedStore, FileInfo, IfMatch
 
 
 class AsyncToSyncStore:
-    """非同期 [KeyValueStore] を [SyncBufferedStore] として同期 API で被せるラッパ。"""
+    """非同期 [Store] の値 API を [SyncBufferedStore] として同期 API で被せるラッパ。"""
 
     def __init__(self, store: AsyncBufferedStore) -> None:
         self._store = store
