@@ -134,14 +134,9 @@ def backend_reachability() -> list[tuple[str, bool]]:
 # 残す（registry はテスト環境の結線を知らない＝そこだけ手当て）。
 
 
-def _build_filestore(backend: str, opts: dict, *, native: bool) -> object:
-    """registry から（未接続の）FileStore を作る。native=native FileStore／既定=KVS を wrap。"""
-    spec = get_backend_spec(backend)
-    if native:
-        if spec.file_factory is None:
-            raise ValueError(f"backend {backend!r} は native FileStore 非対応")
-        return spec.file_factory(**opts)
-    return KeyValueFileStore(spec.kv_factory(**opts))  # KVS-native は wrap（既存 provider と同形）
+def _build_filestore(backend: str, opts: dict) -> object:
+    """registry の単一 factory から（未接続の）full Store を作る（M071＝backend は 1 クラス）。"""
+    return get_backend_spec(backend).factory(**opts)
 
 
 @dataclass(frozen=True)
@@ -151,7 +146,6 @@ class BackendProfile:
     id: str
     backend: str  # registry 名
     opts: dict = field(default_factory=dict)
-    native: bool = False  # True=native FileStore を直接／False=KVS を KeyValueFileStore で wrap
     gated: bool = False
     reachable: Callable[[], bool] = lambda: True
     unsupported: frozenset[str] = frozenset()
@@ -164,7 +158,7 @@ def _profile_opener(p: BackendProfile) -> Callable[[], object]:
         if p.setup is not None:
             await p.setup()  # 実 backend の準備（bucket 作成 等）＝結線の一部
         async with connecting(
-            lambda: _build_filestore(p.backend, p.opts, native=p.native),
+            lambda: _build_filestore(p.backend, p.opts),
             policy=ConnectPolicy.fail_fast(),
         ) as store:
             yield store
@@ -411,8 +405,8 @@ def all_providers() -> list[Provider]:
       差し替え）は custom opener を残す。
     """
     return [
-        # memory=dict（run_* のオラクルと同型・native FileStore）。registry から構築。
-        _profile_provider(BackendProfile("dict", "memory", native=True)),
+        # memory=dict（run_* のオラクルと同型・full Store）。registry の単一 factory から構築。
+        _profile_provider(BackendProfile("dict", "memory")),
         Provider("local", _open_local),  # tmp dir（per-open）＝custom
         Provider("remote", _open_remote),  # in-process ASGI サーバ＝custom
         # fake＝非 gated（docker 無し fast）。CAS は非権威＝xfail。nats fake は JetStream メタ再現が
@@ -443,20 +437,17 @@ def leaf_fault_providers() -> list[Provider]:
 
 
 def native_file_providers() -> list[Provider]:
-    """**native streaming IO** を持つ FileStore を直接 yield する provider（M066③）。
+    """**native streaming IO**（S3=multipart/range）を検査する provider（M066③）。
 
-    KVS-native backend を `KeyValueFileStore` で包むとバッファ writer 経由になるので、native の
-    open_writer/open_reader（S3=multipart/range）を直接検査する別系統。multipart/range は実装差が
-    出うる＝S3 実装ごとに行を立てる。local/dict は元々 matrix で native を流すのでここには入れない。
+    M071 で S3 は 1 クラス `S3Store`（両軸 native）に統合＝main の s3 provider と同一構築だが、
+    multipart/range を明示的に検査する系統として別 id（`s3-<impl>-path-native`）で残す。
     """
-    # profile の native=True＝registry の file_factory で native S3FileStore を直接構築（M077）。
     return [
         _profile_provider(
             BackendProfile(
                 f"s3-{impl.id}-path-native",
                 "s3",
                 opts=_s3_opts(impl, "path"),
-                native=True,
                 gated=True,
                 reachable=_impl_up(impl),
                 unsupported=impl.unsupported,

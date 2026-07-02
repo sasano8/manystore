@@ -15,27 +15,37 @@ import warnings
 from collections.abc import Callable
 from dataclasses import dataclass
 
-from ...protocols import AsyncBufferedStore, AsyncStreamingStore
+from ...protocols import AsyncStreamingStore
 
 #: plugin 発見に使う entry-point group（EP 名＝backend/scheme 名）。
 ENTRY_POINT_GROUP = "manystore.stores"
 
-KVFactory = Callable[..., AsyncBufferedStore]
-FileFactory = Callable[..., AsyncStreamingStore]
+StoreFactory = Callable[..., AsyncStreamingStore]  # full Store（put/get＋open_*）を作る
+KVFactory = StoreFactory  # 後方互換 alias（旧 kv_factory 型名）
+FileFactory = StoreFactory
 
 
 @dataclass(frozen=True)
 class BackendSpec:
-    """1 つの backend の生成方法（未接続のストアを作る factory 群）と出自。
+    """1 つの backend の生成方法（未接続の full Store を作る単一 factory）と出自（M071・M068）。
 
-    `file_factory` が None の backend は KVS のみ（FileStore 非対応）。factory は backend 固有の
-    `**opts` を受け、**未接続**のストアを返す（接続は呼び出し側が担う）。
+    `factory` は backend 固有の `**opts` を受け、**未接続の full Store**（put/get＋open_*）を返す。
+    M071 で backend は 1 クラス＝factory も 1 本に統合（旧 kv_factory/file_factory は廃止）。
     """
 
     name: str
-    kv_factory: KVFactory
-    file_factory: FileFactory | None = None
+    factory: StoreFactory
     origin: str = "programmatic"  # "builtin" | "entry-point:<dist>" | "programmatic"
+
+
+def _resolve_factory(
+    factory: StoreFactory | None, kv_factory: StoreFactory | None, file_factory: StoreFactory | None
+) -> StoreFactory:
+    """単一 `factory` を解決（旧 `kv_factory`/`file_factory` kwargs も後方互換で受理・M071）。"""
+    f = factory or file_factory or kv_factory
+    if f is None:
+        raise ValueError("register: factory (or legacy kv_factory/file_factory) is required")
+    return f
 
 
 _REGISTRY: dict[str, BackendSpec] = {}
@@ -45,21 +55,25 @@ _ENTRY_POINTS_LOADED = False  # entry-point 走査を一度だけ行うための
 def register_builtin_backend(
     name: str,
     *,
-    kv_factory: KVFactory,
-    file_factory: FileFactory | None = None,
+    factory: StoreFactory | None = None,
+    kv_factory: StoreFactory | None = None,
+    file_factory: StoreFactory | None = None,
 ) -> None:
     """同梱 backend を予約名として seed する（`backends` パッケージの import 時に呼ぶ内部 API）。"""
-    _REGISTRY[name] = BackendSpec(name, kv_factory, file_factory, "builtin")
+    _REGISTRY[name] = BackendSpec(
+        name, _resolve_factory(factory, kv_factory, file_factory), "builtin"
+    )
 
 
 def register_backend(
     name: str,
     *,
-    kv_factory: KVFactory,
-    file_factory: FileFactory | None = None,
+    factory: StoreFactory | None = None,
+    kv_factory: StoreFactory | None = None,
+    file_factory: StoreFactory | None = None,
     clobber: bool = False,
 ) -> None:
-    """programmatic に backend を登録する（自プロセス）。
+    """programmatic に backend を登録する（自プロセス）。単一 `factory`（旧 kv/file kwargs も可）。
 
     既存名は `clobber=True` のときだけ上書き可（builtin 予約名の差し替えもこれ経由）。
     それ以外は [ValueError]。
@@ -70,7 +84,9 @@ def register_backend(
             f"backend {name!r} already registered (origin={existing.origin}); "
             "pass clobber=True to override"
         )
-    _REGISTRY[name] = BackendSpec(name, kv_factory, file_factory, "programmatic")
+    _REGISTRY[name] = BackendSpec(
+        name, _resolve_factory(factory, kv_factory, file_factory), "programmatic"
+    )
 
 
 def _register_entry_point(spec: BackendSpec) -> None:
@@ -104,7 +120,7 @@ def _load_entry_points() -> None:
             # EP 名を正本にし、出自を記録する（配布名が取れれば併記）。
             dist = getattr(getattr(ep, "dist", None), "name", None)
             origin = f"entry-point:{dist}" if dist else "entry-point"
-            _register_entry_point(BackendSpec(ep.name, spec.kv_factory, spec.file_factory, origin))
+            _register_entry_point(BackendSpec(ep.name, spec.factory, origin))
         except Exception as exc:  # plugin の import/生成失敗は他を巻き込まない
             warnings.warn(
                 f"failed to load manystore backend plugin {ep.name!r}: {exc}",

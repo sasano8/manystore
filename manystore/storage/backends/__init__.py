@@ -49,131 +49,79 @@ __all__ = [
 ]
 
 
-# ── builtin backend の factory（未接続のストアを作る。opts は暫定の flat kwargs＝M069 で整理）──
+# ── builtin backend の単一 factory（未接続の full Store を作る・M071。opts は flat kwargs＝M069）──
 
 
-def _kv_memory(**opts: object) -> AsyncBufferedStore:
-    return DictKeyValueStore()  # プロセス内 dict（揮発・接続不要）
+def _make_memory(**opts: object) -> AsyncStreamingStore:
+    return DictStore()  # プロセス内 dict（揮発・接続不要）
 
 
-def _file_memory(**opts: object) -> AsyncStreamingStore:
-    return DictFileStore()
-
-
-def _kv_local(**opts: object) -> AsyncBufferedStore:
+def _make_local(**opts: object) -> AsyncStreamingStore:
     local_dir = opts.get("local_dir")
     if local_dir is None:
         raise ValueError("local backend requires local_dir")
-    return LocalKeyValueStore(local_dir)  # type: ignore[arg-type]
+    return LocalStore(local_dir)  # type: ignore[arg-type]
 
 
-def _file_local(**opts: object) -> AsyncStreamingStore:
-    local_dir = opts.get("local_dir")
-    if local_dir is None:
-        raise ValueError("local backend requires local_dir")
-    return LocalFileStore(local_dir)  # type: ignore[arg-type]
-
-
-def _s3_kwargs(opts: dict[str, object]) -> dict[str, object]:
-    return dict(
-        bucket=opts.get("s3_bucket", ""),
-        endpoint_url=opts.get("s3_endpoint", ""),
-        region=opts.get("s3_region", "us-east-1"),
-        access_key=opts.get("s3_access_key", ""),
-        secret_key=opts.get("s3_secret_key", ""),
-        addressing_style=opts.get("s3_addressing_style", "virtual"),
+def _make_s3(**opts: object) -> AsyncStreamingStore:
+    return S3Store(
+        bucket=opts.get("s3_bucket", ""),  # type: ignore[arg-type]
+        endpoint_url=opts.get("s3_endpoint", ""),  # type: ignore[arg-type]
+        region=opts.get("s3_region", "us-east-1"),  # type: ignore[arg-type]
+        access_key=opts.get("s3_access_key", ""),  # type: ignore[arg-type]
+        secret_key=opts.get("s3_secret_key", ""),  # type: ignore[arg-type]
+        addressing_style=opts.get("s3_addressing_style", "virtual"),  # type: ignore[arg-type]
     )
 
 
-def _kv_s3(**opts: object) -> AsyncBufferedStore:
-    return S3KeyValueStore(**_s3_kwargs(opts))  # type: ignore[arg-type]
-
-
-def _file_s3(**opts: object) -> AsyncStreamingStore:
-    return S3FileStore(**_s3_kwargs(opts))  # type: ignore[arg-type]
-
-
-def _kv_nats(**opts: object) -> AsyncBufferedStore:
-    return NatsObjectKeyValueStore(
+def _make_nats(**opts: object) -> AsyncStreamingStore:
+    return NatsStore(
         url=opts.get("nats_url", ""),  # type: ignore[arg-type]
         bucket=opts.get("nats_bucket", "manystore_files"),  # type: ignore[arg-type]
     )
 
 
-def _file_nats(**opts: object) -> AsyncStreamingStore:
-    return NatsFileStore(
-        url=opts.get("nats_url", ""),  # type: ignore[arg-type]
-        bucket=opts.get("nats_bucket", "manystore_files"),  # type: ignore[arg-type]
-    )
-
-
-def _kv_http(**opts: object) -> AsyncBufferedStore:
-    return HttpKeyValueStore(
+def _make_http(**opts: object) -> AsyncStreamingStore:
+    return HttpStore(
         base_url=opts.get("http_base_url", ""),  # type: ignore[arg-type]
         headers=opts.get("http_headers"),  # type: ignore[arg-type]
     )
 
 
-def _file_http(**opts: object) -> AsyncStreamingStore:
-    return HttpFileStore(
-        base_url=opts.get("http_base_url", ""),  # type: ignore[arg-type]
-        headers=opts.get("http_headers"),  # type: ignore[arg-type]
-    )
-
-
-def _kv_manystore(**opts: object) -> AsyncBufferedStore:
+def _make_manystore(**opts: object) -> AsyncStreamingStore:
     # manystore 自身の HTTP サービスを喋る client（`client/` 在中）を遅延 import。opts は暫定。
-    from ...client.remote import RemoteKeyValueStore
+    from ...client.remote import RemoteStore
 
-    return RemoteKeyValueStore(
+    return RemoteStore(
         base_url=opts.get("base_url", ""),  # type: ignore[arg-type]
         context=opts.get("context", ""),  # type: ignore[arg-type]
         headers=opts.get("headers"),  # type: ignore[arg-type]
     )
 
 
-# ── builtin を予約名として seed（import 時に一度）──
-register_builtin_backend("memory", kv_factory=_kv_memory, file_factory=_file_memory)
-register_builtin_backend("local", kv_factory=_kv_local, file_factory=_file_local)
-register_builtin_backend("s3", kv_factory=_kv_s3, file_factory=_file_s3)
-register_builtin_backend("nats", kv_factory=_kv_nats, file_factory=_file_nats)
-register_builtin_backend("http", kv_factory=_kv_http, file_factory=_file_http)
-# manystore は remote client を KVS として。FileStore は非対応（file_factory=None）。
-register_builtin_backend("manystore", kv_factory=_kv_manystore, file_factory=None)
+# ── builtin を予約名として seed（import 時に一度）＝1 backend=1 factory（M071）──
+register_builtin_backend("memory", factory=_make_memory)
+register_builtin_backend("local", factory=_make_local)
+register_builtin_backend("s3", factory=_make_s3)
+register_builtin_backend("nats", factory=_make_nats)
+register_builtin_backend("http", factory=_make_http)
+register_builtin_backend("manystore", factory=_make_manystore)
 
 
 def create_unsafe_store(backend: str, **opts: object) -> AsyncStreamingStore:
-    """backend 名から生の（未接続・**キー検証なし**）**full Store**（put/get＋open_* 両備）を作る。
+    """生の（未接続・検証なし）**full Store**を作る＝[registry] 単一 factory の薄いラッパ（M071）。
 
-    kv/file の二本立て factory を畳んだ**統合入口**（M071）。native ストリーミングがあればそれ
-    （`file_factory`）、無ければ kv 実装（`kv_factory`）を返す＝基底が IO/whole を双方向合成し full
-    Store になる（`manystore` 等 KVS-only も可）。安全に使うなら [create_safe_store]／顔
-    [open_async_store]。
+    **unsafe**＝`../escape` 等を弾かない（対策は呼び出し側）。安全に使うなら [create_safe_store]／顔
+    [open_async_store]。opts は backend 固有（例: `local_dir=`/`s3_bucket=`/`http_base_url=`）。
     """
-    spec = get_backend_spec(backend)
-    return (spec.file_factory or spec.kv_factory)(**opts)
+    return get_backend_spec(backend).factory(**opts)
 
 
 def create_unsafe_key_value_store(backend: str, **opts: object) -> AsyncBufferedStore:
-    """backend 名から生の（未接続・**キー検証なし**）[KeyValueStore] を作る低レベルファクトリ。
-
-    **非推奨（M071）＝[create_unsafe_store] へ統合**。put/get だけなら本関数も可。
-
-    [registry] の薄いラッパ。**unsafe**＝`../escape` 等を弾かない（対策は呼び出し側責務）。安全に
-    使うなら [create_safe_key_value_store]（Safe 包装）か顔の `open_async_key_value_store`
-    （Safe＋接続）。
-    opts は backend 固有（例: `local_dir=` / `s3_bucket=` / `http_base_url=`）。
-    """
-    return get_backend_spec(backend).kv_factory(**opts)
+    """**非推奨（M071）＝[create_unsafe_store] へ統合**（full Store を返す）。"""
+    return create_unsafe_store(backend, **opts)
 
 
 def create_unsafe_file_store(backend: str, **opts: object) -> AsyncStreamingStore:
-    """[create_unsafe_key_value_store] の FileStore 版（backend → 完全な [FileStore]＝KVS + IO）。
-
-    **非推奨（M071）＝[create_unsafe_store] へ統合**。本関数は native `file_factory` の無い backend
-    を [ValueError] にする点だけ異なる（後方互換で存置）。http は read-only。opts は KVS 版と同形。
-    """
-    spec = get_backend_spec(backend)
-    if spec.file_factory is None:
-        raise ValueError(f"backend {backend!r} does not provide a FileStore")
-    return spec.file_factory(**opts)
+    """**非推奨（M071）＝[create_unsafe_store] へ統合**（backend は 1 クラスで常に full Store）。"""
+    return create_unsafe_store(backend, **opts)
