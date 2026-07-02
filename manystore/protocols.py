@@ -342,9 +342,22 @@ class BufferedStoreBase(_StoreBase):
 
     NATS/dict/HTTP/S3 のように「whole の取得・保存が native で、バッファが元から生じる」backend が
     継承する。共通表面（iter_all/exists/delete/connect/aclose の abstract と get/list_all/cp/mv の
-    既定）は [_StoreBase] から継ぐ。ストリーム IO（open_reader/open_writer）が要るときは
-    [KeyValueFileStore] で被せて FileStore 化する。
+    既定）は [_StoreBase] から継ぐ。
+
+    **ストリーム IO（open_reader/open_writer）は whole の get/put から合成した既定実装を持つ**
+    （read=全体取得・write=close で全体 put＝値境界でバッファ）。[StreamingStoreBase] が逆向き
+    （IO→get/put）を内蔵するのと対称で、**両基底とも put/get＋open_* の全 Store 表面を備える**
+    ＝別ラッパ無しで full Store になる（M071）。native なストリーミングを持つ backend（S3 multipart
+    等）は open_reader/open_writer を override して真のストリーム性能を出す。
     """
+
+    async def open_reader(self, filename: str) -> AsyncFileObject:
+        # whole get を読み取りストリームに見せる合成（真のストリームは native override で）。
+        return _KvReadFileObject(await self.get_or_raise(filename))
+
+    async def open_writer(self, filename: str) -> AsyncFileObject:
+        # close で全体 put する合成 writer（all-or-nothing＝例外経路は確定しない）。
+        return _KvWriteFileObject(self, filename)
 
 
 class StreamingStoreBase(_StoreBase):
