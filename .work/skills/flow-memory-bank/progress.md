@@ -97,6 +97,13 @@
 
 ### 完了マイルストーン（要点のみ・経緯は git 履歴）
 
+- **M079（2026-07-02・完了）＝local backend を OS 別実装に分割**: ユーザー要望。現行 POSIX 実装を
+  `PosixLocalStore`（Linux/macOS＝`fcntl.flock` の CAS・`os.link` の create-only）に改名し、`WindowsLocalStore`
+  は**未実装スタブ**（生成時 `NotImplementedError`）。`LocalStore = PosixLocalStore if os.name=="posix" else
+  WindowsLocalStore`＝OS で自動選択（`LocalFileStore`/`LocalKeyValueStore` はその alias）。**`fcntl` を遅延 import**
+  にして Windows 上でも本モジュール import 自体は壊れないよう修正（実証済）。backends で新名を公開。テスト +2
+  （POSIX 選択・Windows 未実装 raise）。make check 緑（271）。残＝Windows native 実装（`msvcrt.locking`/`ReplaceFile` 等）。
+
 - **M077（2026-07-02・完了）＝conformance provider を registry 駆動＋profile 宣言に**: ユーザー提案＝conformance に
   registry を参照させ store 構築を委ねる（ベタ実装削減）。`_build_filestore(backend, opts, native=)`＝`get_backend_spec`
   で `file_factory`（native）or KVS を `KeyValueFileStore` で wrap（既存 provider と同形）。`BackendProfile(id,

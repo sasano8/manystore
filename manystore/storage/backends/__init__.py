@@ -8,7 +8,14 @@ httpx / client）は factory 内で遅延 import。
 
 from ...protocols import AsyncBufferedStore, AsyncStreamingStore
 from .http_store import HttpFileStore, HttpKeyValueStore, HttpStore
-from .local import LocalFileObject, LocalFileStore, LocalKeyValueStore, LocalStore
+from .local import (
+    LocalFileObject,
+    LocalFileStore,
+    LocalKeyValueStore,
+    LocalStore,
+    PosixLocalStore,
+    WindowsLocalStore,
+)
 from .memory import DictFileStore, DictKeyValueStore, DictStore
 from .nats import NatsFileStore, NatsObjectKeyValueStore, NatsStore
 from .registry import (
@@ -24,6 +31,8 @@ __all__ = [
     # 1 backend = 1 Store（M071・full Store）
     "DictStore",
     "LocalStore",
+    "PosixLocalStore",  # local の OS 別実装（M079）
+    "WindowsLocalStore",  # 未実装スタブ（M079）
     "S3Store",
     "NatsStore",
     "HttpStore",

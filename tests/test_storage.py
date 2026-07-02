@@ -317,6 +317,25 @@ async def test_local_kvs_and_file_store_are_one_class(tmp_path: Path) -> None:
         assert await f.read() == b"xyz"
 
 
+def test_local_store_selects_posix_on_posix(tmp_path: Path) -> None:
+    # M079＝LocalStore は OS で実装を選ぶ。POSIX（Linux/macOS）では PosixLocalStore。
+    import os
+
+    from manystore.storage.backends.local import LocalStore, PosixLocalStore
+
+    if os.name == "posix":
+        assert LocalStore is PosixLocalStore
+        assert isinstance(LocalStore(tmp_path), PosixLocalStore)
+
+
+def test_windows_local_store_is_unimplemented(tmp_path: Path) -> None:
+    # M079＝Windows 版は未実装＝生成時に NotImplementedError（POSIX 上でも直接生成して確認）。
+    from manystore.storage.backends.local import WindowsLocalStore
+
+    with pytest.raises(NotImplementedError, match="Windows local backend is not implemented"):
+        WindowsLocalStore(tmp_path)
+
+
 async def test_safe_file_store_validates_filename(tmp_path: Path) -> None:
     safe = SafeFileStore(LocalFileStore(tmp_path))
 
