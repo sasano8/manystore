@@ -24,6 +24,13 @@ from .backends import (
     S3KeyValueStore,
     create_unsafe_key_value_store,
 )
+from .config import (
+    ContextConfig,
+    StoreConfig,
+    discover_store_config,
+    find_config_file,
+    load_store_config,
+)
 from .connect import ConnectPolicy, connect_key_value_store, connecting
 from .surfaces.array import DEFAULT_CACHE_DIR, ArrayKeyValueStore, DownloadCache
 from .surfaces.safe import SafeKeyValueStore, UnsafePathError, validate_safe_path
@@ -75,6 +82,12 @@ __all__ = [
     # URL でストアを開く（fsspec 風・M069）
     "open_store",
     "parse_store_url",
+    # 構成ファイルからストア復元（M070）
+    "StoreConfig",
+    "ContextConfig",
+    "load_store_config",
+    "discover_store_config",
+    "find_config_file",
     # safe path
     "SafeKeyValueStore",
     "validate_safe_path",
@@ -127,20 +140,45 @@ def open_async_key_value_store(
     )
 
 
+def _resolve_context(name: str, config: StoreConfig | None) -> tuple[str, dict[str, object]]:
+    """context 名を構成ファイルから `(backend, opts)` へ解決する（M070）。"""
+    cfg = config if config is not None else discover_store_config()
+    if cfg is None:
+        raise ValueError(
+            f"構成ファイル（manystore.toml）が見つからない＝context {name!r} を解決できない"
+            "（`manystore store init` で作成／URL 形式 'scheme://…' で直接指定）"
+        )
+    ctx_name = name or cfg.default_context
+    if not ctx_name:
+        raise ValueError("context 名が空で default_context も未設定＝解決できない")
+    ctx = cfg.contexts.get(ctx_name)
+    if ctx is None:
+        known = ", ".join(sorted(cfg.contexts)) or "(none)"
+        raise ValueError(f"unknown context: {ctx_name!r}（既知: {known}）")
+    return ctx.backend, ctx.opts
+
+
 def open_store(
-    url: str,
+    target: str,
     *,
     verify: bool = True,
     policy: ConnectPolicy | None = None,
+    config: StoreConfig | None = None,
 ):
-    """名前 URL（`scheme://…`）から安全な KeyValueStore を開く入口（fsspec 風・M069）。
+    """名前 URL または構成ファイルの context 名から安全な KeyValueStore を開く（fsspec 風）。
 
-    `async with open_store("s3://bkt?endpoint=http://h:9000") as store:` の形で使う。
-    URL を [parse_store_url] で `(backend, opts)` に分解し、顔 [open_async_key_value_store] へ委譲
-    ＝Safe 包装＋接続 CM（検証つきの接続済みストアを yield・終了で aclose）。scheme は backend 名
-    （[registry]）に解決。文法は `docs/url_scheme.md`。
+    `async with open_store("s3://bkt?endpoint=http://h:9000") as store:`（URL・M069）／
+    `async with open_store("mycontext") as store:`（構成ファイルの context 名・M070）の形で使う。
+
+    - `target` に `://` があれば **URL**＝[parse_store_url] で分解（`docs/url_scheme.md`）。
+    - 無ければ **context 名**＝`manystore.toml` を上方向 discovery（`config` で明示も可）して解決。
+      空文字は `default_context`。local 相対パスは**構成ファイルのディレクトリ基準**で解決される。
+    いずれも顔 [open_async_key_value_store] へ委譲＝Safe 包装＋接続 CM。
     """
-    backend, opts = parse_store_url(url)
+    if "://" in target:
+        backend, opts = parse_store_url(target)
+    else:
+        backend, opts = _resolve_context(target, config)
     return open_async_key_value_store(backend, verify=verify, policy=policy, **opts)
 
 

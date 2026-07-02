@@ -30,6 +30,7 @@ nav:
   - アーキテクチャ: architecture.md
   - Backend レジストリ / プラグイン: backend_registry.md
   - 名前 URL でストアを開く: url_scheme.md
+  - 構成ファイルからストア復元: store_config.md
   - Conformance spec:
       - 挙動契約 (behavioral): conformance_spec.md
       - KeyValueStore (メソッド): kv_spec.md
