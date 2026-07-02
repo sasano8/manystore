@@ -15,13 +15,13 @@ import warnings
 from collections.abc import Callable
 from dataclasses import dataclass
 
-from ...protocols import AsyncFileStore, AsyncKeyValueStore
+from ...protocols import AsyncBufferedStore, AsyncStreamingStore
 
 #: plugin 発見に使う entry-point group（EP 名＝backend/scheme 名）。
 ENTRY_POINT_GROUP = "manystore.stores"
 
-KVFactory = Callable[..., AsyncKeyValueStore]
-FileFactory = Callable[..., AsyncFileStore]
+KVFactory = Callable[..., AsyncBufferedStore]
+FileFactory = Callable[..., AsyncStreamingStore]
 
 
 @dataclass(frozen=True)

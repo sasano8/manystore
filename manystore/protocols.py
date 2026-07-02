@@ -4,24 +4,24 @@
 一意に定まる。**async↔sync の突合**も 1 ファイルで完結する。内容は 3 段:
 
 1. **契約（Protocol）** … async 版と sync 版のストア抽象（実装を持たない型）。
-2. **既定実装の基底クラス** … `FileStoreBase`（file 寄り＝open_reader/open_writer が
-   primitive・KVS 面は IO から導出）/ `KeyValueStoreBase`（kv 寄り＝get_or_raise が
+2. **既定実装の基底クラス** … `StreamingStoreBase`（file 寄り＝open_reader/open_writer が
+   primitive・KVS 面は IO から導出）/ `BufferedStoreBase`（kv 寄り＝get_or_raise が
    primitive）。**backend は native primitive 側の基底を継承する**（NATS/dict/HTTP/S3=
-   KeyValueStoreBase・Local=FileStoreBase）。
+   BufferedStoreBase・Local=StreamingStoreBase）。
 3. **汎用アダプタ＋共有ヘルパ** … 2 方向のアダプタ（KVS→FileStore の [KeyValueFileStore] /
    FileStore→KVS の [KeyValueFromFileStore]）、共有 IO・cp/mv・原子的書き込みのヘルパ。
    prefix 列挙は **別 capability ではなく `iter_all(prefix=…)`/`list_all(prefix=…)` 引数**に畳む
    （S3 はサーバ側 `Prefix=` で native・他は scan+filter が既定動作＝契約として明示）。
 
 対応関係（async ↔ sync）:
-- [KeyValueStore] ↔ [SyncKeyValueStore]（put/get がメインの値ストア。teardown は
+- [KeyValueStore] ↔ [SyncBufferedStore]（put/get がメインの値ストア。teardown は
   `aclose` ↔ `close`）。
-- [FileStore] ↔ [SyncFileStore]（**= KeyValueStore + open_reader/open_writer**。包含を継承で表す）。
+- [FileStore] ↔ [SyncStreamingStore]（**= KeyValueStore + open_reader/open_writer**）。
 - [FileObject] ↔ [SyncFileObject]（ストリーム。`__aenter__/__aexit__` ↔ `__enter__/__exit__`）。
 
 **FileStore = KeyValueStore + IO**（Protocol は包含を継承で表す）。「どちらを native primitive
-として実装するか」は backend 次第＝**基底実装クラスの選択**（file 寄り=`FileStoreBase`／kv 寄り=
-`KeyValueStoreBase`）で表現する。
+として実装するか」は backend 次第＝**基底実装クラスの選択**（file 寄り=`StreamingStoreBase`／
+kv 寄り=`BufferedStoreBase`）で表現する。
 """
 
 import abc
@@ -136,7 +136,7 @@ class AsyncFileObject(Protocol):
     async def __aexit__(self, *exc: object) -> None: ...
 
 
-class AsyncKeyValueStore(Protocol):
+class AsyncBufferedStore(Protocol):
     # put は書いた値の安価な [FileInfo]（`{filename, size}`）を返す。`if_match` で **conditional
     # put（CAS）**: None=無条件（原子＋直列化の last-writer-wins）／不在 FileInfo（`is_absent()`）=
     # 不在を要求（create-only・既存なら ConflictError）／その他 FileInfo=その etag に一致を要求
@@ -172,7 +172,7 @@ class AsyncKeyValueStore(Protocol):
     async def aclose(self) -> None: ...
 
 
-class AsyncFileStore(AsyncKeyValueStore, Protocol):
+class AsyncStreamingStore(AsyncBufferedStore, Protocol):
     """[KeyValueStore] にストリーム IO（open_reader/open_writer）を足したストア（バイナリ専用）。
 
     モデル: **FileStore = KeyValueStore + {open_reader, open_writer}**。KVS 面（put/get/iter…・
@@ -200,16 +200,16 @@ class SyncFileObject(Protocol):
     def __exit__(self, *exc: object) -> None: ...
 
 
-class SyncKeyValueStore(Protocol):
+class SyncBufferedStore(Protocol):
     """[KeyValueStore] の同期版（put/get がメイン）。teardown は async `aclose` ↔ sync `close`。"""
 
     def put(
         self, key: str, value: bytes, *, if_match: IfMatch = None
-    ) -> FileInfo: ...  # [AsyncKeyValueStore.put] の同期版
+    ) -> FileInfo: ...  # [AsyncBufferedStore.put] の同期版
     def create(
         self, key: str, value: bytes
-    ) -> FileInfo: ...  # [AsyncKeyValueStore.create] の同期版
-    def head(self, key: str) -> FileInfo: ...  # [AsyncKeyValueStore.head] の同期版
+    ) -> FileInfo: ...  # [AsyncBufferedStore.create] の同期版
+    def head(self, key: str) -> FileInfo: ...  # [AsyncBufferedStore.head] の同期版
     def head_or_absent(self, key: str) -> FileInfo: ...  # 同期版
     def get_or_raise(self, key: str) -> bytes: ...
     def get(self, key: str, default: bytes | None = None) -> bytes | None: ...
@@ -223,8 +223,8 @@ class SyncKeyValueStore(Protocol):
     def close(self) -> None: ...
 
 
-class SyncFileStore(SyncKeyValueStore, Protocol):
-    """[FileStore] の同期版＝**SyncKeyValueStore + open_reader/open_writer**（包含を継承）。"""
+class SyncStreamingStore(SyncBufferedStore, Protocol):
+    """[FileStore] の同期版＝**SyncBufferedStore + open_reader/open_writer**（包含を継承）。"""
 
     def open_reader(self, filename: str) -> SyncFileObject: ...
     def open_writer(self, filename: str) -> SyncFileObject: ...
@@ -238,7 +238,7 @@ class SyncFileStore(SyncKeyValueStore, Protocol):
 class _StoreBase(abc.ABC):
     """KVS / FileStore どちらの backend にも共通する store 操作の基底（[KeyValueStore] の表面）。
 
-    kv 寄り（[KeyValueStoreBase]）と file 寄り（[FileStoreBase]）の差は「どれを native primitive と
+    kv 寄り（[BufferedStoreBase]）と file 寄り（[StreamingStoreBase]）の差は「どれを native と
     するか」だけで、**[KeyValueStore] Protocol の表面（put/get/iter_all/list_all/exists/delete/
     cp/mv/connect/aclose）は両者で同一**。その共通表面をここに 1 か所だけ定義する:
 
@@ -337,7 +337,7 @@ class _StoreBase(abc.ABC):
         await _kv_move(self, src, dst)
 
 
-class KeyValueStoreBase(_StoreBase):
+class BufferedStoreBase(_StoreBase):
     """**kv 寄り** backend の基底＝primitive は `put` / `get_or_raise`（whole get/put が native）。
 
     NATS/dict/HTTP/S3 のように「whole の取得・保存が native で、バッファが元から生じる」backend が
@@ -347,7 +347,7 @@ class KeyValueStoreBase(_StoreBase):
     """
 
 
-class FileStoreBase(_StoreBase):
+class StreamingStoreBase(_StoreBase):
     """**file 寄り** ([FileStore]) backend の基底＝primitive は `open_reader`/`open_writer`。
 
     KVS 面（get_or_raise/put）は **IO から導出**する＝get_or_raise は open_reader で全体読み、put は
@@ -355,7 +355,7 @@ class FileStoreBase(_StoreBase):
     直接使えば得られる）。`LocalFileStore` 等「真実が IO 側」の backend が継ぐ。
     iter_all/exists/delete/connect/aclose は依然 [_StoreBase] の abstract（backend が実装）。
 
-    対して **kv 寄り** backend は [KeyValueStoreBase] を継承し IO は whole の上に buffer 合成する。
+    対して **kv 寄り** backend は [BufferedStoreBase] を継承し IO は whole の上に buffer 合成する。
     `open_reader`/`open_writer` は **`@abstractmethod`**＝未実装なら生成時に `TypeError`。
     """
 
@@ -426,7 +426,7 @@ async def _atomic_write_bytes_async(path: Path, data: bytes) -> None:
     await anyio.to_thread.run_sync(_atomic_write_bytes, path, data)
 
 
-async def _kv_copy(store: AsyncKeyValueStore, src: str, dst: str) -> None:
+async def _kv_copy(store: AsyncBufferedStore, src: str, dst: str) -> None:
     """get→put で src を dst へコピーする汎用実装（src が無ければ NotFoundError）。"""
     data = await store.get(src)
     if data is None:
@@ -434,20 +434,20 @@ async def _kv_copy(store: AsyncKeyValueStore, src: str, dst: str) -> None:
     await store.put(dst, data)
 
 
-async def _kv_move(store: AsyncKeyValueStore, src: str, dst: str) -> None:
+async def _kv_move(store: AsyncBufferedStore, src: str, dst: str) -> None:
     """copy→delete で src を dst へ移動する汎用実装（原子的ではない）。"""
     await _kv_copy(store, src, dst)
     await store.delete(src)
 
 
-async def _connect_all(stores: Iterable[AsyncKeyValueStore]) -> None:
+async def _connect_all(stores: Iterable[AsyncBufferedStore]) -> None:
     """複数ストアを順に connect する。**途中失敗で確立済みを巻き戻して**から再送出する（M057）。
 
     合成ストア（Array/loadbalancer）や service の connect が、N 番目で失敗したときに 1..N-1 を
     接続したまま放置するとリーク（aclose は呼ばれない）。確立済みを best-effort で閉じてから元の
     例外を伝播させる（巻き戻し中の aclose 失敗は元の失敗を優先して握り潰す）。
     """
-    connected: list[AsyncKeyValueStore] = []
+    connected: list[AsyncBufferedStore] = []
     try:
         for store in stores:
             await store.connect()
@@ -458,7 +458,7 @@ async def _connect_all(stores: Iterable[AsyncKeyValueStore]) -> None:
         raise
 
 
-async def _aclose_all(stores: Iterable[AsyncKeyValueStore]) -> None:
+async def _aclose_all(stores: Iterable[AsyncBufferedStore]) -> None:
     """複数ストアを**全て** aclose する。1 つの失敗で残りを閉じ漏らさない（M057）。
 
     逐次 await だと先頭の aclose が例外を投げた時点で残りが閉じられずリークする。全件を試し、
@@ -504,7 +504,7 @@ class _KvReadFileObject:
 class _KvWriteFileObject:
     """書き込みをメモリにバッファし、close 時に KVS へ全体 put する [FileObject]。"""
 
-    def __init__(self, store: AsyncKeyValueStore, key: str) -> None:
+    def __init__(self, store: AsyncBufferedStore, key: str) -> None:
         self._store = store
         self._key = key
         self._buf = io.BytesIO()
@@ -535,7 +535,7 @@ class _KvWriteFileObject:
         await self.close()
 
 
-class KeyValueFileStore(KeyValueStoreBase):
+class KeyValueFileStore(BufferedStoreBase):
     """[KeyValueStore] を [FileStore] として被せる汎用アダプタ＝**IO の埋め合わせ**。
 
     KVS は FileStore から open_reader/open_writer を除いた部分集合なので、KVS→FileStore は
@@ -546,7 +546,7 @@ class KeyValueFileStore(KeyValueStoreBase):
     参照。
     """
 
-    def __init__(self, store: AsyncKeyValueStore) -> None:
+    def __init__(self, store: AsyncBufferedStore) -> None:
         self._store = store
 
     # ── 合成する IO（KVS に無い分の埋め合わせ） ──
@@ -591,19 +591,19 @@ class KeyValueFileStore(KeyValueStoreBase):
         await self._store.aclose()
 
 
-class KeyValueFromFileStore(KeyValueStoreBase):
+class KeyValueFromFileStore(BufferedStoreBase):
     """[FileStore] を [KeyValueStore] として被せる汎用アダプタ（[KeyValueFileStore] の逆向き）。
 
     **FileStore = KeyValueStore + IO** なので、FileStore→KVS は **IO（open_reader/open_writer）を
     落とすだけ**＝put/get/get_or_raise・iter/list/exists/delete/cp/mv・connect/aclose を下層
-    FileStore へそのまま委譲（流用）する。`get(key, default=None)` は基底 [KeyValueStoreBase] が
+    FileStore へそのまま委譲（流用）する。`get(key, default=None)` は基底 [BufferedStoreBase] が
     get_or_raise を捕捉して与える。
 
     用途: ローカルのように「真実の実装が FileStore 側」にある backend で、open_reader/open_writer を
     隠した KVS ビューを得る（`LocalKeyValueStore = KeyValueFromFileStore(LocalFileStore)`）。
     """
 
-    def __init__(self, store: AsyncFileStore) -> None:
+    def __init__(self, store: AsyncStreamingStore) -> None:
         self._store = store
 
     async def put(self, key: str, value: bytes, *, if_match: IfMatch = None) -> FileInfo:

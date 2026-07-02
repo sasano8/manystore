@@ -19,7 +19,7 @@ filename/size のみ＝mtime を持たない。更新日時での比較は M013 
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
-from ...protocols import AsyncKeyValueStore, FileInfo
+from ...protocols import AsyncBufferedStore, FileInfo
 
 # (source 側 info, sink 側 info) を受け取り「更新が必要か」を返す述語。
 Comparator = Callable[[FileInfo, FileInfo], bool]
@@ -66,8 +66,8 @@ class StorageMirror:
 
     def __init__(
         self,
-        source: AsyncKeyValueStore,
-        sink: AsyncKeyValueStore,
+        source: AsyncBufferedStore,
+        sink: AsyncBufferedStore,
         *,
         compare: Comparator = size_differs,
     ) -> None:
@@ -75,7 +75,7 @@ class StorageMirror:
         self._sink = sink
         self._compare = compare
 
-    async def _index(self, store: AsyncKeyValueStore) -> dict[str, FileInfo]:
+    async def _index(self, store: AsyncBufferedStore) -> dict[str, FileInfo]:
         """`store` の全キー → [FileInfo] の索引（存在有無＋size の突合に使う）。"""
         return {info["filename"]: info async for info in store.iter_all()}
 

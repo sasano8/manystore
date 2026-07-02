@@ -12,7 +12,7 @@ KVS の get/exists と FileStore の read のみ実装する。httpx はメソ�
 from collections.abc import AsyncIterator
 
 from ...exceptions import NotFoundError, UnsupportedOperation
-from ...protocols import AsyncFileObject, FileInfo, IfMatch, KeyValueStoreBase, _KvReadFileObject
+from ...protocols import AsyncFileObject, BufferedStoreBase, FileInfo, IfMatch, _KvReadFileObject
 
 
 def _read_only(op: str) -> None:
@@ -50,7 +50,7 @@ class _HttpBase:
         return None
 
 
-class HttpKeyValueStore(_HttpBase, KeyValueStoreBase):
+class HttpKeyValueStore(_HttpBase, BufferedStoreBase):
     """HTTP 越しの read-only KVS。`get` / `exists` のみ実装し、書き込み・一覧は非対応。"""
 
     async def put(self, key: str, value: bytes, *, if_match: IfMatch = None) -> FileInfo:

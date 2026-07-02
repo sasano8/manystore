@@ -6,14 +6,14 @@
 """
 
 from ..protocols import (
+    AsyncBufferedStore,
     AsyncFileObject,
-    AsyncFileStore,
-    AsyncKeyValueStore,
+    AsyncStreamingStore,
     FileInfo,
     KeyValueFileStore,
+    SyncBufferedStore,
     SyncFileObject,
-    SyncFileStore,
-    SyncKeyValueStore,
+    SyncStreamingStore,
 )
 from .backends import (
     DictFileStore,
@@ -31,7 +31,7 @@ __all__ = [
     # shared
     "FileInfo",
     # abstraction
-    "AsyncFileStore",
+    "AsyncStreamingStore",
     "AsyncFileObject",
     # backends
     "DictFileStore",
@@ -42,12 +42,12 @@ __all__ = [
     "HttpFileStore",
     # KVS → FileStore アダプタ
     "KeyValueFileStore",
-    "SyncKeyValueStore",
-    "AsyncKeyValueStore",
+    "SyncBufferedStore",
+    "AsyncBufferedStore",
     # sync
-    "SyncFileStore",
+    "SyncStreamingStore",
     "SyncFileObject",
-    "AsyncFileStore",
+    "AsyncStreamingStore",
     # 低レベル factory（生＝未接続・キー検証なし）。生口はトップ公開に残す（名前で unsafe 明示）。
     "create_unsafe_file_store",
     # safe factory（Safe 包装込み・未接続）＋ 顔（Safe 包装＋接続 CM）

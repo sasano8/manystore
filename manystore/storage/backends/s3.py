@@ -7,7 +7,7 @@ import contextlib
 from collections.abc import AsyncIterator
 
 from ...exceptions import ConflictError, NotFoundError, UnsupportedOperation
-from ...protocols import AsyncFileObject, FileInfo, IfMatch, KeyValueStoreBase, _sha256_hex
+from ...protocols import AsyncFileObject, BufferedStoreBase, FileInfo, IfMatch, _sha256_hex
 
 
 class _S3Base:
@@ -53,7 +53,7 @@ class _S3Base:
         return None
 
 
-class S3KeyValueStore(_S3Base, KeyValueStoreBase):
+class S3KeyValueStore(_S3Base, BufferedStoreBase):
     async def put(self, key: str, value: bytes, *, if_match: IfMatch = None) -> FileInfo:
         # conditional put はサーバ側で原子的: 不在 FileInfo=IfNoneMatch="*"（create-only）／
         # 他 FileInfo=IfMatch=etag（update CAS）。412/409 は ConflictError へ正規化。

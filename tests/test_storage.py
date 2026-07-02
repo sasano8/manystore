@@ -182,7 +182,7 @@ async def test_local_kvs_put_is_atomic(tmp_path: Path) -> None:
 
 async def test_put_returns_common_fileinfo(tmp_path: Path) -> None:
     # put は全 backend 共通レスポンス FileInfo（filename/size）を返す（protocols.py の契約）。
-    # native KVS（dict）と FileStoreBase 導出（local）の両系統で同じ形を返す。
+    # native KVS（dict）と StreamingStoreBase 導出（local）の両系統で同じ形を返す。
     d = await DictKeyValueStore().put("a.bin", b"hello")
     assert (d["filename"], d["size"]) == ("a.bin", 5)
     loc = await LocalKeyValueStore(tmp_path).put("k", b"xyz")

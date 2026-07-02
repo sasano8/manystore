@@ -45,12 +45,12 @@ from pathlib import Path
 from ...exceptions import ConflictError, NotFoundError, UnsupportedOperation
 from ...protocols import (
     DEFAULT_LIST_LIMIT,
+    AsyncBufferedStore,
     AsyncFileObject,
-    AsyncFileStore,
-    AsyncKeyValueStore,
+    AsyncStreamingStore,
+    BufferedStoreBase,
     FileInfo,
-    FileStoreBase,
-    KeyValueStoreBase,
+    StreamingStoreBase,
 )
 
 
@@ -112,8 +112,8 @@ def base_protocol_parity_errors(base: type, protocol: type) -> list[str]:
 def assert_base_protocol_parity(base: type, protocol: type) -> None:
     """`base` が `protocol` を網羅しシグネチャも一致することを表明する（基底↔Protocol lockstep）。
 
-    違反があれば `AssertionError`（網羅漏れ・シグネチャ不一致を列挙）。`KeyValueStoreBase`↔
-    `AsyncKeyValueStore` / `FileStoreBase`↔`AsyncFileStore` を対称に点検する用途（M043）。
+    違反があれば `AssertionError`（網羅漏れ・シグネチャ不一致を列挙）。`BufferedStoreBase`↔
+    `AsyncBufferedStore` / `StreamingStoreBase`↔`AsyncStreamingStore` を対称に点検する用途（M043）。
     """
     errors = base_protocol_parity_errors(base, protocol)
     if errors:
@@ -137,7 +137,7 @@ def concrete_store_signature_errors(impl: type, protocol: type) -> list[str]:
     `AsyncIterable`（Protocol）でなく部分型 `AsyncIterator` で返す（LSP 的に安全な共変 narrowing）。
     よって concrete store の署名検証は メンバ存在＋パラメータ部（名前・既定値・並び・種別）を見、
     戻り注釈の narrowing は許容する。引数 drift（`if_match` 欠落など caller を壊す実害）は loud に
-    捕える。`RemoteKeyValueStore`↔`AsyncKeyValueStore` 等、HTTP 越し含む concrete store 用。
+    捕える。`RemoteKeyValueStore`↔`AsyncBufferedStore` 等、HTTP 越し含む concrete store 用。
     違反メッセージ list（空＝OK）。
     """
     errors: list[str] = []
@@ -229,7 +229,7 @@ def conformancer_protocol_drift() -> list[str]:
     食い違い＝conformancer が **古いプロトコルを前提に**テストしている合図（protocols.py を正として
     `_op_*` と写しを追従させる）。違反メッセージ list を返す（空＝一致）。
     """
-    return signature_drift(AsyncFileStore, _PINNED_STORE_SIGNATURES) + signature_drift(
+    return signature_drift(AsyncStreamingStore, _PINNED_STORE_SIGNATURES) + signature_drift(
         AsyncFileObject, _PINNED_FILEOBJECT_SIGNATURES
     )
 
@@ -496,7 +496,7 @@ class InjectedFault(Exception):
     """
 
 
-class FaultInjectingKeyValueStore(KeyValueStoreBase):
+class FaultInjectingKeyValueStore(BufferedStoreBase):
     """全 primitive が `InjectedFault` を投げる KVS（fail-loud 契約のための「壊れた下層」）。
 
     connect/aclose だけは無害（wrapper を構築・接続できるように）。Safe/Array/DownloadCache/
@@ -729,16 +729,16 @@ def _stub_signature(member: object) -> str:
 def scaffold_backend(class_name: str, *, kind: str = "file") -> str:
     """契約カタログ＋基底から新 backend 実装の**雛形**（未実装メソッド＋契約 TODO）を生成する。
 
-    北極星④＝「契約一覧が実装の TODO になる」。基底（`FileStoreBase`/`KeyValueStoreBase`）の
+    北極星④＝「契約一覧が実装の TODO になる」。基底（`StreamingStoreBase`/`BufferedStoreBase`）の
     `__abstractmethods__`（=著者が必ず実装すべき primitive）だけを `raise NotImplementedError` で
     stub し、`get`/`list_all`/`cp`/`mv`/`head` 等の既定実装は基底から継承する。ヘッダに満たすべき
     絶対契約（[ABSOLUTE_CONTRACTS]）と配線手順を書く。`kind`＝"file"（FileStore）/"kv"（KeyValueStore）。
     生成物を conformancer（matrix の provider）に通すだけで実装漏れが loud に落ちる状態が出発点。
     """
     if kind == "file":
-        base, base_name, protocol = FileStoreBase, "FileStoreBase", AsyncFileStore
+        base, base_name, protocol = StreamingStoreBase, "StreamingStoreBase", AsyncStreamingStore
     elif kind == "kv":
-        base, base_name, protocol = KeyValueStoreBase, "KeyValueStoreBase", AsyncKeyValueStore
+        base, base_name, protocol = BufferedStoreBase, "BufferedStoreBase", AsyncBufferedStore
     else:
         raise ValueError(f"unknown kind: {kind!r}（kv | file）")
 
@@ -786,12 +786,12 @@ def scaffold_backend(class_name: str, *, kind: str = "file") -> str:
 
 def assert_key_value_store(obj: object) -> None:
     """`obj` が [KeyValueStore] の全メソッドを持つことを表明する。"""
-    assert_implements(obj, AsyncKeyValueStore)
+    assert_implements(obj, AsyncBufferedStore)
 
 
 def assert_file_store(obj: object) -> None:
     """`obj` が [FileStore]（= KeyValueStore + open_reader/open_writer）を持つことを表明する。"""
-    assert_implements(obj, AsyncFileStore)
+    assert_implements(obj, AsyncStreamingStore)
 
 
 # ── 挙動契約テストツール（辞書ストアをオラクルに差分比較） ──

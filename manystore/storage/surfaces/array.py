@@ -16,10 +16,10 @@ from pathlib import Path
 
 from ...exceptions import IntegrityError
 from ...protocols import (
-    AsyncKeyValueStore,
+    AsyncBufferedStore,
+    BufferedStoreBase,
     FileInfo,
     IfMatch,
-    KeyValueStoreBase,
     Verify,
     _aclose_all,
     _atomic_write_bytes_async,
@@ -65,13 +65,13 @@ def _verify_download(info: FileInfo, data: bytes, policy: Verify) -> None:
 DEFAULT_CACHE_DIR = Path.home() / ".cache" / "manystore"
 
 
-class ArrayKeyValueStore(KeyValueStoreBase):
+class ArrayKeyValueStore(BufferedStoreBase):
     """論理名 → [KeyValueStore] のマウント表で複数 backend を束ねる合成 [KeyValueStore]。"""
 
     def __init__(self) -> None:
-        self._mounts: dict[str, AsyncKeyValueStore] = {}
+        self._mounts: dict[str, AsyncBufferedStore] = {}
 
-    async def mount(self, name: str, store: AsyncKeyValueStore) -> None:
+    async def mount(self, name: str, store: AsyncBufferedStore) -> None:
         """論理名 `name` に backend を割り当てる（現状は**登録のみ**＝I/O なし）。
 
         **インターフェースは非同期**にしてある＝将来の動的マウントで「connect＋登録」を
@@ -83,7 +83,7 @@ class ArrayKeyValueStore(KeyValueStoreBase):
             raise ValueError(f"mount name must be a single segment: {name!r}")
         self._mounts[name] = store
 
-    async def unmount(self, name: str) -> AsyncKeyValueStore | None:
+    async def unmount(self, name: str) -> AsyncBufferedStore | None:
         """論理名を外して登録解除し、外した backend を返す（無ければ None。**aclose はしない**）。
 
         mount と対称（非同期 IF・現状は登録解除のみ・I/O なし）。外した backend の `aclose` は
@@ -95,7 +95,7 @@ class ArrayKeyValueStore(KeyValueStoreBase):
         """マウント済みの論理名を名前順で返す。"""
         return sorted(self._mounts)
 
-    def _route(self, key: str) -> tuple[AsyncKeyValueStore, str]:
+    def _route(self, key: str) -> tuple[AsyncBufferedStore, str]:
         """`<name>/<subkey>` を (backend, subkey) に分解する。"""
         name, sep, subkey = key.partition("/")
         if not sep or not subkey:
@@ -207,7 +207,7 @@ class ArrayKeyValueStore(KeyValueStoreBase):
         await _aclose_all(self._mounts.values())
 
 
-class DownloadCache(KeyValueStoreBase):
+class DownloadCache(BufferedStoreBase):
     """[KeyValueStore]（典型的には [ArrayKeyValueStore]）を包み、`download` でローカルへ取得する層。
 
     KVS 操作は委譲しつつ、`download(key)` で値をローカルキャッシュへ落としてパスを返す（PyTorch の
@@ -215,7 +215,7 @@ class DownloadCache(KeyValueStoreBase):
     （cwd が変わってもヒットさせるため。既定 `~/.cache/manystore`）。
     """
 
-    def __init__(self, store: AsyncKeyValueStore, cache_dir: Path | str | None = None) -> None:
+    def __init__(self, store: AsyncBufferedStore, cache_dir: Path | str | None = None) -> None:
         self._store = store
         base = Path(cache_dir).expanduser() if cache_dir is not None else DEFAULT_CACHE_DIR
         self._cache_dir = base.resolve()

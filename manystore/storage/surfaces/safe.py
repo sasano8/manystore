@@ -9,12 +9,12 @@ from collections.abc import AsyncIterator
 
 from ...exceptions import UnsafePathError  # 集約先（後方互換: ここからも import できる）
 from ...protocols import (
+    AsyncBufferedStore,
     AsyncFileObject,
-    AsyncFileStore,
-    AsyncKeyValueStore,
+    AsyncStreamingStore,
+    BufferedStoreBase,
     FileInfo,
     IfMatch,
-    KeyValueStoreBase,
 )
 
 __all__ = ["UnsafePathError", "validate_safe_path", "SafeKeyValueStore", "SafeFileStore"]
@@ -39,10 +39,10 @@ def validate_safe_path(path: str) -> str:
     return path
 
 
-class SafeKeyValueStore(KeyValueStoreBase):
+class SafeKeyValueStore(BufferedStoreBase):
     """キーを [validate_safe_path] で検証してから委譲する [KeyValueStore] ラッパ。"""
 
-    def __init__(self, store: AsyncKeyValueStore) -> None:
+    def __init__(self, store: AsyncBufferedStore) -> None:
         self._store = store
 
     async def put(self, key: str, value: bytes, *, if_match: IfMatch = None) -> FileInfo:
@@ -89,7 +89,7 @@ class SafeFileStore(SafeKeyValueStore):
     FileStore 固有の IO（open_reader/open_writer）だけを filename 検証付きで足す。
     """
 
-    def __init__(self, store: AsyncFileStore) -> None:
+    def __init__(self, store: AsyncStreamingStore) -> None:
         super().__init__(store)  # 下層は完全な FileStore（KVS 面も持つ）
 
     async def open_reader(self, filename: str) -> AsyncFileObject:

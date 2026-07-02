@@ -17,7 +17,7 @@ import asyncio
 import tempfile
 from pathlib import Path
 
-from ...protocols import AsyncFileStore, AsyncKeyValueStore
+from ...protocols import AsyncBufferedStore, AsyncStreamingStore
 from . import (
     ABSOLUTE_CONTRACTS,
     differential_contract_aspects,
@@ -177,10 +177,10 @@ def main() -> None:
 
     with tempfile.TemporaryDirectory() as tmp_path:
         targets = [
-            (out_dir / "kv_spec.md", AsyncKeyValueStore, "KeyValueStore", _kv_instances(tmp_path)),
+            (out_dir / "kv_spec.md", AsyncBufferedStore, "KeyValueStore", _kv_instances(tmp_path)),
             (
                 out_dir / "file_storage_spec.md",
-                AsyncFileStore,
+                AsyncStreamingStore,
                 "FileStore",
                 _file_instances(tmp_path),
             ),

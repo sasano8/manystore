@@ -1,6 +1,6 @@
 """async-to-sync storage — 非同期ストアを同期として被せるブリッジ。
 
-[AsyncToSyncKeyValueStore] は非同期 [KeyValueStore] を同期 [SyncKeyValueStore] として被せる。
+[AsyncToSyncKeyValueStore] は非同期 [KeyValueStore] を同期 [SyncBufferedStore] として被せる。
 ストレージの一次実装は async に保ち、同期版はこのブリッジだけで得る
 （手書きの二重実装を避ける）。専属のイベントループを 1 つ保持し、各呼び出しを
 `run_until_complete` で同期化する（接続を保持する nats 等のため、呼び出し毎にループを作らず
@@ -13,13 +13,13 @@
 import asyncio
 from collections.abc import Iterator
 
-from ...protocols import AsyncKeyValueStore, FileInfo, IfMatch
+from ...protocols import AsyncBufferedStore, FileInfo, IfMatch
 
 
 class AsyncToSyncKeyValueStore:
-    """非同期 [KeyValueStore] を [SyncKeyValueStore] として同期 API で被せるラッパ。"""
+    """非同期 [KeyValueStore] を [SyncBufferedStore] として同期 API で被せるラッパ。"""
 
-    def __init__(self, store: AsyncKeyValueStore) -> None:
+    def __init__(self, store: AsyncBufferedStore) -> None:
         self._store = store
         self._loop = asyncio.new_event_loop()
 

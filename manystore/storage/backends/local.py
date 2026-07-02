@@ -26,9 +26,9 @@ from ...exceptions import ConflictError, NotFoundError, UnsupportedOperation
 from ...protocols import (
     AsyncFileObject,
     FileInfo,
-    FileStoreBase,
     IfMatch,
     KeyValueFromFileStore,
+    StreamingStoreBase,
     _atomic_write_bytes,
     _kv_copy,
 )
@@ -165,11 +165,12 @@ class _LocalAtomicWriter:
             await self.close()
 
 
-class LocalFileStore(FileStoreBase):
+class LocalFileStore(StreamingStoreBase):
     """ローカルファイルシステムの「真実の実装」（完全な [FileStore]＝KeyValueStore + IO）。
 
-    **file 寄り**＝primitive は `open_reader`/`open_writer`（ストリーム）なので [FileStoreBase] を
-    継承し、put/get/get_or_raise（全体）は基底が IO から導出する（値境界でのみバッファ）。本クラスは
+    **file 寄り**＝primitive は `open_reader`/`open_writer`（ストリーム）なので
+    [StreamingStoreBase] を継承し、put/get/get_or_raise（全体）は基底が IO から導出する（値境界での
+    みバッファ）。本クラスは
     IO 2 つ＋名前空間操作（iter/list/exists/delete・cp/mv・vacuum）を filesystem-native に実装する
     ＝KeyValueStore も満たす。KVS ビュー（IO を隠したもの）は
     `KeyValueFromFileStore(LocalFileStore(...))`（＝[LocalKeyValueStore]）で被せる＝実装の二重持ちを
@@ -182,7 +183,7 @@ class LocalFileStore(FileStoreBase):
         self._dir = Path(directory).resolve()
         self._dir.mkdir(parents=True, exist_ok=True)
 
-    # ── ストリーム入出力（primitive）。put/get_or_raise/get は [FileStoreBase] が導出 ──
+    # ── ストリーム入出力（primitive）。put/get_or_raise/get は [StreamingStoreBase] が導出 ──
 
     async def open_reader(self, filename: str) -> AsyncFileObject:
         try:
@@ -195,7 +196,7 @@ class LocalFileStore(FileStoreBase):
         # 親ディレクトリ作成＋temp+rename で all-or-nothing（ネストキーもそのまま置ける）。
         return await _LocalAtomicWriter.open(self._dir / filename)
 
-    # ── conditional put（CAS）＋ head（情報取得）。FileStoreBase の派生 put を native で上書き ──
+    # ── conditional put（CAS）＋ head（情報取得）。基底の派生 put を native で上書き ──
 
     async def put(self, filename: str, value: bytes, *, if_match: IfMatch = None) -> FileInfo:
         # None=無条件 LWW（temp+replace）／不在 FileInfo=create-only（os.link）／他=update

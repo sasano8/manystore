@@ -6,7 +6,7 @@
 httpx / client）は factory 内で遅延 import。
 """
 
-from ...protocols import AsyncFileStore, AsyncKeyValueStore
+from ...protocols import AsyncBufferedStore, AsyncStreamingStore
 from .http_store import HttpFileStore, HttpKeyValueStore
 from .local import LocalFileObject, LocalFileStore, LocalKeyValueStore
 from .memory import DictFileStore, DictKeyValueStore
@@ -44,22 +44,22 @@ __all__ = [
 # ── builtin backend の factory（未接続のストアを作る。opts は暫定の flat kwargs＝M069 で整理）──
 
 
-def _kv_memory(**opts: object) -> AsyncKeyValueStore:
+def _kv_memory(**opts: object) -> AsyncBufferedStore:
     return DictKeyValueStore()  # プロセス内 dict（揮発・接続不要）
 
 
-def _file_memory(**opts: object) -> AsyncFileStore:
+def _file_memory(**opts: object) -> AsyncStreamingStore:
     return DictFileStore()
 
 
-def _kv_local(**opts: object) -> AsyncKeyValueStore:
+def _kv_local(**opts: object) -> AsyncBufferedStore:
     local_dir = opts.get("local_dir")
     if local_dir is None:
         raise ValueError("local backend requires local_dir")
     return LocalKeyValueStore(local_dir)  # type: ignore[arg-type]
 
 
-def _file_local(**opts: object) -> AsyncFileStore:
+def _file_local(**opts: object) -> AsyncStreamingStore:
     local_dir = opts.get("local_dir")
     if local_dir is None:
         raise ValueError("local backend requires local_dir")
@@ -77,43 +77,43 @@ def _s3_kwargs(opts: dict[str, object]) -> dict[str, object]:
     )
 
 
-def _kv_s3(**opts: object) -> AsyncKeyValueStore:
+def _kv_s3(**opts: object) -> AsyncBufferedStore:
     return S3KeyValueStore(**_s3_kwargs(opts))  # type: ignore[arg-type]
 
 
-def _file_s3(**opts: object) -> AsyncFileStore:
+def _file_s3(**opts: object) -> AsyncStreamingStore:
     return S3FileStore(**_s3_kwargs(opts))  # type: ignore[arg-type]
 
 
-def _kv_nats(**opts: object) -> AsyncKeyValueStore:
+def _kv_nats(**opts: object) -> AsyncBufferedStore:
     return NatsObjectKeyValueStore(
         url=opts.get("nats_url", ""),  # type: ignore[arg-type]
         bucket=opts.get("nats_bucket", "manystore_files"),  # type: ignore[arg-type]
     )
 
 
-def _file_nats(**opts: object) -> AsyncFileStore:
+def _file_nats(**opts: object) -> AsyncStreamingStore:
     return NatsFileStore(
         url=opts.get("nats_url", ""),  # type: ignore[arg-type]
         bucket=opts.get("nats_bucket", "manystore_files"),  # type: ignore[arg-type]
     )
 
 
-def _kv_http(**opts: object) -> AsyncKeyValueStore:
+def _kv_http(**opts: object) -> AsyncBufferedStore:
     return HttpKeyValueStore(
         base_url=opts.get("http_base_url", ""),  # type: ignore[arg-type]
         headers=opts.get("http_headers"),  # type: ignore[arg-type]
     )
 
 
-def _file_http(**opts: object) -> AsyncFileStore:
+def _file_http(**opts: object) -> AsyncStreamingStore:
     return HttpFileStore(
         base_url=opts.get("http_base_url", ""),  # type: ignore[arg-type]
         headers=opts.get("http_headers"),  # type: ignore[arg-type]
     )
 
 
-def _kv_manystore(**opts: object) -> AsyncKeyValueStore:
+def _kv_manystore(**opts: object) -> AsyncBufferedStore:
     # manystore 自身の HTTP サービスを喋る client（`client/` 在中）を遅延 import。opts は暫定。
     from ...client.remote import RemoteKeyValueStore
 
@@ -134,7 +134,7 @@ register_builtin_backend("http", kv_factory=_kv_http, file_factory=_file_http)
 register_builtin_backend("manystore", kv_factory=_kv_manystore, file_factory=None)
 
 
-def create_unsafe_key_value_store(backend: str, **opts: object) -> AsyncKeyValueStore:
+def create_unsafe_key_value_store(backend: str, **opts: object) -> AsyncBufferedStore:
     """backend 名から生の（未接続・**キー検証なし**）[KeyValueStore] を作る低レベルファクトリ。
 
     [registry] の薄いラッパ。**unsafe**＝`../escape` 等を弾かない（対策は呼び出し側責務）。安全に
@@ -145,7 +145,7 @@ def create_unsafe_key_value_store(backend: str, **opts: object) -> AsyncKeyValue
     return get_backend_spec(backend).kv_factory(**opts)
 
 
-def create_unsafe_file_store(backend: str, **opts: object) -> AsyncFileStore:
+def create_unsafe_file_store(backend: str, **opts: object) -> AsyncStreamingStore:
     """[create_unsafe_key_value_store] の FileStore 版（backend → 完全な [FileStore]＝KVS + IO）。
 
     http は read-only（書き込み・一覧は `io.UnsupportedOperation`）。FileStore 非対応の

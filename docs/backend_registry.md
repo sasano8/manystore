@@ -27,8 +27,8 @@ manystore は「backend 名 → ストア生成」を **1 つのレジストリ*
 @dataclass(frozen=True)
 class BackendSpec:
     name: str
-    kv_factory: Callable[..., AsyncKeyValueStore]
-    file_factory: Callable[..., AsyncFileStore] | None  # None = FileStore 非対応（KVS のみ）
+    kv_factory: Callable[..., AsyncBufferedStore]
+    file_factory: Callable[..., AsyncStreamingStore] | None  # None = FileStore 非対応（KVS のみ）
     origin: str                                          # "builtin" | "entry-point:<dist>" | "programmatic"
 ```
 

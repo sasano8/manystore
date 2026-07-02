@@ -11,9 +11,9 @@ from collections.abc import AsyncIterator
 from ...exceptions import ConflictError, NotFoundError
 from ...protocols import (
     AsyncFileObject,
+    BufferedStoreBase,
     FileInfo,
     IfMatch,
-    KeyValueStoreBase,
     _kv_copy,
     _kv_move,
     _KvReadFileObject,
@@ -22,12 +22,12 @@ from ...protocols import (
 )
 
 
-class DictKeyValueStore(KeyValueStoreBase):
+class DictKeyValueStore(BufferedStoreBase):
     """`dict[str, bytes]` を保持するインメモリ [KeyValueStore]。
 
     外から既存 dict を渡せば共有・観測できる（テストの fake 兼参照実装）。iter は他 backend と
     同じく名前降順。get の primitive は get_or_raise（欠損で FileNotFoundError）で、get(default) は
-    基底 [KeyValueStoreBase] が与える。
+    基底 [BufferedStoreBase] が与える。
 
     conditional put（CAS）用に **メタストア**（`_etag`/`_mtime`）を値と同時更新する。素の dict には
     更新時刻・版が無いため、put のたびに **単調増加の通し番号**（`_seq`）を etag に焼き、`_mtime` に

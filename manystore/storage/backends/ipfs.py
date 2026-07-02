@@ -24,7 +24,7 @@ Kubo は HTTP API なので **httpx を流用**（http backend と同じ遅延 i
 from collections.abc import AsyncIterator
 
 from ...exceptions import UnsupportedOperation
-from ...protocols import AsyncFileObject, FileInfo, IfMatch, KeyValueStoreBase, _KvReadFileObject
+from ...protocols import AsyncFileObject, BufferedStoreBase, FileInfo, IfMatch, _KvReadFileObject
 
 # 既定の Kubo HTTP API（ローカルデーモン）と Gateway。
 DEFAULT_API_URL = "http://127.0.0.1:5001"
@@ -80,7 +80,7 @@ class _IpfsBase:
         return None
 
 
-class IpfsKeyValueStore(_IpfsBase, KeyValueStoreBase):
+class IpfsKeyValueStore(_IpfsBase, BufferedStoreBase):
     """IPFS(MFS) 越しの KVS スキャフォールド。primitive は `get_or_raise`（kv 寄り）。
 
     本体は未実装（`NotImplementedError`）。上の docstring の MFS エンドポイント対応に沿って詰める。

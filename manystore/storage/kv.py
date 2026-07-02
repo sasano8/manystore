@@ -8,12 +8,12 @@ from collections.abc import Mapping
 from contextlib import asynccontextmanager
 
 from ..protocols import (
-    AsyncKeyValueStore,
+    AsyncBufferedStore,
+    BufferedStoreBase,
     FileInfo,
     IfMatch,
     KeyValueFromFileStore,
-    KeyValueStoreBase,
-    SyncKeyValueStore,
+    SyncBufferedStore,
     Verify,
 )
 from .backends import (
@@ -44,8 +44,8 @@ __all__ = [
     # conditional put（CAS）: if_match の型（不在は FileInfo.absent() で作る）
     "IfMatch",
     # abstraction
-    "AsyncKeyValueStore",
-    "KeyValueStoreBase",
+    "AsyncBufferedStore",
+    "BufferedStoreBase",
     # backends
     "DictKeyValueStore",
     "LocalKeyValueStore",
@@ -57,8 +57,8 @@ __all__ = [
     # FileStore → KVS アダプタ（KeyValueFileStore の逆向き）
     "KeyValueFromFileStore",
     # sync / bridge
-    "SyncKeyValueStore",
-    "AsyncKeyValueStore",
+    "SyncBufferedStore",
+    "AsyncBufferedStore",
     "AsyncToSyncKeyValueStore",
     # composite
     "ArrayKeyValueStore",
@@ -105,7 +105,7 @@ def create_safe_key_value_store(backend: str, **opts: object) -> SafeKeyValueSto
     return SafeKeyValueStore(create_unsafe_key_value_store(backend, **opts))
 
 
-async def create_safe_array_store(mounts: Mapping[str, AsyncKeyValueStore]) -> SafeKeyValueStore:
+async def create_safe_array_store(mounts: Mapping[str, AsyncBufferedStore]) -> SafeKeyValueStore:
     """安全な合成ストアを**構築のみ**で返す（未接続）。async＝`mount` が非同期 IF のため。
 
     `mounts`（論理名 → backend）を [ArrayKeyValueStore] に**登録**し（mount は I/O なし）、
@@ -184,7 +184,7 @@ def open_store(
 
 @asynccontextmanager
 async def open_async_array_store(
-    mounts: Mapping[str, AsyncKeyValueStore],
+    mounts: Mapping[str, AsyncBufferedStore],
     *,
     verify: bool = True,
     policy: ConnectPolicy | None = None,

@@ -18,9 +18,9 @@ from collections.abc import AsyncIterator
 from ...exceptions import ConflictError, NotFoundError
 from ...protocols import (
     AsyncFileObject,
+    BufferedStoreBase,
     FileInfo,
     IfMatch,
-    KeyValueStoreBase,
     _kv_copy,
     _kv_move,
     _KvReadFileObject,
@@ -99,7 +99,7 @@ class _NatsBase:
             self._obs = None
 
 
-class NatsObjectKeyValueStore(_NatsBase, KeyValueStoreBase):
+class NatsObjectKeyValueStore(_NatsBase, BufferedStoreBase):
     def _meta_subject(self, key: str) -> str:
         """オブジェクトのメタ subject（`$O.<bucket>.M.<b64url(name)>`）。CAS の version 担体。"""
         import base64

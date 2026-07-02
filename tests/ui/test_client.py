@@ -11,7 +11,7 @@ import pytest
 
 from manystore.client import ManystoreClient, RemoteKeyValueStore
 from manystore.exceptions import ConflictError, NotFoundError
-from manystore.protocols import AsyncKeyValueStore, FileInfo
+from manystore.protocols import AsyncBufferedStore, FileInfo
 from manystore.serving.server.app import create_app
 from manystore.serving.server.routes import KV_RAW_PREFIX  # native NS prefix の単一正本
 from manystore.serving.services.config import parse_config
@@ -43,8 +43,8 @@ def test_remote_kvs_signature_parity() -> None:
     戻り注釈の narrowing（`iter_all` の AsyncIterable→AsyncIterator）は全 backend 共通の慣習ゆえ
     許容＝`concrete_store_signature_errors` の方針。strict な base↔Protocol parity は誤検出する。
     """
-    assert concrete_store_signature_errors(RemoteKeyValueStore, AsyncKeyValueStore) == []
-    assert_concrete_store_signatures(RemoteKeyValueStore, AsyncKeyValueStore)
+    assert concrete_store_signature_errors(RemoteKeyValueStore, AsyncBufferedStore) == []
+    assert_concrete_store_signatures(RemoteKeyValueStore, AsyncBufferedStore)
 
 
 async def test_remote_kvs_roundtrip(tmp_path: Path) -> None:

@@ -20,9 +20,9 @@ from ..exceptions import ConflictError, NotFoundError
 from ..protocols import (
     DEFAULT_LIST_LIMIT,
     MAX_HTTP_LIST_FETCH,
+    BufferedStoreBase,
     FileInfo,
     IfMatch,
-    KeyValueStoreBase,
     _kv_copy,
     _kv_move,
 )
@@ -123,10 +123,10 @@ class ManystoreClient:
         await self._client.aclose()
 
 
-class RemoteKeyValueStore(KeyValueStoreBase):
+class RemoteKeyValueStore(BufferedStoreBase):
     """1 つの context をサーバ越しに [KeyValueStore] として扱うストア（RW）。
 
-    primitive `get_or_raise` だけ実装し、`get(key, default=None)` は基底 [KeyValueStoreBase]
+    primitive `get_or_raise` だけ実装し、`get(key, default=None)` は基底 [BufferedStoreBase]
     から受け取る（欠損は基底が捕捉して `default`）。
     """
 
@@ -155,7 +155,7 @@ class RemoteKeyValueStore(KeyValueStoreBase):
 
     async def head(self, key: str) -> FileInfo:
         # HEAD のメタ（etag/size/modified_at）から version 付き FileInfo を組む。欠損は NotFound。
-        # 既定 [KeyValueStoreBase].head は get で全 body を読み etag=None＝CAS 不可ゆえ override。
+        # 既定 [BufferedStoreBase].head は get で全 body を読み etag=None＝CAS 不可ゆえ override。
         meta = await self._client.head_meta(self._context, key)
         if meta is None:
             raise NotFoundError(key)

@@ -26,9 +26,9 @@ from manystore import (
 )
 from manystore.client import RemoteKeyValueStore
 from manystore.exceptions import ConflictError, NotFoundError
-from manystore.protocols import FileInfo, FileStoreBase, KeyValueStoreBase
-from manystore.storage.file import AsyncFileStore
-from manystore.storage.kv import AsyncKeyValueStore
+from manystore.protocols import BufferedStoreBase, FileInfo, StreamingStoreBase
+from manystore.storage.file import AsyncStreamingStore
+from manystore.storage.kv import AsyncBufferedStore
 from manystore.tools.conformancer import (
     ABSOLUTE_CONTRACTS,
     FileStoreTester,
@@ -91,10 +91,10 @@ def test_all_file_stores_have_required_methods(tmp_path) -> None:
 
 def test_file_store_requires_io_on_top_of_kvs() -> None:
     # 包含関係の確認: FileStore のメンバ ⊇ KVS のメンバ ＋ open_reader/open_writer。
-    kvs = required_members(AsyncKeyValueStore)
-    from manystore.storage.file import AsyncFileStore
+    kvs = required_members(AsyncBufferedStore)
+    from manystore.storage.file import AsyncStreamingStore
 
-    fs = required_members(AsyncFileStore)
+    fs = required_members(AsyncStreamingStore)
     assert kvs <= fs
     assert fs - kvs == {"open_reader", "open_writer"}
 
@@ -373,7 +373,7 @@ async def test_fail_loud_propagation_contract(make_store) -> None:
 
 async def test_fail_loud_contract_catches_swallowing_wrapper() -> None:
     # 契約の牙: exists を握り潰す（M055 と同型の）壊れた wrapper は契約で落ちる。
-    class _SwallowExists(KeyValueStoreBase):
+    class _SwallowExists(BufferedStoreBase):
         def __init__(self, inner):
             self._inner = inner
 
@@ -445,7 +445,7 @@ async def test_differential_aspects_derived_from_runs() -> None:
 
 
 @pytest.mark.parametrize(
-    ("kind", "base_name"), [("file", "FileStoreBase"), ("kv", "KeyValueStoreBase")]
+    ("kind", "base_name"), [("file", "StreamingStoreBase"), ("kv", "BufferedStoreBase")]
 )
 async def test_scaffold_compiles_and_stubs_raise(kind: str, base_name: str) -> None:
     # 雛形は compile でき、未実装 primitive を呼ぶと NotImplementedError（＝実装の TODO が loud）。
@@ -490,7 +490,7 @@ def test_conformance_detects_missing_method() -> None:
     class _Broken:
         async def put(self, key, value): ...
 
-    missing = missing_members(_Broken(), AsyncKeyValueStore)
+    missing = missing_members(_Broken(), AsyncBufferedStore)
     assert "get_or_raise" in missing
     assert "iter_all" in missing
     with pytest.raises(AssertionError):
@@ -498,11 +498,11 @@ def test_conformance_detects_missing_method() -> None:
 
 
 async def test_base_enforces_full_protocol_at_instantiation() -> None:
-    # KeyValueStoreBase の primitive（put/get_or_raise/iter_all/exists/delete/connect/aclose）を
+    # BufferedStoreBase の primitive（put/get_or_raise/iter_all/exists/delete/connect/aclose）を
     # 一部でも実装し忘れたストアは、呼ぶ前に **インスタンス化時点で TypeError**＝部分実装が黙って
     # Protocol を破る（M043 のドリフト）のを fail-loud に防ぐ。get_or_raise だけ実装した旧来 OK な
     # 部分実装も、いまは未実装の primitive が残るため生成できない。
-    class _ForgotMost(KeyValueStoreBase):
+    class _ForgotMost(BufferedStoreBase):
         async def get_or_raise(self, key):  # 残り primitive を実装していない
             raise NotFoundError(key)
 
@@ -510,7 +510,7 @@ async def test_base_enforces_full_protocol_at_instantiation() -> None:
         _ForgotMost()
 
     # primitive を全実装したサブクラスは生成でき、get/list_all/cp/mv は基底の既定実装から得られる。
-    class _Ok(KeyValueStoreBase):
+    class _Ok(BufferedStoreBase):
         async def put(self, key, value):
             return {"filename": key, "size": len(value)}
 
@@ -540,15 +540,15 @@ async def _assert_defaults(store) -> None:
 
 
 def test_kvs_base_matches_protocol() -> None:
-    # KeyValueStoreBase が AsyncKeyValueStore を網羅し、全メソッドのシグネチャが一致する。
-    assert base_protocol_parity_errors(KeyValueStoreBase, AsyncKeyValueStore) == []
-    assert_base_protocol_parity(KeyValueStoreBase, AsyncKeyValueStore)
+    # BufferedStoreBase が AsyncBufferedStore を網羅し、全メソッドのシグネチャが一致する。
+    assert base_protocol_parity_errors(BufferedStoreBase, AsyncBufferedStore) == []
+    assert_base_protocol_parity(BufferedStoreBase, AsyncBufferedStore)
 
 
 def test_file_store_base_matches_protocol() -> None:
-    # FileStoreBase は AsyncFileStore（= KVS + open_reader/open_writer）を網羅・シグネチャ一致。
-    assert base_protocol_parity_errors(FileStoreBase, AsyncFileStore) == []
-    assert_base_protocol_parity(FileStoreBase, AsyncFileStore)
+    # StreamingStoreBase は AsyncStreamingStore（= KVS + open_reader/open_writer）を網羅＆一致。
+    assert base_protocol_parity_errors(StreamingStoreBase, AsyncStreamingStore) == []
+    assert_base_protocol_parity(StreamingStoreBase, AsyncStreamingStore)
 
 
 def test_conformancer_assumes_current_protocol() -> None:
@@ -561,11 +561,11 @@ def test_conformancer_assumes_current_protocol() -> None:
 def test_signature_drift_detects_stale_assumption() -> None:
     # ツール自体の健全性: protocols.py が前提（写し）と食い違えば drift として検出する。
     stale = {"exists": "(self, key: str, extra: int) -> bool"}  # 実際の Protocol には無い引数
-    drift = signature_drift(AsyncFileStore, stale)
+    drift = signature_drift(AsyncStreamingStore, stale)
     assert any("exists" in e for e in drift)
 
     removed = {"no_such_method": "(self) -> None"}  # 改廃されたメンバ
-    assert any("no_such_method" in e for e in signature_drift(AsyncFileStore, removed))
+    assert any("no_such_method" in e for e in signature_drift(AsyncStreamingStore, removed))
 
 
 def test_parity_detects_missing_and_signature_drift() -> None:
@@ -573,28 +573,28 @@ def test_parity_detects_missing_and_signature_drift() -> None:
     class _PartialBase:
         async def put(self, key, value): ...  # 他の Protocol メンバが無い
 
-    errors = base_protocol_parity_errors(_PartialBase, AsyncKeyValueStore)
+    errors = base_protocol_parity_errors(_PartialBase, AsyncBufferedStore)
     assert any("get_or_raise" in e for e in errors)  # 網羅漏れを検出
 
-    class _SigDrift(KeyValueStoreBase):  # exists の引数名を変える（シグネチャ drift）
+    class _SigDrift(BufferedStoreBase):  # exists の引数名を変える（シグネチャ drift）
         async def exists(self, name): ...  # type: ignore[override]
 
-    drift = base_protocol_parity_errors(_SigDrift, AsyncKeyValueStore)
+    drift = base_protocol_parity_errors(_SigDrift, AsyncBufferedStore)
     assert any("exists" in e and "シグネチャ" in e for e in drift)
 
 
 def test_concrete_store_signatures_tolerate_return_narrowing() -> None:
     # ツール自体の健全性: concrete 実装の署名検証は **戻り注釈の narrowing を許容**しつつ
-    # **パラメータ drift は捕える**。KeyValueStoreBase は戻り注釈まで一致＝当然 OK。
-    assert concrete_store_signature_errors(KeyValueStoreBase, AsyncKeyValueStore) == []
-    assert_concrete_store_signatures(KeyValueStoreBase, AsyncKeyValueStore)
+    # **パラメータ drift は捕える**。BufferedStoreBase は戻り注釈まで一致＝当然 OK。
+    assert concrete_store_signature_errors(BufferedStoreBase, AsyncBufferedStore) == []
+    assert_concrete_store_signatures(BufferedStoreBase, AsyncBufferedStore)
 
     from collections.abc import AsyncIterable, AsyncIterator
 
     from manystore.protocols import FileInfo
 
     class _NarrowedReturn(
-        KeyValueStoreBase
+        BufferedStoreBase
     ):  # 戻り注釈だけ narrowing（AsyncIterable→AsyncIterator）
         async def iter_all(  # type: ignore[override]
             self, limit: int | None = None, prefix: str = ""
@@ -602,13 +602,13 @@ def test_concrete_store_signatures_tolerate_return_narrowing() -> None:
             yield FileInfo(filename="x", size=0)
 
     # 全 backend と同じ narrowing は許容＝違反ゼロ（strict base parity ならここを誤検出する）。
-    assert concrete_store_signature_errors(_NarrowedReturn, AsyncKeyValueStore) == []
+    assert concrete_store_signature_errors(_NarrowedReturn, AsyncBufferedStore) == []
 
-    class _ParamDrift(KeyValueStoreBase):  # put の if_match キーワードを落とす（実害ある drift）
+    class _ParamDrift(BufferedStoreBase):  # put の if_match キーワードを落とす（実害ある drift）
         async def put(self, key: str, value: bytes) -> FileInfo:  # type: ignore[override]
             return FileInfo(filename=key, size=len(value))
 
-    errors = concrete_store_signature_errors(_ParamDrift, AsyncKeyValueStore)
+    errors = concrete_store_signature_errors(_ParamDrift, AsyncBufferedStore)
     assert any("put" in e for e in errors)  # パラメータ drift は loud に捕える
     assert AsyncIterable is not AsyncIterator  # narrowing は型として別物（共変・LSP 安全）
 
