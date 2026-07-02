@@ -6,7 +6,7 @@
 httpx / client）は factory 内で遅延 import。
 """
 
-from ...spec import AsyncBufferedStore, AsyncStreamingStore
+from ...spec import AsyncStreamingStore
 from ..registry import (
     BackendSpec,
     get_backend_spec,
@@ -14,18 +14,16 @@ from ..registry import (
     register_backend,
     register_builtin_backend,
 )
-from .http_store import HttpFileStore, HttpKeyValueStore, HttpStore
+from .http_store import HttpStore
 from .local import (
     LocalFileObject,
-    LocalFileStore,
-    LocalKeyValueStore,
     LocalStore,
     PosixLocalStore,
     WindowsLocalStore,
 )
-from .memory import DictFileStore, DictKeyValueStore, DictStore
-from .nats import NatsFileStore, NatsObjectKeyValueStore, NatsStore
-from .s3 import S3FileStore, S3KeyValueStore, S3Store
+from .memory import DictStore
+from .nats import NatsStore
+from .s3 import S3Store
 
 __all__ = [
     # 1 backend = 1 Store（M071・full Store）
@@ -37,24 +35,11 @@ __all__ = [
     "NatsStore",
     "HttpStore",
     "LocalFileObject",
-    # 旧名 alias（非推奨・M071）
-    "DictKeyValueStore",
-    "DictFileStore",
-    "LocalKeyValueStore",
-    "LocalFileStore",
-    "S3KeyValueStore",
-    "S3FileStore",
-    "NatsObjectKeyValueStore",
-    "NatsFileStore",
-    "HttpKeyValueStore",
-    "HttpFileStore",
     "BackendSpec",
     "register_backend",
     "get_backend_spec",
     "list_backends",
     "create_unsafe_store",
-    "create_unsafe_key_value_store",
-    "create_unsafe_file_store",
 ]
 
 
@@ -124,13 +109,3 @@ def create_unsafe_store(backend: str, **opts: object) -> AsyncStreamingStore:
     [open_async_store]。opts は backend 固有（例: `local_dir=`/`s3_bucket=`/`http_base_url=`）。
     """
     return get_backend_spec(backend).factory(**opts)
-
-
-def create_unsafe_key_value_store(backend: str, **opts: object) -> AsyncBufferedStore:
-    """**非推奨（M071）＝[create_unsafe_store] へ統合**（full Store を返す）。"""
-    return create_unsafe_store(backend, **opts)
-
-
-def create_unsafe_file_store(backend: str, **opts: object) -> AsyncStreamingStore:
-    """**非推奨（M071）＝[create_unsafe_store] へ統合**（backend は 1 クラスで常に full Store）。"""
-    return create_unsafe_store(backend, **opts)

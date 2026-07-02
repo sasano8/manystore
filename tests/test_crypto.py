@@ -1,4 +1,4 @@
-"""crypto（ストリーム暗号と FileStore IO 繋ぎこみ）のテスト。
+"""crypto（ストリーム暗号と Store の IO API 繋ぎこみ）のテスト。
 
 crypto.py のインライン `_selftest`（`__main__` でしか走らず CI 収集対象外だった）を pytest へ移し、
 契約を CI で常時検証する（M060）:

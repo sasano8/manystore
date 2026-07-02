@@ -1,8 +1,9 @@
 """manystore — 差し替え可能なバックエンドを持つストア群。
 
-2 種のストア抽象を提供する（async を一次実装、sync ブリッジを同梱）:
-- [KeyValueStore] … put/get がメインの値ストア（Local / S3 / NATS / HTTP バックエンド同梱）。
-- [FileStore]     … `open` でファイルオブジェクト（[FileObject]）を取得するストリーム指向の抽象。
+1 つの Store（[Store]）を提供する（async を一次実装、sync ブリッジを同梱）:
+- 値 API … put/get がメインの値操作（Local / S3 / NATS / HTTP バックエンド同梱）。
+- IO API … `open_reader`/`open_writer` でファイルオブジェクト（[FileObject]）を取得する
+  ストリーム指向の面。
 
 公開 API は統合 facade `manystore.storage.store`（M071＝put/get も open_* も持つ 1 つの Store）に
 集約し、トップ `manystore` へフラットに再エクスポートする（`from manystore import ...` でも

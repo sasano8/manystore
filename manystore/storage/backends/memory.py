@@ -1,8 +1,8 @@
-"""memory backend — プロセス内の辞書（dict）ストア（KVS / FileStore）。
+"""memory backend — プロセス内の辞書（dict）ストア（1 つの Store）。
 
 依存ゼロ・接続不要のインメモリ実装。テストの参照 backend や、軽量な一時ストアに使う
-（プロセス終了で揮発）。dict は **kv 寄り**（whole get/put が native）なので、核は KVS 側に置き、
-FileStore は KVS を継承して IO を buffer 合成する（systemPatterns 原則7）。
+（プロセス終了で揮発）。dict は **値寄り**（whole get/put が native）なので、核は値 API 側に
+置き、IO API は値 API を継承して buffer 合成する（systemPatterns 原則7）。
 """
 
 import time
@@ -110,8 +110,3 @@ class DictStore(BufferedStoreBase):
 
     async def aclose(self) -> None:
         return None
-
-
-# 旧名は alias（非推奨・M071）。DictFileStore の明示 open_* は基底合成と同一で冗長。
-DictKeyValueStore = DictStore
-DictFileStore = DictStore

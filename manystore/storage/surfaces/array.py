@@ -1,13 +1,13 @@
-"""array storage — 複数の KeyValueStore を論理名（マウント先）配下に束ねる合成ストア。
+"""array storage — 複数の Store を論理名（マウント先）配下に束ねる合成ストア。
 
 `await mount(name, store)` で論理名に backend を割り当て（現状は**登録のみ**＝I/O なし。非同期 IF は
 将来の動的マウント余地）、キー `"<name>/<subkey>"` の先頭セグメントで振り分ける。接続は別途＝合成
 ストアの `connect()`（全 mount を
 connect）か、顔の入口 [open_async_array_store]（mount 群を connect する CM）が一括で担う（mount は
 登録と接続の二重責務を持たない）。論理名はディレクトリのように振る舞い、全 backend を「論理名配下に
-存在しているかのように」横断できる（[KeyValueStore] を満たす）。
+存在しているかのように」横断できる（[Store] を満たす）。
 
-[DownloadCache] は ArrayStorage（等の KeyValueStore）を包み、`download` でローカルキャッシュへ取得
+[DownloadCache] は ArrayStorage（等の Store）を包み、`download` でローカルキャッシュへ取得
 するラッパ層（キャッシュは常にローカル FS。リモート backend をローカルへ落として使う想定）。
 """
 
@@ -65,8 +65,8 @@ def _verify_download(info: FileInfo, data: bytes, policy: Verify) -> None:
 DEFAULT_CACHE_DIR = Path.home() / ".cache" / "manystore"
 
 
-class ArrayKeyValueStore(BufferedStoreBase):
-    """論理名 → [KeyValueStore] のマウント表で複数 backend を束ねる合成 [KeyValueStore]。"""
+class ArrayStore(BufferedStoreBase):
+    """論理名 → [Store] のマウント表で複数 backend を束ねる合成 [Store]。"""
 
     def __init__(self) -> None:
         self._mounts: dict[str, AsyncBufferedStore] = {}
@@ -177,7 +177,7 @@ class ArrayKeyValueStore(BufferedStoreBase):
     # cp/mv の「同一 backend」判定は store オブジェクトの identity（`is`）で行う（M064）。
     # 「同一 mount／同一ストアを別名で 2 度 mount」のときだけ native（S3 copy_object・local 原子
     # rename 等）を使い、それ以外は get→put に落とす**保守的**な設計。同一物理 backend を別ラッパ
-    # （別 SafeKeyValueStore 等）で 2 度包んだ別 mount どうしは `is`=False で native を取りこぼすが
+    # （別 SafeStore 等）で 2 度包んだ別 mount どうしは `is`=False で native を取りこぼすが
     # 意図的: 別 mount は論理的に別コンテキストで subkey 名前空間の一致を Array は保証できず、native
     # cp は意味論的に危険ゆえ安全側に倒す。物理同一性判定を IF に足すのは最小原則に反する（YAGNI）。
     # 確実に native にしたいなら同一ストアオブジェクトを 2 名で mount する。
@@ -208,7 +208,7 @@ class ArrayKeyValueStore(BufferedStoreBase):
 
 
 class DownloadCache(BufferedStoreBase):
-    """[KeyValueStore]（典型的には [ArrayKeyValueStore]）を包み、`download` でローカルへ取得する層。
+    """[Store]（典型的には [ArrayStore]）を包み、`download` でローカルへ取得する層。
 
     KVS 操作は委譲しつつ、`download(key)` で値をローカルキャッシュへ落としてパスを返す（PyTorch の
     モデル DL 様）。キャッシュは常にローカル FS・sync。`cache_dir` は init で絶対パスへ固定

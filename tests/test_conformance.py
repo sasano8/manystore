@@ -1,7 +1,7 @@
 """横断的な準拠テスト。
 
-(1) 全 backend が `KeyValueStore` / `FileStore` Protocol のメソッドを揃えているか（存在チェック）、
-(2) `FileStoreTester` が辞書ストアをオラクルに対象の挙動（run_light）を差分検証できるか、を確認。
+(1) 全 backend が Store（値 API＋IO API）の Protocol メソッドを揃えているか（存在チェック）、
+(2) `StoreTester` が辞書ストアをオラクルに対象の挙動（run_light）を差分検証できるか、を確認。
 サードパーティ backend も `manystore.conformancer` を import すれば同じ検査を回せる。
 """
 
@@ -17,28 +17,27 @@ from manystore import (
     NatsStore,
     S3Store,
 )
-from manystore.client import RemoteKeyValueStore
+from manystore.client import RemoteStore
 from manystore.spec import (
     AsyncBufferedStore,
     AsyncStreamingStore,
     BufferedStoreBase,
     FileInfo,
-    KeyValueFileStore,
     StreamingStoreBase,
 )
 from manystore.spec.conformancer import (
     ABSOLUTE_CONTRACTS,
-    FileStoreTester,
+    StoreTester,
     assert_base_protocol_parity,
+    assert_buffered_store,
     assert_concrete_store_signatures,
     assert_concurrent_delete_safe,
     assert_concurrent_overwrite_atomic,
     assert_conformancer_protocol_current,
     assert_contract_catalog_current,
     assert_fail_loud_propagation,
-    assert_file_store,
-    assert_key_value_store,
     assert_put_if_absent_concurrency_safe,
+    assert_store,
     assert_writer_aborts_on_error,
     base_protocol_parity_errors,
     concrete_store_signature_errors,
@@ -51,11 +50,11 @@ from manystore.spec.conformancer import (
     signature_drift,
 )
 from manystore.spec.exceptions import ConflictError, NotFoundError
-from manystore.storage.surfaces.safe import SafeKeyValueStore
+from manystore.storage.surfaces.safe import SafeStore
 
 
 def _kvs_instances(tmp_path):
-    # 接続はしない（メソッド存在チェックは生成だけで十分）。サーバ越しの RemoteKeyValueStore も
+    # 接続はしない（メソッド存在チェックは生成だけで十分）。サーバ越しの RemoteStore も
     # 「関係するストア」として roster に含める（get_or_raise 未実装などの取りこぼしを検知する）。
     return [
         DictStore(),
@@ -63,11 +62,11 @@ def _kvs_instances(tmp_path):
         S3Store(bucket="b"),
         NatsStore(url="nats://x", bucket="b"),
         HttpStore(base_url="http://x"),
-        RemoteKeyValueStore("http://x", "ctx"),
+        RemoteStore("http://x", "ctx"),
     ]
 
 
-def _file_store_instances(tmp_path):
+def _store_instances(tmp_path):
     return [
         DictStore(),
         LocalStore(tmp_path),
@@ -77,19 +76,19 @@ def _file_store_instances(tmp_path):
     ]
 
 
-def test_all_key_value_stores_have_required_methods(tmp_path) -> None:
+def test_all_buffered_stores_have_required_methods(tmp_path) -> None:
     for store in _kvs_instances(tmp_path):
-        assert_key_value_store(store)  # 欠けていれば AssertionError で backend 名つき
+        assert_buffered_store(store)  # 欠けていれば AssertionError で backend 名つき
 
 
-def test_all_file_stores_have_required_methods(tmp_path) -> None:
-    # FileStore は KVS + open_reader/open_writer。全 FileStore がそれを満たす。
-    for store in _file_store_instances(tmp_path):
-        assert_file_store(store)
+def test_all_stores_have_required_methods(tmp_path) -> None:
+    # full Store は KVS + open_reader/open_writer。全 Store がそれを満たす。
+    for store in _store_instances(tmp_path):
+        assert_store(store)
 
 
-def test_file_store_requires_io_on_top_of_kvs() -> None:
-    # 包含関係の確認: FileStore のメンバ ⊇ KVS のメンバ ＋ open_reader/open_writer。
+def test_store_requires_io_on_top_of_kvs() -> None:
+    # 包含関係の確認: full Store のメンバ ⊇ KVS のメンバ ＋ open_reader/open_writer。
     kvs = required_members(AsyncBufferedStore)
     fs = required_members(AsyncStreamingStore)
     assert kvs <= fs
@@ -99,9 +98,9 @@ def test_file_store_requires_io_on_top_of_kvs() -> None:
 # ── 挙動契約テストツール（辞書ストアをオラクルに run_light・report に追記） ──
 
 
-async def test_run_light_local_file_store_matches_oracle(tmp_path) -> None:
+async def test_run_light_local_store_matches_oracle(tmp_path) -> None:
     # 辞書ストアを正に LocalStore の IO/exists/list_all/iter_all を差分検証。
-    tester = FileStoreTester(DictStore(), LocalStore(tmp_path))
+    tester = StoreTester(DictStore(), LocalStore(tmp_path))
     report: list = []
     await tester.run_light(report)
     assert all(s["passed"] for s in report), report
@@ -112,7 +111,7 @@ async def test_run_light_local_file_store_matches_oracle(tmp_path) -> None:
 
 async def test_run_light_records_state_per_op(tmp_path) -> None:
     # op 毎に「適用後の状態」（iter_all のファイル名・昇順）が返り値とは別に記録される。
-    tester = FileStoreTester(DictStore(), LocalStore(tmp_path))
+    tester = StoreTester(DictStore(), LocalStore(tmp_path))
     report: list = []
     await tester.run_light(report)
     by_aspect = {s["aspect"]: s for s in report}
@@ -131,7 +130,7 @@ async def test_run_light_records_state_per_op(tmp_path) -> None:
 
 async def test_run_light_dict_self_consistent() -> None:
     # 正=対象=辞書ストアなら全観点一致（ツールの健全性）。
-    tester = FileStoreTester(DictStore(), DictStore())
+    tester = StoreTester(DictStore(), DictStore())
     report: list = []
     await tester.run_light(report)
     assert all(s["passed"] for s in report)
@@ -155,7 +154,7 @@ async def test_run_light_detects_divergence(tmp_path) -> None:
         return _NoopWriter()
 
     broken.open_writer = open_writer
-    tester = FileStoreTester(DictStore(), broken)
+    tester = StoreTester(DictStore(), broken)
     report: list = []
     await tester.run_light(report)
     assert any(
@@ -166,9 +165,9 @@ async def test_run_light_detects_divergence(tmp_path) -> None:
 # ── run_middle（細かい挙動契約・差分検証）＋ writer all-or-nothing 絶対契約（M065） ──
 
 
-async def test_run_middle_local_file_store_matches_oracle(tmp_path) -> None:
+async def test_run_middle_local_store_matches_oracle(tmp_path) -> None:
     # 辞書ストアを正に LocalStore の delete/冪等/複数キー/read 境界/overwrite 縮小を差分検証。
-    tester = FileStoreTester(DictStore(), LocalStore(tmp_path))
+    tester = StoreTester(DictStore(), LocalStore(tmp_path))
     report: list = []
     await tester.run_middle(report)
     assert all(s["passed"] for s in report), report
@@ -178,7 +177,7 @@ async def test_run_middle_local_file_store_matches_oracle(tmp_path) -> None:
 
 async def test_run_middle_dict_self_consistent() -> None:
     # 正=対象=辞書ストアなら run_middle も全観点一致（ツールの健全性）。
-    tester = FileStoreTester(DictStore(), DictStore())
+    tester = StoreTester(DictStore(), DictStore())
     report: list = []
     await tester.run_middle(report)
     assert all(s["passed"] for s in report)
@@ -187,9 +186,9 @@ async def test_run_middle_dict_self_consistent() -> None:
 # ── run_heavy（規模・境界の挙動契約・差分検証・M065） ──
 
 
-async def test_run_heavy_local_file_store_matches_oracle(tmp_path) -> None:
+async def test_run_heavy_local_store_matches_oracle(tmp_path) -> None:
     # 辞書ストアを正に LocalStore の大容量/分割 read/多キー/連続 overwrite を差分検証。
-    tester = FileStoreTester(DictStore(), LocalStore(tmp_path))
+    tester = StoreTester(DictStore(), LocalStore(tmp_path))
     report: list = []
     await tester.run_heavy(report)
     assert all(s["passed"] for s in report), report
@@ -199,7 +198,7 @@ async def test_run_heavy_local_file_store_matches_oracle(tmp_path) -> None:
 
 async def test_run_heavy_dict_self_consistent() -> None:
     # 正=対象=辞書ストアなら run_heavy も全観点一致（ツールの健全性）。
-    tester = FileStoreTester(DictStore(), DictStore())
+    tester = StoreTester(DictStore(), DictStore())
     report: list = []
     await tester.run_heavy(report)
     assert all(s["passed"] for s in report)
@@ -230,7 +229,7 @@ async def test_run_heavy_detects_truncating_reader(tmp_path) -> None:
         return _TruncReader(data)
 
     broken.open_reader = open_reader
-    tester = FileStoreTester(DictStore(), broken)
+    tester = StoreTester(DictStore(), broken)
     report: list = []
     await tester.run_heavy(report)
     assert any(not s["passed"] for s in report)  # 大容量 read がオラクルと食い違う
@@ -315,7 +314,7 @@ async def test_concurrent_delete_safe_catches_non_deleting_store() -> None:
 
 async def test_run_full_dict_self_consistent() -> None:
     # 健全なストアは差分も絶対契約も全て passed＝run_full の全観点が緑。
-    tester = FileStoreTester(DictStore(), DictStore())
+    tester = StoreTester(DictStore(), DictStore())
     report: list = []
     await tester.run_full(report)
     assert all(s["passed"] for s in report), [s for s in report if not s["passed"]]
@@ -331,7 +330,7 @@ async def test_run_full_dict_self_consistent() -> None:
 
 
 async def test_run_full_local_matches_oracle(tmp_path) -> None:
-    tester = FileStoreTester(DictStore(), LocalStore(tmp_path))
+    tester = StoreTester(DictStore(), LocalStore(tmp_path))
     report: list = []
     await tester.run_full(report)
     assert all(s["passed"] for s in report), [s for s in report if not s["passed"]]
@@ -343,7 +342,7 @@ async def test_run_full_records_absolute_violation_without_raising() -> None:
         async def delete(self, key):  # noqa: ANN001
             return None
 
-    tester = FileStoreTester(DictStore(), _NoDeleteStore())
+    tester = StoreTester(DictStore(), _NoDeleteStore())
     report: list = []
     await tester.run_full(report)  # 例外を投げない
     violated = [s for s in report if not s["passed"]]
@@ -357,13 +356,12 @@ async def test_run_full_records_absolute_violation_without_raising() -> None:
     "make_store",
     [
         pytest.param(lambda inner: inner, id="base_duality"),
-        pytest.param(lambda inner: SafeKeyValueStore(inner), id="safe"),
-        pytest.param(lambda inner: KeyValueFileStore(inner), id="kv_file_store"),
+        pytest.param(lambda inner: SafeStore(inner), id="safe"),
         pytest.param(lambda inner: DownloadCache(inner), id="download_cache"),
     ],
 )
 async def test_fail_loud_propagation_contract(make_store) -> None:
-    # 下層（FaultInjectingKeyValueStore）の InjectedFault を握り潰さず伝播すること。基底の
+    # 下層（FaultInjectingStore）の InjectedFault を握り潰さず伝播すること。基底の
     # get duality（NotFoundError 以外を default に化けさせない）も identity で同時に検証する。
     await assert_fail_loud_propagation(make_store)
 
@@ -471,7 +469,7 @@ async def test_run_light_report_is_external_and_saves(tmp_path) -> None:
     import json
 
     # ツールはレポートを保持しない＝呼び出し側の list に操作順で追記される。
-    tester = FileStoreTester(DictStore(), LocalStore(tmp_path))
+    tester = StoreTester(DictStore(), LocalStore(tmp_path))
     report: list = []
     await tester.run_light(report)
     assert report[0]["op"] == "exists"  # 操作順・op/args/expected が残る（リプレイ素材）
@@ -491,7 +489,7 @@ def test_conformance_detects_missing_method() -> None:
     assert "get_or_raise" in missing
     assert "iter_all" in missing
     with pytest.raises(AssertionError):
-        assert_key_value_store(_Broken())
+        assert_buffered_store(_Broken())
 
 
 async def test_base_enforces_full_protocol_at_instantiation() -> None:
@@ -542,14 +540,14 @@ def test_kvs_base_matches_protocol() -> None:
     assert_base_protocol_parity(BufferedStoreBase, AsyncBufferedStore)
 
 
-def test_file_store_base_matches_protocol() -> None:
+def test_store_base_matches_protocol() -> None:
     # StreamingStoreBase は AsyncStreamingStore（= KVS + open_reader/open_writer）を網羅＆一致。
     assert base_protocol_parity_errors(StreamingStoreBase, AsyncStreamingStore) == []
     assert_base_protocol_parity(StreamingStoreBase, AsyncStreamingStore)
 
 
 def test_conformancer_assumes_current_protocol() -> None:
-    # conformancer（FileStoreTester/_OPS）が前提とする Protocol メソッドのシグネチャが protocols.py
+    # conformancer（StoreTester/_OPS）が前提とする Protocol メソッドのシグネチャが protocols.py
     # （正）と一致する。食い違えば conformancer が古い契約を叩いている＝_op_* と写しの追従が必要。
     assert conformancer_protocol_drift() == []
     assert_conformancer_protocol_current()

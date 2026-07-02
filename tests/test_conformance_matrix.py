@@ -31,7 +31,7 @@ from conformance_providers import (
 
 from manystore import DictStore
 from manystore.spec.conformancer import (
-    FileStoreTester,
+    StoreTester,
     assert_concurrent_delete_safe,
     assert_concurrent_overwrite_atomic,
     assert_fail_loud_over_transport,
@@ -161,7 +161,7 @@ async def test_head_sha256_correct(provider: Provider) -> None:
 
 @pytest.mark.parametrize("provider", _params(_NATIVE_FILE))
 async def test_native_writer_aborts_on_error(provider: Provider) -> None:
-    # native FileStore の open_writer（S3=multipart）が例外時に確定しない（all-or-nothing）。
+    # native Store の open_writer（S3=multipart）が例外時に確定しない（all-or-nothing）。
     # 包んだ KVS バッファ writer ではなく native streaming writer 自身を検査する。
     async with _store(provider) as fs:
         await assert_writer_aborts_on_error(fs)
@@ -172,7 +172,7 @@ async def test_native_file_io_matches_oracle(provider: Provider) -> None:
     # native open_writer/open_reader を run_light/middle/heavy で差分検証（分割 read 含む）。
     async with _store(provider) as fs:
         for run in ("run_light", "run_middle", "run_heavy"):
-            tester = FileStoreTester(DictStore(), fs)
+            tester = StoreTester(DictStore(), fs)
             report: list = []
             await getattr(tester, run)(report)
             assert all(s["passed"] for s in report), (run, report)
@@ -193,7 +193,7 @@ async def test_fail_loud_over_transport(provider: Provider) -> None:
 async def test_run_light_matches_oracle(provider: Provider) -> None:
     # 辞書ストアを正に open_reader/open_writer/exists/list_all/iter_all を差分検証。
     async with _store(provider) as fs:
-        tester = FileStoreTester(DictStore(), fs)
+        tester = StoreTester(DictStore(), fs)
         report: list = []
         await tester.run_light(report)
         assert all(s["passed"] for s in report), report
@@ -203,7 +203,7 @@ async def test_run_light_matches_oracle(provider: Provider) -> None:
 async def test_run_middle_matches_oracle(provider: Provider) -> None:
     # delete/冪等/複数キー/read 境界/overwrite 縮小の細かい契約を差分検証。
     async with _store(provider) as fs:
-        tester = FileStoreTester(DictStore(), fs)
+        tester = StoreTester(DictStore(), fs)
         report: list = []
         await tester.run_middle(report)
         assert all(s["passed"] for s in report), report
@@ -213,7 +213,7 @@ async def test_run_middle_matches_oracle(provider: Provider) -> None:
 async def test_run_heavy_matches_oracle(provider: Provider) -> None:
     # 多チャンク大容量/分割 read/多キー/連続 overwrite の規模・境界契約を差分検証。
     async with _store(provider) as fs:
-        tester = FileStoreTester(DictStore(), fs)
+        tester = StoreTester(DictStore(), fs)
         report: list = []
         await tester.run_heavy(report)
         assert all(s["passed"] for s in report), report

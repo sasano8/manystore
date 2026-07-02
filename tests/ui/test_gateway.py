@@ -83,7 +83,7 @@ def test_readonly_bucket_access_denied(tmp_path: Path) -> None:
 
 def test_unsafe_key_invalid_argument(tmp_path: Path) -> None:
     with _client(tmp_path) as client:
-        # バックスラッシュを含むキーは SafeKeyValueStore が弾く → S3 InvalidArgument(400)。
+        # バックスラッシュを含むキーは SafeStore が弾く → S3 InvalidArgument(400)。
         # （'..' は HTTP クライアントがパス正規化で潰すため、正規化されない '\\' で検証する。）
         r = client.put("/work/a%5Cb.txt", content=b"x")
         assert r.status_code == 400

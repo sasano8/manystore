@@ -1,6 +1,6 @@
 """http backend — HTTP/HTTPS 越しの read-only ストア。
 
-KVS の get/exists と FileStore の read のみ実装する。httpx はメソッド内で遅延 import する。
+値 API の get/exists と IO API の read のみ実装する。httpx はメソッド内で遅延 import する。
 書き込み系（put/delete/cp/mv）と一覧（list/iter）は read-only ゆえ非対応
 （`io.UnsupportedOperation`）。キーは `base_url` への相対パスとして URL を組み立てる
 （`base_url + "/" + key`）。認証等が要るときは `headers` を渡す。
@@ -105,8 +105,3 @@ class HttpStore(_HttpBase, BufferedStoreBase):
         # read-only＝open 時点で fail-fast（基底合成だと close の put まで遅延するので override）。
         _read_only("open_writer")
         # open_reader は基底 [BufferedStoreBase] の buffer 合成（whole GET）をそのまま使う。
-
-
-# 旧名は alias（非推奨・M071）。
-HttpKeyValueStore = HttpStore
-HttpFileStore = HttpStore

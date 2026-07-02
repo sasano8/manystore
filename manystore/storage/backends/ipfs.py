@@ -80,10 +80,12 @@ class _IpfsBase:
         return None
 
 
-class IpfsKeyValueStore(_IpfsBase, BufferedStoreBase):
-    """IPFS(MFS) 越しの KVS スキャフォールド。primitive は `get_or_raise`（kv 寄り）。
+class IpfsStore(_IpfsBase, BufferedStoreBase):
+    """IPFS(MFS) 越しの full Store スキャフォールド。primitive は `get_or_raise`（kv 寄り）。
 
     本体は未実装（`NotImplementedError`）。上の docstring の MFS エンドポイント対応に沿って詰める。
+    IPFS は **kv 寄り**（whole read/write が native）＝open_reader は whole get の上に buffer 合成
+    （[_KvReadFileObject]）、open_writer は本実装で files/write のストリーム化を検討（当面未実装）。
     """
 
     async def put(self, key: str, value: bytes, *, if_match: IfMatch = None) -> FileInfo:
@@ -117,14 +119,7 @@ class IpfsKeyValueStore(_IpfsBase, BufferedStoreBase):
         """CID から `cat` で bytes を取る。"""
         _todo("cid_get")
 
-
-class IpfsFileStore(IpfsKeyValueStore):
-    """IPFS(MFS) 越しの完全 [FileStore]（= [IpfsKeyValueStore] ＋ IO）。スキャフォールド。
-
-    IPFS は **kv 寄り**（whole read/write が native）。open_reader は whole get の上に buffer 合成
-    （[_KvReadFileObject]）、open_writer は本実装で files/write のストリーム化を検討（当面未実装）。
-    """
-
+    # ── IO 面（open_reader/open_writer）＝Store の残り半分。──
     async def open_reader(self, filename: str) -> AsyncFileObject:
         return _KvReadFileObject(await self.get_or_raise(filename))  # 欠損は FileNotFoundError
 

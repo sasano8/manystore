@@ -3,8 +3,8 @@
 > ⚠️ ここにあるのは「あるべき場所に置いた空定義 ＋ アルゴリズムのネタ」であり、メソッド本体は
 > `NotImplementedError`。本実装は別タスクで詰める。**facade（kv.py）には未公開**（未完成のため）。
 
-## [ArrayKeyValueStore] との関係（兄弟であって素直な派生ではない）
-共通点は「複数 [KeyValueStore] ＋ ルーティング ＋ 横断列挙」。だが [ArrayKeyValueStore] とは 2 点で
+## [ArrayStore] との関係（兄弟であって素直な派生ではない）
+共通点は「複数 [Store] ＋ ルーティング ＋ 横断列挙」。だが [ArrayStore] とは 2 点で
 本質的に違う:
 
 1. **行き先が鍵に出ない**。Array は鍵 `<mount>/<sub>` に行き先が書いてある（決定的・明示）。LB は
@@ -13,7 +13,7 @@
 2. **ルーティングが「負荷」で決まる**。Array は鍵→mount の決定的写像。LB は backend が報告する負荷
    メトリクス（CPU/メモリ/空き容量…）を見て[BalancePolicy]がその時点の最適 member を選ぶ。
 
-そのため [ArrayKeyValueStore] を継承して `_route` だけ差し替える、は罠（iter/exists/cp/mv も総取り
+そのため [ArrayStore] を継承して `_route` だけ差し替える、は罠（iter/exists/cp/mv も総取り
 換え）。**[BufferedStoreBase] を継承した兄弟**として置く（共通 composite 基底の抽出は将来 YAGNI）。
 
 ## 未解決の論点（読みのルーティング）— scaffold では probe-all を既定とする
@@ -55,8 +55,8 @@ class LoadStats(TypedDict, total=False):
 class SupportsLoadStats(Protocol):
     """負荷メトリクスをネイティブに報告できる backend の **optional capability**。
 
-    core IF（[KeyValueStore]）には載せない（最小・汎用）。報告できる backend だけが実装し、
-    [LoadBalancedKeyValueStore] は capability を持つ member からのみ [LoadStats] を集める
+    core IF（[Store]）には載せない（最小・汎用）。報告できる backend だけが実装し、
+    [LoadBalancedStore] は capability を持つ member からのみ [LoadStats] を集める
     （持たない member は「不明」として policy が扱う）。
     """
 
@@ -105,8 +105,8 @@ class LeastLoadedPolicy:
         raise NotImplementedError("loadbalancer scaffold: LeastLoadedPolicy.select")
 
 
-class LoadBalancedKeyValueStore(BufferedStoreBase):
-    """匿名の member 群を負荷で選んで束ねる合成 [KeyValueStore]（[ArrayKeyValueStore] の兄弟）。
+class LoadBalancedStore(BufferedStoreBase):
+    """匿名の member 群を負荷で選んで束ねる合成 [Store]（[ArrayStore] の兄弟）。
 
     本体は未実装（`NotImplementedError`）。書きは [BalancePolicy] で 1 member を選び、読み系は
     probe-all（既定）。詳細はモジュール docstring 参照。

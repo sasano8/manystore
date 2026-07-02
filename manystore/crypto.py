@@ -9,9 +9,9 @@
 
 2. **[CipherReader] / [CipherWriter]** … 既存の [AsyncFileObject]（`open_reader`/`open_writer` の
    戻り値）を 1 枚だけ包み、read で復号 / write で暗号化する。これ自体が [AsyncFileObject] を満たす
-   ＝**FileStore の IO にそのまま差し込める繋ぎこみ点**（ストア本体には手を入れない）。
+   ＝**Store の IO API にそのまま差し込める繋ぎこみ点**（ストア本体には手を入れない）。
 
-ストレージ実装（暗号化 FileStore）はここでは提供しない。利用側は backend の `open_reader`/
+ストレージ実装（暗号化 Store）はここでは提供しない。利用側は backend の `open_reader`/
 `open_writer` が返したオブジェクトを下記ラッパで包むだけでよい:
 
     async with await store.open_writer(name) as raw:

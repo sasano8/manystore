@@ -1,6 +1,6 @@
 """client 層のテスト（in-process ASGITransport で server と往復）。
 
-RemoteKeyValueStore が [KeyValueStore] 準拠でサーバ越しに put/get/list/exists/delete/cp/mv できる。
+RemoteStore が Store の値 API（put/get）準拠でサーバ越しに put/get/list/exists/delete/cp/mv できる。
 pytest-asyncio（asyncio_mode=auto）で `async def test_*` をそのまま回す。
 """
 
@@ -9,7 +9,7 @@ from pathlib import Path
 import httpx
 import pytest
 
-from manystore.client import ManystoreClient, RemoteKeyValueStore
+from manystore.client import ManystoreClient, RemoteStore
 from manystore.serving.server.app import create_app
 from manystore.serving.server.routes import KV_RAW_PREFIX  # native NS prefix の単一正本
 from manystore.serving.services.config import parse_config
@@ -23,28 +23,28 @@ from manystore.spec.conformancer import (
 from manystore.spec.exceptions import ConflictError, NotFoundError
 
 
-async def _remote_store(tmp_path: Path) -> tuple[StorageService, RemoteKeyValueStore]:
-    """local backend の server を in-process ASGITransport で繋いだ RemoteKeyValueStore を返す。"""
+async def _remote_store(tmp_path: Path) -> tuple[StorageService, RemoteStore]:
+    """local backend の server を in-process ASGITransport で繋いだ RemoteStore を返す。"""
     cfg = parse_config({"contexts": {"work": {"backend": "local", "root": str(tmp_path)}}})
     service = StorageService(cfg, watch_interval=1.0)
     await service.connect()
     app = create_app(service)
-    store = RemoteKeyValueStore(
+    store = RemoteStore(
         f"http://test{KV_RAW_PREFIX}", "work", transport=httpx.ASGITransport(app=app)
     )
     return service, store
 
 
 def test_remote_kvs_signature_parity() -> None:
-    """RemoteKeyValueStore が KeyValueStore Protocol を署名レベルで満たすこと（HTTP 越し前提）。
+    """RemoteStore が Store の値 API（put/get）を署名レベルで満たすこと（HTTP 越し前提）。
 
-    挙動（roundtrip）の前に「remote が KeyValueStore の顔を被れているか」を機械検証する。
+    挙動（roundtrip）の前に「remote が Store の値 API の顔を被れているか」を機械検証する。
     存在＋パラメータ署名の一致を見る（`put` の `if_match` や `head`/`create` の drift を検出）。
     戻り注釈の narrowing（`iter_all` の AsyncIterable→AsyncIterator）は全 backend 共通の慣習ゆえ
     許容＝`concrete_store_signature_errors` の方針。strict な base↔Protocol parity は誤検出する。
     """
-    assert concrete_store_signature_errors(RemoteKeyValueStore, AsyncBufferedStore) == []
-    assert_concrete_store_signatures(RemoteKeyValueStore, AsyncBufferedStore)
+    assert concrete_store_signature_errors(RemoteStore, AsyncBufferedStore) == []
+    assert_concrete_store_signatures(RemoteStore, AsyncBufferedStore)
 
 
 async def test_remote_kvs_roundtrip(tmp_path: Path) -> None:
@@ -58,7 +58,7 @@ async def test_remote_kvs_roundtrip(tmp_path: Path) -> None:
     app = create_app(service)
     transport = httpx.ASGITransport(app=app)
     # base_url = host + native NS prefix（router アタッチ先と同じ定数で組む＝ベタ書きしない）。
-    store = RemoteKeyValueStore(f"http://test{KV_RAW_PREFIX}", "work", transport=transport)
+    store = RemoteStore(f"http://test{KV_RAW_PREFIX}", "work", transport=transport)
     try:
         assert await store.get("a.txt") is None
         await store.put("a.txt", b"hello")
@@ -88,7 +88,7 @@ async def test_remote_get_or_raise_and_default(tmp_path: Path) -> None:
     service = StorageService(cfg, watch_interval=1.0)
     await service.connect()
     app = create_app(service)
-    store = RemoteKeyValueStore(
+    store = RemoteStore(
         f"http://test{KV_RAW_PREFIX}", "work", transport=httpx.ASGITransport(app=app)
     )
     try:
@@ -96,7 +96,7 @@ async def test_remote_get_or_raise_and_default(tmp_path: Path) -> None:
         with pytest.raises(NotFoundError):
             await service.get_or_raise("work", "missing.txt")
 
-        # クライアント層（RemoteKeyValueStore）：欠損は get_or_raise が送出、get は default。
+        # クライアント層（RemoteStore）：欠損は get_or_raise が送出、get は default。
         with pytest.raises(NotFoundError):
             await store.get_or_raise("missing.txt")
         assert await store.get("missing.txt", default=b"fallback") == b"fallback"
@@ -191,7 +191,7 @@ async def test_remote_is_fail_loud_over_transport_fault() -> None:
     """M065 step5 / M066 step3: server/backend 障害（500）を client が**全 op で**握り潰さず raise。
 
     server 越し（transport-level fault）の fail-loud を契約化＝conformancer の
-    `assert_fail_loud_over_transport` を 500 を返す transport の `RemoteKeyValueStore` に当てる。
+    `assert_fail_loud_over_transport` を 500 を返す transport の `RemoteStore` に当てる。
     get/get(default)/exists/delete/put/list/iter のどれも障害を None/False/default/NotFound に
     化けさせず loud に失敗（M054〔欠損偽装〕/M055〔False 偽装〕のクラスを HTTP 越しで横断検知）。
     """
@@ -199,9 +199,7 @@ async def test_remote_is_fail_loud_over_transport_fault() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(500, json={"detail": "injected backend fault"})
 
-    store = RemoteKeyValueStore(
-        "http://test/kv/raw", "work", transport=httpx.MockTransport(handler)
-    )
+    store = RemoteStore("http://test/kv/raw", "work", transport=httpx.MockTransport(handler))
     try:
         await assert_fail_loud_over_transport(store)
     finally:

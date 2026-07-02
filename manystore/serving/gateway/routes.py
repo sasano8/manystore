@@ -24,7 +24,7 @@ S3 操作は同一 HTTP メソッド/パスを query で多重化するため、
 未対応（バックログ）: passthrough（S3）/ continuation token・MaxKeys ページング（繰延）/
 ListParts・ListMultipartUploads。SigV4 署名検証はしない（gateway 認証へ委譲＝既定 localhost）。
 
-S3 のキーは `SafeKeyValueStore` の制約（先頭 '/'・'..'・'\\'・NUL を拒否）に従う。
+S3 のキーは `SafeStore` の制約（先頭 '/'・'..'・'\\'・NUL を拒否）に従う。
 弾かれたキーは 400 InvalidArgument にマップする（制約は意図的に維持＝緩めない）。
 """
 

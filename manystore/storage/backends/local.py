@@ -3,8 +3,8 @@
 書き込みは temp+rename で原子的（all-or-nothing）。パスは init で絶対パスへ固定（cd 非依存）。
 
 **OS 別実装（M079）**: `fcntl.flock`/`os.link` に依存する [PosixLocalStore]（Linux/macOS）と、未実装
-の [WindowsLocalStore] に分かれ、`LocalStore` が `os.name` でどちらかを指す（旧名 `LocalFileStore`/
-`LocalKeyValueStore` は `LocalStore` の alias）。fcntl は POSIX 専用なので遅延 import
+の [WindowsLocalStore] に分かれ、`LocalStore` が `os.name` でどちらかを指す（旧名 `LocalStore`/
+`LocalStore` は `LocalStore` の alias）。fcntl は POSIX 専用なので遅延 import
 （Windows 上でも本モジュールの import 自体は壊れない）。
 
 **非ブロッキング（M010）**: ディスク IO（open/read/write/close・rglob/stat・replace/unlink 等）は
@@ -362,7 +362,4 @@ class WindowsLocalStore(StreamingStoreBase):
 
 
 # プラットフォームで実装を選ぶ（M079）。`LocalStore(path)` / backend "local" はこれを指す。
-# 旧名は alias（非推奨・M071）＝LocalStore は full Store＋vacuum（POSIX）を持つ。
 LocalStore = PosixLocalStore if os.name == "posix" else WindowsLocalStore
-LocalFileStore = LocalStore
-LocalKeyValueStore = LocalStore
