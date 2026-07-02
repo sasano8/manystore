@@ -26,7 +26,7 @@
 from collections.abc import AsyncIterator
 from typing import Protocol, TypedDict, runtime_checkable
 
-from ...protocols import (
+from ...spec import (
     AsyncBufferedStore,
     BufferedStoreBase,
     FileInfo,

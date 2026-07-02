@@ -10,26 +10,23 @@ import asyncio
 import pytest
 
 from manystore import (
-    DictFileStore,
-    DictKeyValueStore,
+    DictStore,
     DownloadCache,
-    HttpFileStore,
-    HttpKeyValueStore,
-    KeyValueFileStore,
-    LocalFileStore,
-    LocalKeyValueStore,
-    NatsFileStore,
-    NatsObjectKeyValueStore,
-    S3FileStore,
-    S3KeyValueStore,
-    SafeKeyValueStore,
+    HttpStore,
+    LocalStore,
+    NatsStore,
+    S3Store,
 )
 from manystore.client import RemoteKeyValueStore
-from manystore.exceptions import ConflictError, NotFoundError
-from manystore.protocols import BufferedStoreBase, FileInfo, StreamingStoreBase
-from manystore.storage.file import AsyncStreamingStore
-from manystore.storage.kv import AsyncBufferedStore
-from manystore.tools.conformancer import (
+from manystore.spec import (
+    AsyncBufferedStore,
+    AsyncStreamingStore,
+    BufferedStoreBase,
+    FileInfo,
+    KeyValueFileStore,
+    StreamingStoreBase,
+)
+from manystore.spec.conformancer import (
     ABSOLUTE_CONTRACTS,
     FileStoreTester,
     assert_base_protocol_parity,
@@ -53,28 +50,30 @@ from manystore.tools.conformancer import (
     scaffold_backend,
     signature_drift,
 )
+from manystore.spec.exceptions import ConflictError, NotFoundError
+from manystore.storage.surfaces.safe import SafeKeyValueStore
 
 
 def _kvs_instances(tmp_path):
     # 接続はしない（メソッド存在チェックは生成だけで十分）。サーバ越しの RemoteKeyValueStore も
     # 「関係するストア」として roster に含める（get_or_raise 未実装などの取りこぼしを検知する）。
     return [
-        DictKeyValueStore(),
-        LocalKeyValueStore(tmp_path),
-        S3KeyValueStore(bucket="b"),
-        NatsObjectKeyValueStore(url="nats://x", bucket="b"),
-        HttpKeyValueStore(base_url="http://x"),
+        DictStore(),
+        LocalStore(tmp_path),
+        S3Store(bucket="b"),
+        NatsStore(url="nats://x", bucket="b"),
+        HttpStore(base_url="http://x"),
         RemoteKeyValueStore("http://x", "ctx"),
     ]
 
 
 def _file_store_instances(tmp_path):
     return [
-        DictFileStore(),
-        LocalFileStore(tmp_path),
-        S3FileStore(bucket="b"),
-        NatsFileStore(url="nats://x", bucket="b"),
-        HttpFileStore(base_url="http://x"),
+        DictStore(),
+        LocalStore(tmp_path),
+        S3Store(bucket="b"),
+        NatsStore(url="nats://x", bucket="b"),
+        HttpStore(base_url="http://x"),
     ]
 
 
@@ -92,8 +91,6 @@ def test_all_file_stores_have_required_methods(tmp_path) -> None:
 def test_file_store_requires_io_on_top_of_kvs() -> None:
     # 包含関係の確認: FileStore のメンバ ⊇ KVS のメンバ ＋ open_reader/open_writer。
     kvs = required_members(AsyncBufferedStore)
-    from manystore.storage.file import AsyncStreamingStore
-
     fs = required_members(AsyncStreamingStore)
     assert kvs <= fs
     assert fs - kvs == {"open_reader", "open_writer"}
@@ -103,8 +100,8 @@ def test_file_store_requires_io_on_top_of_kvs() -> None:
 
 
 async def test_run_light_local_file_store_matches_oracle(tmp_path) -> None:
-    # 辞書ストアを正に LocalFileStore の IO/exists/list_all/iter_all を差分検証。
-    tester = FileStoreTester(DictFileStore(), LocalFileStore(tmp_path))
+    # 辞書ストアを正に LocalStore の IO/exists/list_all/iter_all を差分検証。
+    tester = FileStoreTester(DictStore(), LocalStore(tmp_path))
     report: list = []
     await tester.run_light(report)
     assert all(s["passed"] for s in report), report
@@ -115,7 +112,7 @@ async def test_run_light_local_file_store_matches_oracle(tmp_path) -> None:
 
 async def test_run_light_records_state_per_op(tmp_path) -> None:
     # op 毎に「適用後の状態」（iter_all のファイル名・昇順）が返り値とは別に記録される。
-    tester = FileStoreTester(DictFileStore(), LocalFileStore(tmp_path))
+    tester = FileStoreTester(DictStore(), LocalStore(tmp_path))
     report: list = []
     await tester.run_light(report)
     by_aspect = {s["aspect"]: s for s in report}
@@ -134,7 +131,7 @@ async def test_run_light_records_state_per_op(tmp_path) -> None:
 
 async def test_run_light_dict_self_consistent() -> None:
     # 正=対象=辞書ストアなら全観点一致（ツールの健全性）。
-    tester = FileStoreTester(DictFileStore(), DictFileStore())
+    tester = FileStoreTester(DictStore(), DictStore())
     report: list = []
     await tester.run_light(report)
     assert all(s["passed"] for s in report)
@@ -152,13 +149,13 @@ async def test_run_light_detects_divergence(tmp_path) -> None:
 
         async def __aexit__(self, *exc): ...
 
-    broken = LocalFileStore(tmp_path)
+    broken = LocalStore(tmp_path)
 
     async def open_writer(filename):  # 書き込みを握り潰す壊れた open_writer
         return _NoopWriter()
 
     broken.open_writer = open_writer
-    tester = FileStoreTester(DictFileStore(), broken)
+    tester = FileStoreTester(DictStore(), broken)
     report: list = []
     await tester.run_light(report)
     assert any(
@@ -170,8 +167,8 @@ async def test_run_light_detects_divergence(tmp_path) -> None:
 
 
 async def test_run_middle_local_file_store_matches_oracle(tmp_path) -> None:
-    # 辞書ストアを正に LocalFileStore の delete/冪等/複数キー/read 境界/overwrite 縮小を差分検証。
-    tester = FileStoreTester(DictFileStore(), LocalFileStore(tmp_path))
+    # 辞書ストアを正に LocalStore の delete/冪等/複数キー/read 境界/overwrite 縮小を差分検証。
+    tester = FileStoreTester(DictStore(), LocalStore(tmp_path))
     report: list = []
     await tester.run_middle(report)
     assert all(s["passed"] for s in report), report
@@ -181,7 +178,7 @@ async def test_run_middle_local_file_store_matches_oracle(tmp_path) -> None:
 
 async def test_run_middle_dict_self_consistent() -> None:
     # 正=対象=辞書ストアなら run_middle も全観点一致（ツールの健全性）。
-    tester = FileStoreTester(DictFileStore(), DictFileStore())
+    tester = FileStoreTester(DictStore(), DictStore())
     report: list = []
     await tester.run_middle(report)
     assert all(s["passed"] for s in report)
@@ -191,8 +188,8 @@ async def test_run_middle_dict_self_consistent() -> None:
 
 
 async def test_run_heavy_local_file_store_matches_oracle(tmp_path) -> None:
-    # 辞書ストアを正に LocalFileStore の大容量/分割 read/多キー/連続 overwrite を差分検証。
-    tester = FileStoreTester(DictFileStore(), LocalFileStore(tmp_path))
+    # 辞書ストアを正に LocalStore の大容量/分割 read/多キー/連続 overwrite を差分検証。
+    tester = FileStoreTester(DictStore(), LocalStore(tmp_path))
     report: list = []
     await tester.run_heavy(report)
     assert all(s["passed"] for s in report), report
@@ -202,7 +199,7 @@ async def test_run_heavy_local_file_store_matches_oracle(tmp_path) -> None:
 
 async def test_run_heavy_dict_self_consistent() -> None:
     # 正=対象=辞書ストアなら run_heavy も全観点一致（ツールの健全性）。
-    tester = FileStoreTester(DictFileStore(), DictFileStore())
+    tester = FileStoreTester(DictStore(), DictStore())
     report: list = []
     await tester.run_heavy(report)
     assert all(s["passed"] for s in report)
@@ -223,7 +220,7 @@ async def test_run_heavy_detects_truncating_reader(tmp_path) -> None:
 
         async def __aexit__(self, *exc): ...
 
-    broken = LocalFileStore(tmp_path)
+    broken = LocalStore(tmp_path)
     inner_open_reader = broken.open_reader
 
     async def open_reader(filename):  # noqa: ANN001  実 reader の中身を 64B 截断で包む
@@ -233,7 +230,7 @@ async def test_run_heavy_detects_truncating_reader(tmp_path) -> None:
         return _TruncReader(data)
 
     broken.open_reader = open_reader
-    tester = FileStoreTester(DictFileStore(), broken)
+    tester = FileStoreTester(DictStore(), broken)
     report: list = []
     await tester.run_heavy(report)
     assert any(not s["passed"] for s in report)  # 大容量 read がオラクルと食い違う
@@ -260,7 +257,7 @@ async def test_writer_abort_contract_catches_committing_writer(tmp_path) -> None
         async def __aexit__(self, *exc):
             await self._store.put(self._key, self._buf)  # 例外経路でも確定＝契約違反
 
-    broken = LocalFileStore(tmp_path)
+    broken = LocalStore(tmp_path)
 
     async def open_writer(filename):
         return _CommitOnExitWriter(broken, filename)
@@ -275,17 +272,17 @@ async def test_writer_abort_contract_catches_committing_writer(tmp_path) -> None
 
 async def test_concurrent_overwrite_atomic_dict_passes() -> None:
     # 健全なストア（dict）は並行上書きでも最終値が完全な A/B＝契約を満たす。
-    last = await assert_concurrent_overwrite_atomic(DictFileStore(), size=256, rounds=2)
+    last = await assert_concurrent_overwrite_atomic(DictStore(), size=256, rounds=2)
     assert len(last) == 256 and len(set(last)) == 1  # 単一バイトの完全値（torn でない）
 
 
 async def test_concurrent_overwrite_atomic_local_passes(tmp_path) -> None:
-    await assert_concurrent_overwrite_atomic(LocalFileStore(tmp_path), size=256, rounds=2)
+    await assert_concurrent_overwrite_atomic(LocalStore(tmp_path), size=256, rounds=2)
 
 
 async def test_concurrent_overwrite_atomic_catches_torn_writer() -> None:
     # 契約の牙: A/B を連結して torn な値を確定する壊れた put は原子性違反で落ちる。
-    class _TornStore(DictFileStore):
+    class _TornStore(DictStore):
         async def put(self, key, value, *, if_match=None):  # noqa: ANN001
             # 並行 2 本目の put で既存値に追記＝混在（torn）した値を残す。
             prev = await self.get(key, default=b"")
@@ -296,16 +293,16 @@ async def test_concurrent_overwrite_atomic_catches_torn_writer() -> None:
 
 
 async def test_concurrent_delete_safe_dict_passes() -> None:
-    await assert_concurrent_delete_safe(DictFileStore())
+    await assert_concurrent_delete_safe(DictStore())
 
 
 async def test_concurrent_delete_safe_local_passes(tmp_path) -> None:
-    await assert_concurrent_delete_safe(LocalFileStore(tmp_path))
+    await assert_concurrent_delete_safe(LocalStore(tmp_path))
 
 
 async def test_concurrent_delete_safe_catches_non_deleting_store() -> None:
     # 契約の牙: delete を握り潰して何も消さない壊れたストアは「完了後 不在」で落ちる。
-    class _NoDeleteStore(DictFileStore):
+    class _NoDeleteStore(DictStore):
         async def delete(self, key):  # noqa: ANN001  delete を no-op 化（残存させる）
             return None
 
@@ -318,7 +315,7 @@ async def test_concurrent_delete_safe_catches_non_deleting_store() -> None:
 
 async def test_run_full_dict_self_consistent() -> None:
     # 健全なストアは差分も絶対契約も全て passed＝run_full の全観点が緑。
-    tester = FileStoreTester(DictFileStore(), DictFileStore())
+    tester = FileStoreTester(DictStore(), DictStore())
     report: list = []
     await tester.run_full(report)
     assert all(s["passed"] for s in report), [s for s in report if not s["passed"]]
@@ -334,7 +331,7 @@ async def test_run_full_dict_self_consistent() -> None:
 
 
 async def test_run_full_local_matches_oracle(tmp_path) -> None:
-    tester = FileStoreTester(DictFileStore(), LocalFileStore(tmp_path))
+    tester = FileStoreTester(DictStore(), LocalStore(tmp_path))
     report: list = []
     await tester.run_full(report)
     assert all(s["passed"] for s in report), [s for s in report if not s["passed"]]
@@ -342,11 +339,11 @@ async def test_run_full_local_matches_oracle(tmp_path) -> None:
 
 async def test_run_full_records_absolute_violation_without_raising() -> None:
     # run_full は絶対契約違反でも止めず passed=False で記録する（全契約を回し切る）。
-    class _NoDeleteStore(DictFileStore):
+    class _NoDeleteStore(DictStore):
         async def delete(self, key):  # noqa: ANN001
             return None
 
-    tester = FileStoreTester(DictFileStore(), _NoDeleteStore())
+    tester = FileStoreTester(DictStore(), _NoDeleteStore())
     report: list = []
     await tester.run_full(report)  # 例外を投げない
     violated = [s for s in report if not s["passed"]]
@@ -474,7 +471,7 @@ async def test_run_light_report_is_external_and_saves(tmp_path) -> None:
     import json
 
     # ツールはレポートを保持しない＝呼び出し側の list に操作順で追記される。
-    tester = FileStoreTester(DictFileStore(), LocalFileStore(tmp_path))
+    tester = FileStoreTester(DictStore(), LocalStore(tmp_path))
     report: list = []
     await tester.run_light(report)
     assert report[0]["op"] == "exists"  # 操作順・op/args/expected が残る（リプレイ素材）
@@ -591,7 +588,7 @@ def test_concrete_store_signatures_tolerate_return_narrowing() -> None:
 
     from collections.abc import AsyncIterable, AsyncIterator
 
-    from manystore.protocols import FileInfo
+    from manystore.spec import FileInfo
 
     class _NarrowedReturn(
         BufferedStoreBase
@@ -651,9 +648,9 @@ class _RacyCreateDict:
 
 
 async def test_concurrency_checker_passes_for_real_dict_store() -> None:
-    # 実ストア（DictKeyValueStore）の create-only CAS は「一方成功・保存値=勝者」を満たす＝通る。
+    # 実ストア（DictStore）の create-only CAS は「一方成功・保存値=勝者」を満たす＝通る。
     # 後発を stagger で遅らせるので先行（b"A"）が勝つ＝どちらが優先されたかを内容で識別できる。
-    winner = await assert_put_if_absent_concurrency_safe(DictKeyValueStore(), size=256)
+    winner = await assert_put_if_absent_concurrency_safe(DictStore(), size=256)
     assert winner == b"A" * 256  # 先行 writer が優先された
 
 
@@ -673,7 +670,7 @@ async def test_concurrency_checker_fails_on_collision() -> None:
 
 
 async def test_dict_conditional_put_unit(tmp_path) -> None:
-    store = DictKeyValueStore()
+    store = DictStore()
     info = await store.put("k", b"v1")
     assert (info["filename"], info["size"]) == ("k", 2)  # put の戻りは filename/size
     # create-only: 2 回目は ConflictError
@@ -690,7 +687,7 @@ async def test_dict_conditional_put_unit(tmp_path) -> None:
 
 
 async def test_local_conditional_put_unit(tmp_path) -> None:
-    store = LocalKeyValueStore(tmp_path)
+    store = LocalStore(tmp_path)
     await store.put("k", b"v1")
     with pytest.raises(ConflictError):
         await store.put("k", b"v2", if_match=FileInfo.absent("k"))
@@ -704,7 +701,7 @@ async def test_local_conditional_put_unit(tmp_path) -> None:
 
 async def test_head_or_absent_upsert() -> None:
     # head_or_absent の戻りをそのまま if_match に渡す＝create-or-update を一発で CAS 付きに。
-    store = DictKeyValueStore()
+    store = DictStore()
     # 不在 → is_absent() な FileInfo が返り、create CAS として成功（新規作成）。
     cond = await store.head_or_absent("k")
     assert cond.is_absent()

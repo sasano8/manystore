@@ -1,9 +1,11 @@
-"""local backend — ローカルファイルシステム実装（KVS / FileStore）。
+"""local backend — ローカルファイルシステムの full Store（M071・M079）。
 
 書き込みは temp+rename で原子的（all-or-nothing）。パスは init で絶対パスへ固定（cd 非依存）。
 
-実装の真実は [LocalFileStore] に集約する（filesystem-native なので KVS の名前空間操作も
-ここで担える）。[LocalKeyValueStore] は [KeyValueFromFileStore] を介した薄い KVS ビュー。
+**OS 別実装（M079）**: `fcntl.flock`/`os.link` に依存する [PosixLocalStore]（Linux/macOS）と、未実装
+の [WindowsLocalStore] に分かれ、`LocalStore` が `os.name` でどちらかを指す（旧名 `LocalFileStore`/
+`LocalKeyValueStore` は `LocalStore` の alias）。fcntl は POSIX 専用なので遅延 import
+（Windows 上でも本モジュールの import 自体は壊れない）。
 
 **非ブロッキング（M010）**: ディスク IO（open/read/write/close・rglob/stat・replace/unlink 等）は
 全て同期 syscall なので、`anyio.to_thread.run_sync` でワーカースレッドへオフロードし event loop を
@@ -12,7 +14,6 @@
 """
 
 import contextlib
-import fcntl
 import os
 import tempfile
 from collections.abc import AsyncIterator
@@ -22,8 +23,7 @@ from typing import BinaryIO
 
 import anyio.to_thread
 
-from ...exceptions import ConflictError, NotFoundError, UnsupportedOperation
-from ...protocols import (
+from ...spec import (
     AsyncFileObject,
     FileInfo,
     IfMatch,
@@ -31,6 +31,7 @@ from ...protocols import (
     _atomic_write_bytes,
     _kv_copy,
 )
+from ...spec.exceptions import ConflictError, NotFoundError, UnsupportedOperation
 
 # 同期関数をワーカースレッドへ逃がす（event loop を塞がない）。
 # 位置引数のみ＝kwargs は partial で畳む。
@@ -62,8 +63,11 @@ def _cas_replace(path: Path, value: bytes, if_match: FileInfo) -> None:
 
     Linux には「変化していたら失敗する replace」syscall が無いため、比較と差し替えを排他で括る。
     flock は同一 dir への並行 CAS どうしを直列化する（無条件 put の LWW 経路はロックを取らない＝
-    LWW は元から先勝ち上書きを許す契約なので CAS の健全性を損なわない）。
+    LWW は元から先勝ち上書きを許す契約なので CAS の健全性を損なわない）。fcntl は POSIX 専用なので
+    遅延 import（Windows で本モジュール import 自体を壊さない・M079）。
     """
+    import fcntl  # POSIX 専用（Windows 実装は別途＝WindowsLocalStore）
+
     lock_fd = os.open(path.parent, os.O_RDONLY)
     try:
         fcntl.flock(lock_fd, fcntl.LOCK_EX)
@@ -164,13 +168,16 @@ class _LocalAtomicWriter:
             await self.close()
 
 
-class LocalStore(StreamingStoreBase):
-    """ローカルファイルシステムの **full Store**＝file 寄り（M071）。
+class PosixLocalStore(StreamingStoreBase):
+    """**POSIX（Linux/macOS）版**のローカル full Store＝file 寄り（M071・M079）。
 
     **file 寄り**＝primitive は `open_reader`/`open_writer`（ストリーム）なので [StreamingStoreBase]
     を継承し、put/get/get_or_raise（全体）は基底が IO から導出（値境界でのみバッファ）。IO 2 つ＋
     名前空間操作（iter/list/exists/delete・cp/mv・vacuum）を filesystem-native に実装。full Store。
     書き込みは open_writer の temp+rename で原子的（all-or-nothing）。バイナリ専用。
+
+    **POSIX 専用**＝create-only は `os.link`、update CAS は `fcntl.flock`。Windows は別実装が要る
+    （[WindowsLocalStore]・未実装）。プラットフォームに応じ `LocalStore` がどちらかを指す。
     """
 
     def __init__(self, directory: Path) -> None:
@@ -315,6 +322,47 @@ class LocalStore(StreamingStoreBase):
         return None
 
 
-# 旧名は alias（非推奨・M071）。LocalStore が既に full Store＋vacuum を持つ（KVS ビュー不要）。
+class WindowsLocalStore(StreamingStoreBase):
+    """**Windows 版**のローカル full Store（未実装・M079）。
+
+    POSIX 実装（[PosixLocalStore]）は `fcntl.flock`（CAS 直列化）や `os.link`（create-only）に依存し
+    Windows では使えないため別実装が要る。**現状は未対応**＝生成時に `NotImplementedError`
+    （対応時にここへ `msvcrt.locking` / `ReplaceFile` 等の native 実装を入れる）。
+    """
+
+    def __init__(self, directory: object) -> None:
+        raise NotImplementedError(
+            "Windows local backend is not implemented yet; "
+            "run on POSIX (Linux/macOS) or contribute WindowsLocalStore"
+        )
+
+    # 抽象メソッドの充足だけ（__init__ で raise するので到達しない）。put/get_or_raise は
+    # 基底 [StreamingStoreBase] の合成を継承（再宣言不要）。
+    async def open_reader(self, filename: str) -> AsyncFileObject:
+        raise NotImplementedError
+
+    async def open_writer(self, filename: str) -> AsyncFileObject:
+        raise NotImplementedError
+
+    async def iter_all(self, limit: int | None = None, prefix: str = "") -> AsyncIterator[FileInfo]:
+        raise NotImplementedError
+        yield  # 未到達（async generator 化のため）
+
+    async def exists(self, key: str) -> bool:
+        raise NotImplementedError
+
+    async def delete(self, key: str) -> None:
+        raise NotImplementedError
+
+    async def connect(self) -> None:
+        raise NotImplementedError
+
+    async def aclose(self) -> None:
+        raise NotImplementedError
+
+
+# プラットフォームで実装を選ぶ（M079）。`LocalStore(path)` / backend "local" はこれを指す。
+# 旧名は alias（非推奨・M071）＝LocalStore は full Store＋vacuum（POSIX）を持つ。
+LocalStore = PosixLocalStore if os.name == "posix" else WindowsLocalStore
 LocalFileStore = LocalStore
 LocalKeyValueStore = LocalStore

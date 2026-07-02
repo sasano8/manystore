@@ -5,10 +5,11 @@ manystore の **conformance（挙動契約）を仕様の単一源泉**とし、
 
 ## 全体像（5 ステップ）
 
-1. **契約を読む** — `manystore/protocols.py`（`AsyncBufferedStore` / `AsyncStreamingStore` の Protocol＋既定実装）と
+1. **契約を読む** — `manystore/spec/protocols.py`（`AsyncBufferedStore` / `AsyncStreamingStore` の Protocol＝純粋な契約）と
+   既定実装 `manystore/spec/base.py`（`*StoreBase`）、および
    設計原則の正本 [`docs/architecture.md`](architecture.md)。挙動契約の一覧は
    [Conformance spec](conformance_spec.md)。
-2. **雛形を起こす** — `python -m manystore.tools.conformancer --scaffold MyStore --kind kv|file` が
+2. **雛形を起こす** — `python -m manystore.spec.conformancer --scaffold MyStore --kind kv|file` が
    実装 TODO 付きの skeleton を出力する（契約が実装の TODO リストになる）。
 3. **実装する** — 参照実装 `DictKeyValueStore`（`backends/memory.py`＝in-memory・依存ゼロ）を手本に。
    核（真の実装）は native primitive 側に置く（kv 寄り/file 寄りの見極めは architecture.md）。

@@ -19,7 +19,7 @@ filename/size のみ＝mtime を持たない。更新日時での比較は M013 
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
-from ...protocols import AsyncBufferedStore, FileInfo
+from ...spec import AsyncBufferedStore, FileInfo
 
 # (source 側 info, sink 側 info) を受け取り「更新が必要か」を返す述語。
 Comparator = Callable[[FileInfo, FileInfo], bool]

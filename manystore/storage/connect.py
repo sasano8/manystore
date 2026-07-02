@@ -18,7 +18,7 @@ from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 
-from ..protocols import AsyncBufferedStore
+from ..spec import AsyncBufferedStore
 from .backends import create_unsafe_key_value_store
 
 

@@ -16,7 +16,7 @@ from manystore.crypto import (
     StreamCipher,
     XorStreamCipher,
 )
-from manystore.exceptions import UnsupportedOperation
+from manystore.spec.exceptions import UnsupportedOperation
 
 
 class _MemFile:

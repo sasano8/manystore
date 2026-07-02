@@ -9,11 +9,11 @@ import pytest
 
 from manystore import open_store, parse_store_url
 from manystore.storage.backends import (
-    DictKeyValueStore,
-    HttpKeyValueStore,
-    LocalKeyValueStore,
-    NatsObjectKeyValueStore,
-    S3KeyValueStore,
+    DictStore,
+    HttpStore,
+    LocalStore,
+    NatsStore,
+    S3Store,
 )
 from manystore.storage.surfaces.safe import SafeKeyValueStore
 
@@ -96,16 +96,16 @@ async def test_open_store_local_roundtrip(tmp_path: Path) -> None:
 @pytest.mark.parametrize(
     "url, expected",
     [
-        ("memory://", DictKeyValueStore),
-        ("local://.", LocalKeyValueStore),
-        ("s3://b?endpoint=http://x", S3KeyValueStore),
-        ("nats://b?server=nats://x:4222", NatsObjectKeyValueStore),
-        ("http://h/x", HttpKeyValueStore),
+        ("memory://", DictStore),
+        ("local://.", LocalStore),
+        ("s3://b?endpoint=http://x", S3Store),
+        ("nats://b?server=nats://x:4222", NatsStore),
+        ("http://h/x", HttpStore),
     ],
 )
 def test_url_builds_expected_backend_type(url: str, expected: type) -> None:
     # 接続はせず、URL→backend 型の対応だけを確認（registry 経由・未接続の生型を突き合わせ）。
-    from manystore.storage.backends import create_unsafe_key_value_store
+    from manystore.storage.backends import create_unsafe_store
 
     backend, opts = parse_store_url(url)
-    assert isinstance(create_unsafe_key_value_store(backend, **opts), expected)
+    assert isinstance(create_unsafe_store(backend, **opts), expected)

@@ -23,8 +23,8 @@ Kubo は HTTP API なので **httpx を流用**（http backend と同じ遅延 i
 
 from collections.abc import AsyncIterator
 
-from ...exceptions import UnsupportedOperation
-from ...protocols import AsyncFileObject, BufferedStoreBase, FileInfo, IfMatch, _KvReadFileObject
+from ...spec import AsyncFileObject, BufferedStoreBase, FileInfo, IfMatch, _KvReadFileObject
+from ...spec.exceptions import UnsupportedOperation
 
 # 既定の Kubo HTTP API（ローカルデーモン）と Gateway。
 DEFAULT_API_URL = "http://127.0.0.1:5001"

@@ -18,13 +18,13 @@
 使い方（サードパーティ backend のテスト例）::
 
     import asyncio
-    from manystore import DictFileStore
-    from manystore.tools.conformancer import assert_file_store, FileStoreTester, save_report
+    from manystore import DictStore
+    from manystore.spec.conformancer import assert_file_store, FileStoreTester, save_report
 
     def test_my_file_store():
         target = MyFileStore()
         assert_file_store(target)                              # メソッドが揃っているか
-        tester = FileStoreTester(DictFileStore(), target)     # 正=辞書, 対象=target
+        tester = FileStoreTester(DictStore(), target)     # 正=辞書, 対象=target
         report = []                                            # 呼び出し側がレポートを所有
         asyncio.run(tester.run_light(report))                 # 操作順に結果を追記
         assert all(s["passed"] for s in report)
@@ -42,8 +42,7 @@ from collections.abc import AsyncIterator
 from dataclasses import dataclass, fields
 from pathlib import Path
 
-from ...exceptions import ConflictError, NotFoundError, UnsupportedOperation
-from ...protocols import (
+from .. import (
     DEFAULT_LIST_LIMIT,
     AsyncBufferedStore,
     AsyncFileObject,
@@ -52,6 +51,7 @@ from ...protocols import (
     FileInfo,
     StreamingStoreBase,
 )
+from ..exceptions import ConflictError, NotFoundError, UnsupportedOperation
 
 
 def required_members(protocol: type) -> frozenset[str]:
@@ -206,14 +206,15 @@ def signature_drift(protocol: type, expected: dict[str, str]) -> list[str]:
 _PINNED_STORE_SIGNATURES = {
     "exists": "(self, key: str) -> bool",
     "delete": "(self, key: str) -> None",
-    "open_reader": "(self, filename: str) -> manystore.protocols.AsyncFileObject",
-    "open_writer": "(self, filename: str) -> manystore.protocols.AsyncFileObject",
+    "open_reader": "(self, filename: str) -> manystore.spec.protocols.AsyncFileObject",
+    "open_writer": "(self, filename: str) -> manystore.spec.protocols.AsyncFileObject",
     "iter_all": (
         "(self, limit: int | None = None, prefix: str = '') -> "
-        "collections.abc.AsyncIterable[manystore.protocols.FileInfo]"
+        "collections.abc.AsyncIterable[manystore.spec.protocols.FileInfo]"
     ),
     "list_all": (
-        "(self, limit: int | None = None, prefix: str = '') -> list[manystore.protocols.FileInfo]"
+        "(self, limit: int | None = None, prefix: str = '') -> "
+        "list[manystore.spec.protocols.FileInfo]"
     ),
 }
 _PINNED_FILEOBJECT_SIGNATURES = {
@@ -592,7 +593,7 @@ async def assert_fail_loud_over_transport(store: object, *, key: str = "faultlou
 #
 # 「ストア実装が満たすべき挙動契約」を 1 か所のカタログに宣言し、ここから 4 つの価値を同時に得る:
 #   ① テスト可能（各契約は assert_*／run_* として実行）／② pytest-cov に現れる（網羅の可視化）／
-#   ③ 仕様書として出力（`python -m manystore.tools.conformancer` が conformance_spec.md を生成）／
+#   ③ 仕様書として出力（`python -m manystore.spec.conformancer` が conformance_spec.md を生成）／
 #   ④ 新 backend のスキャフォールド材料（契約一覧＝実装の TODO）。
 # 絶対契約（オラクル非依存）はここに宣言＝`check` で実装する assert 関数名を指す（drift ガード付）。
 # 差分契約（run_light/middle の観点）は **実行から導出**するので、ここには宣言しない（実態が正）。
@@ -704,11 +705,11 @@ async def differential_contract_aspects() -> list[tuple[str, str]]:
     差分契約は「辞書ストアをオラクルに観測一致を見る観点」で、一覧は run_* の実行で確定する。
     宣言を二重持ちしない＝カタログ（仕様書）が実態と乖離しない。spec 文書生成（`__main__`）が呼ぶ。
     """
-    from manystore import DictFileStore  # 遅延 import（manystore __init__ の循環を避ける）
+    from manystore import DictStore  # 遅延 import（manystore __init__ の循環を避ける）
 
     out: list[tuple[str, str]] = []
     for level in ("light", "middle", "heavy"):
-        tester = FileStoreTester(DictFileStore(), DictFileStore())
+        tester = FileStoreTester(DictStore(), DictStore())
         report: list = []
         await getattr(tester, f"run_{level}")(report)
         out.extend((level, step["aspect"]) for step in report)
@@ -744,17 +745,17 @@ def scaffold_backend(class_name: str, *, kind: str = "file") -> str:
 
     abstracts = sorted(base.__abstractmethods__)
     head = [
-        '"""自動生成スキャフォールド（`python -m manystore.tools.conformancer --scaffold`）。',
+        '"""自動生成スキャフォールド（`python -m manystore.spec.conformancer --scaffold`）。',
         "",
         f"{class_name}（{base_name} 派生）の未実装メソッドを埋め conformancer の契約を満たすこと。",
         "満たすべき絶対契約（conformancer の各 assert で機械検証）:",
     ]
     head += [f"  - {c.id}: {c.summary}" for c in ABSOLUTE_CONTRACTS]
     head += [
-        "差分契約は FileStoreTester(DictFileStore(), <store>) の run_light/run_middle で。",
+        "差分契約は FileStoreTester(DictStore(), <store>) の run_light/run_middle で。",
         '"""',
         "",
-        f"from manystore.protocols import {base_name}",
+        f"from manystore.spec import {base_name}",
         "",
         "",
         f"class {class_name}({base_name}):",

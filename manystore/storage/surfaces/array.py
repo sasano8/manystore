@@ -14,8 +14,7 @@ connect）か、顔の入口 [open_async_array_store]（mount 群を connect す
 from collections.abc import AsyncIterator
 from pathlib import Path
 
-from ...exceptions import IntegrityError
-from ...protocols import (
+from ...spec import (
     AsyncBufferedStore,
     BufferedStoreBase,
     FileInfo,
@@ -29,6 +28,7 @@ from ...protocols import (
     _kv_copy,
     _kv_move,
 )
+from ...spec.exceptions import IntegrityError
 from .safe import validate_safe_path
 
 

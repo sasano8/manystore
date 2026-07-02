@@ -1,6 +1,6 @@
 """conformance 結果を docs の spec へ出力する CLI 入口。
 
-`python -m manystore.tools.conformancer [--out-dir docs]` で 3 つの spec を生成する:
+`python -m manystore.spec.conformancer [--out-dir docs]` で 3 つの spec を生成する:
 
 1. `docs/kv_spec.md` / `docs/file_storage_spec.md`＝各 backend が Protocol の**メソッドを満たすか**
    （Implemented / Not）を **メソッド × 実装** の表に（接続不要・決定的）。
@@ -17,7 +17,7 @@ import asyncio
 import tempfile
 from pathlib import Path
 
-from ...protocols import AsyncBufferedStore, AsyncStreamingStore
+from .. import AsyncBufferedStore, AsyncStreamingStore
 from . import (
     ABSOLUTE_CONTRACTS,
     differential_contract_aspects,
@@ -30,20 +30,20 @@ from . import (
 def _kv_instances(tmp_path: str) -> list:
     """KeyValueStore 実装のロスター（接続はしない＝生成だけ）。"""
     from manystore import (
-        DictKeyValueStore,
-        HttpKeyValueStore,
-        LocalKeyValueStore,
-        NatsObjectKeyValueStore,
-        S3KeyValueStore,
+        DictStore,
+        HttpStore,
+        LocalStore,
+        NatsStore,
+        S3Store,
     )
     from manystore.client import RemoteKeyValueStore
 
     return [
-        DictKeyValueStore(),
-        LocalKeyValueStore(tmp_path),
-        S3KeyValueStore(bucket="b"),
-        NatsObjectKeyValueStore(url="nats://x", bucket="b"),
-        HttpKeyValueStore(base_url="http://x"),
+        DictStore(),
+        LocalStore(tmp_path),
+        S3Store(bucket="b"),
+        NatsStore(url="nats://x", bucket="b"),
+        HttpStore(base_url="http://x"),
         RemoteKeyValueStore("http://x", "ctx"),
     ]
 
@@ -51,19 +51,19 @@ def _kv_instances(tmp_path: str) -> list:
 def _file_instances(tmp_path: str) -> list:
     """FileStore 実装のロスター（接続はしない＝生成だけ）。"""
     from manystore import (
-        DictFileStore,
-        HttpFileStore,
-        LocalFileStore,
-        NatsFileStore,
-        S3FileStore,
+        DictStore,
+        HttpStore,
+        LocalStore,
+        NatsStore,
+        S3Store,
     )
 
     return [
-        DictFileStore(),
-        LocalFileStore(tmp_path),
-        S3FileStore(bucket="b"),
-        NatsFileStore(url="nats://x", bucket="b"),
-        HttpFileStore(base_url="http://x"),
+        DictStore(),
+        LocalStore(tmp_path),
+        S3Store(bucket="b"),
+        NatsStore(url="nats://x", bucket="b"),
+        HttpStore(base_url="http://x"),
     ]
 
 
@@ -85,7 +85,7 @@ def _render(protocol: type, title: str, stores: list) -> str:
     """spec ドキュメント 1 ファイル分の本文を生成する。"""
     return (
         f"# {title} — conformance spec\n\n"
-        "> 自動生成: `make conformance-docs`（`python -m manystore.tools.conformancer`）。\n"
+        "> 自動生成: `make conformance-docs`（`python -m manystore.spec.conformancer`）。\n"
         "> 手で編集しない。各実装が Protocol のメソッドを満たすか（メソッド存在チェック）を示す。\n"
         f"> ✅ = Implemented / ❌ = Not（`{protocol.__name__}`）。\n\n"
         f"{_spec_table(protocol, stores)}\n"
@@ -108,7 +108,7 @@ def _render_behavioral(absolute: list, differential: list) -> str:
         "",
         "## 絶対契約（オラクル非依存・全実装が満たす製品必須挙動）",
         "",
-        "`manystore.tools.conformancer` の各 assert 関数で検査する。新 backend は接続済みストアを",
+        "`manystore.spec.conformancer` の各 assert 関数で検査する。新 backend は接続済みストアを",
         "渡してこれらを呼べば、実装漏れが loud に落ちる。",
         "",
         "| 契約ID | 内容 | 実装する検査 |",
@@ -133,12 +133,12 @@ def _render_behavioral(absolute: list, differential: list) -> str:
     out += [
         "## 新しい backend の作り方（scaffold の出発点）",
         "",
-        "0. 雛形生成: `python -m manystore.tools.conformancer --scaffold MyStore --kind kv|file`",
+        "0. 雛形生成: `python -m manystore.spec.conformancer --scaffold MyStore --kind kv|file`",
         "   ＝未実装メソッド（`raise NotImplementedError`）＋満たすべき契約 TODO＋配線手順が出る。",
         "1. `KeyValueStore` / `FileStore` の Protocol メソッドを実装（`kv_spec.md` /",
         "   `file_storage_spec.md` の ✅ を埋める）。`assert_key_value_store` 等で存在チェック。",
         "2. 上記**絶対契約**の assert を接続済みストアに対して呼び、全て緑にする。",
-        "3. `FileStoreTester(DictFileStore(), <your_store>)` の `run_light`/`run_middle`/",
+        "3. `FileStoreTester(DictStore(), <your_store>)` の `run_light`/`run_middle`/",
         "   `run_heavy` を回し差分観点をオラクルに一致させる（run_* は非破壊）。",
         "   `run_full` は差分（light+middle+heavy）＋絶対契約を 1 レポートに集約する一括実行。",
         "",
@@ -147,7 +147,7 @@ def _render_behavioral(absolute: list, differential: list) -> str:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(prog="manystore.tools.conformancer")
+    parser = argparse.ArgumentParser(prog="manystore.spec.conformancer")
     parser.add_argument(
         "--out-dir", default="docs", help="spec 表の出力先ディレクトリ（既定: docs）"
     )

@@ -14,7 +14,7 @@ import contextlib
 from collections.abc import AsyncIterator
 from typing import Protocol
 
-from ...protocols import AsyncBufferedStore
+from ...spec import AsyncBufferedStore
 from .protocol import Event
 
 

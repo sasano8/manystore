@@ -16,8 +16,8 @@ httpx を遅延 import する。
 from collections.abc import AsyncIterator
 from urllib.parse import quote
 
-from ..exceptions import ConflictError, NotFoundError
-from ..protocols import (
+from ..serving.services.protocol import ContextInfo, EntryInfo
+from ..spec import (
     DEFAULT_LIST_LIMIT,
     MAX_HTTP_LIST_FETCH,
     BufferedStoreBase,
@@ -26,7 +26,7 @@ from ..protocols import (
     _kv_copy,
     _kv_move,
 )
-from ..serving.services.protocol import ContextInfo, EntryInfo
+from ..spec.exceptions import ConflictError, NotFoundError
 
 # server 側 routes.py と対の独自メタヘッダ（size/modified_at/sha256）。ETag は標準ヘッダ。
 _SIZE_HEADER = "X-Manystore-Size"

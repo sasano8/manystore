@@ -12,8 +12,11 @@ HTTP には一切依存しない＝この層だけで単体テストできる。
 
 import contextlib
 
-from ...exceptions import ContextNotFound, ReadOnlyContext  # 集約先（後方互換で再エクスポート）
-from ...protocols import DEFAULT_LIST_LIMIT, FileInfo, IfMatch
+from ...spec import DEFAULT_LIST_LIMIT, FileInfo, IfMatch
+from ...spec.exceptions import (
+    ContextNotFound,
+    ReadOnlyContext,
+)  # 集約先（後方互換で再エクスポート）
 from ...storage.backends import create_unsafe_key_value_store
 from ...storage.surfaces.array import ArrayKeyValueStore
 from ...storage.surfaces.safe import SafeKeyValueStore

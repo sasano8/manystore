@@ -8,7 +8,7 @@
 import io
 
 import manystore
-from manystore.exceptions import (
+from manystore.spec.exceptions import (
     PROBLEM_JSON,
     ContextNotFound,
     ManystoreError,

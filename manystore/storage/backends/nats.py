@@ -15,14 +15,14 @@ import asyncio
 import contextlib
 from collections.abc import AsyncIterator
 
-from ...exceptions import ConflictError, NotFoundError
-from ...protocols import (
+from ...spec import (
     BufferedStoreBase,
     FileInfo,
     IfMatch,
     _kv_copy,
     _kv_move,
 )
+from ...spec.exceptions import ConflictError, NotFoundError
 
 # JetStream が「期待した最終 subject シーケンスと不一致」を返すときの err_code（CAS 失敗の判別）。
 _WRONG_LAST_SEQ_ERR = 10071

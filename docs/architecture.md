@@ -1,7 +1,8 @@
 # manystore アーキテクチャと設計原則（正本）
 
-> このファイルが設計原則の **正本**。実行可能な正本は公開 Protocol（`manystore.kv` / `manystore.file`）と
-> 準拠テスト（`manystore.tools.conformancer` / `tests/test_conformance.py`）。
+> このファイルが設計原則の **正本**。実行可能な正本は公開 Protocol（`manystore.spec`）と統合 facade
+> `manystore.store`（M071＝1 つの Store）、準拠テスト（`manystore.spec.conformancer` /
+> `tests/test_conformance.py`）。
 
 ## 2 つのストア抽象と包含関係
 
@@ -55,14 +56,14 @@ Protocol は read-only を静的に表せない。read-only backend（HTTP）は
 
 ## 準拠の確認（conformance）
 
-サードパーティ backend は `manystore.tools.conformancer` で検査できる。2 段階:
+サードパーティ backend は `manystore.spec.conformancer` で検査できる。2 段階:
 
 ### ① メソッド存在チェック
 
 `typing.get_protocol_members` が返す Protocol メンバが callable な属性として在るかを見る。
 
 ```python
-from manystore.tools.conformancer import assert_key_value_store, assert_file_store
+from manystore.spec.conformancer import assert_key_value_store, assert_file_store
 assert_key_value_store(MyKeyValueStore())   # KVS のメソッドが揃うか
 assert_file_store(MyFileStore())            # FileStore（= KVS + IO）が揃うか
 ```
@@ -75,7 +76,7 @@ assert_file_store(MyFileStore())            # FileStore（= KVS + IO）が揃う
 ```python
 import asyncio
 from manystore import DictFileStore
-from manystore.tools.conformancer import FileStoreTester, save_report
+from manystore.spec.conformancer import FileStoreTester, save_report
 
 def test_my_file_store():
     tester = FileStoreTester(DictFileStore(), MyFileStore())   # 正=辞書, 対象

@@ -40,9 +40,9 @@ from manystore.serving.server.app import create_app
 from manystore.serving.server.routes import KV_RAW_PREFIX
 from manystore.serving.services.config import parse_config
 from manystore.serving.services.service import StorageService
-from manystore.storage.backends import LocalStore, create_unsafe_file_store, get_backend_spec
+from manystore.spec.conformancer import InjectedFault
+from manystore.storage.backends import LocalStore, create_unsafe_store, get_backend_spec
 from manystore.storage.connect import connecting
-from manystore.tools.conformancer import InjectedFault
 
 # ── 実 backend の接続情報（`make e2e-up` の dev 既定＝CI compose と一致。env で上書き）。 ──
 NATS_HOST, NATS_PORT = "localhost", 4222
@@ -207,7 +207,7 @@ _FAKE_NON_AUTHORITATIVE = frozenset({"put_if_absent", "put_if_match"})
 async def _open_s3_fake() -> AsyncIterator[object]:
     from fakes import FakeS3
 
-    store = create_unsafe_file_store("s3", s3_bucket="fake")
+    store = create_unsafe_store("s3", s3_bucket="fake")
     fake = FakeS3()  # 1 個を使い回す（毎回新インスタンスだと状態が消える）
     store._session = lambda: fake  # 低層 aiobotocore client を fake に（adapter は本物が走る）
     await store.connect()  # head_bucket（fake は常に存在）
