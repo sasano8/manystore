@@ -5,11 +5,16 @@
 
 ## 現在のフォーカス
 
-**M077 完了（2026-07-02）＝conformance provider を registry 駆動＋profile 宣言に**（M074 のガイドラインを実装面で
-強化＝新 backend は「registry 登録＋`BackendProfile` 1 行」で conformance 自動参加。construct/connect は registry に
-委譲）。**URL/registry/config/conformance 整備が一段落**。次サイクル候補＝**M051（k8s secrets backend＝当初 5 要望の
-最後・doc-first）** ／ M076（nats-fake の JetStream メタ忠実化）／ 大型 doc-first の M071＋M073（公開 IF 統合＝
-`BufferedStore`/`StreamingStore`＋仕様集約・protocols.py 一括再構成）。詳細は progress「残作業」。
+**M071（公開 1 Store 統合）を段階実装中＝Stage 1〜4 完了・次は Stage 5（M073 spec/impl 分離）**（2026-07-02 で区切り）。
+設計は `plans/m071-unify-store-plan.md`（6 段階・各段 alias で非破壊）。完了＝(1)backend 1 クラス `S3Store` 等
+(2)BackendSpec 単一 factory (3)アダプタ非推奨化 (4)公開型 `AsyncStore`＋`manystore.store` facade。**残＝Stage 5
+（`manystore/spec/` 新設で protocols.py の契約/型と conformance 挙動契約カタログを集約・既定実装/検証ハーネスは層を保つ＝
+最大の構造リファクタ・doc-first で分割方針を再確認してから着手）→ Stage 6（docs 更新）**。全 Stage は独立コミット・
+`make check`＋`make test-heavy` 緑済＝いつでも安全に再開可。
+
+次サイクル候補（M071 と別筋）＝**M051（k8s secrets backend＝当初 5 要望の最後）** ／ M076（nats-fake）／
+**M078（横断関心のミドルウェア合成層＝logging/retry/metrics/cache・M014/M015 包含・M071 完了後 doc-first）**。
+詳細は progress「残作業」。
 
 **M070 完了（2026-07-02）＝構成ファイルからストア復元**（`manystore store init`＋`open_store("ctx")` 名前解決・
 local 相対は構成 dir 基準・上方向 discovery・serving と neutral `storage/config.py` を共有）。**URL/registry/config の
