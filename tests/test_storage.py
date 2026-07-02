@@ -10,6 +10,9 @@ import os
 from pathlib import Path
 
 import pytest
+from fakes import FakeNatsObs as _FakeNatsObs
+from fakes import FakeS3 as _FakeS3
+from fakes import patch_nats_obs as _patch_obs
 
 from manystore import (
     DEFAULT_CACHE_DIR,
@@ -342,100 +345,6 @@ async def test_local_kvs_path_fixed_at_init(
 # ── S3 streaming file store（fake S3 client で分割ロジックを検証） ──
 
 
-class _FakeBody:
-    def __init__(self, data: bytes) -> None:
-        self._buf = io.BytesIO(data)
-
-    async def read(self, size: int = -1) -> bytes:
-        return self._buf.read() if size is None or size < 0 else self._buf.read(size)
-
-    def close(self) -> None:
-        self._buf.close()
-
-    async def __aenter__(self) -> _FakeBody:
-        return self
-
-    async def __aexit__(self, *exc: object) -> None:
-        self._buf.close()
-
-
-class _FakeS3:
-    """S3FileStore を駆動する最小のインメモリ fake（async client 兼 context manager）。"""
-
-    class exceptions:  # noqa: N801  aiobotocore の client.exceptions.NoSuchKey 形に合わせる
-        class NoSuchKey(Exception): ...
-
-    def __init__(self) -> None:
-        self.objects: dict[str, bytes] = {}
-        self.meta: dict[str, dict] = {}  # key -> x-amz-meta-*（M013 の sha256 等）
-        self._uploads: dict[str, dict] = {}
-        self._uid = 0
-        self.head_error_code: str | None = None  # set して head_object のエラー Code を差し替える
-
-    async def head_object(self, Bucket: str, Key: str) -> dict:
-        from botocore.exceptions import ClientError
-
-        if self.head_error_code is not None:  # fail-loud 検証用（404 以外のエラー）
-            raise ClientError({"Error": {"Code": self.head_error_code}}, "HeadObject")
-        if Key not in self.objects:
-            raise ClientError({"Error": {"Code": "404"}}, "HeadObject")  # 実 client と同形
-        return {"ContentLength": len(self.objects[Key]), "Metadata": self.meta.get(Key, {})}
-
-    async def __aenter__(self) -> _FakeS3:
-        return self
-
-    async def __aexit__(self, *exc: object) -> bool:
-        return False
-
-    async def create_multipart_upload(self, Bucket: str, Key: str) -> dict:
-        self._uid += 1
-        uid = f"u{self._uid}"
-        self._uploads[uid] = {"key": Key, "parts": {}}
-        return {"UploadId": uid}
-
-    async def upload_part(self, Bucket, Key, PartNumber, UploadId, Body) -> dict:
-        self._uploads[UploadId]["parts"][PartNumber] = bytes(Body)
-        return {"ETag": f'"etag{PartNumber}"'}
-
-    async def complete_multipart_upload(self, Bucket, Key, UploadId, MultipartUpload) -> dict:
-        up = self._uploads.pop(UploadId)
-        order = [p["PartNumber"] for p in MultipartUpload["Parts"]]
-        self.objects[Key] = b"".join(up["parts"][n] for n in order)
-        return {}
-
-    async def put_object(self, Bucket, Key, Body, Metadata=None, **_kw) -> dict:
-        self.objects[Key] = bytes(Body)
-        self.meta[Key] = dict(Metadata or {})  # x-amz-meta-* を保持（head で返す・M013）
-        return {}
-
-    async def get_object(self, Bucket, Key) -> dict:
-        if Key not in self.objects:
-            raise self.exceptions.NoSuchKey  # 欠損は NoSuchKey（実 client と同形）
-        return {"Body": _FakeBody(self.objects[Key])}
-
-    def get_paginator(self, name: str) -> _FakeS3Paginator:
-        assert name == "list_objects_v2"
-        return _FakeS3Paginator(self)
-
-
-class _FakeS3Paginator:
-    """`list_objects_v2` のページャ fake。`Prefix=` をサーバ側で効かせる（実 S3 と同形）。"""
-
-    def __init__(self, fake: _FakeS3) -> None:
-        self._fake = fake
-
-    async def _pages(self, Bucket: str, Prefix: str = ""):
-        contents = [
-            {"Key": k, "Size": len(v)}
-            for k, v in self._fake.objects.items()
-            if k.startswith(Prefix)  # サーバ側 prefix 絞り
-        ]
-        yield {"Contents": contents}
-
-    def paginate(self, Bucket: str, Prefix: str = ""):
-        return self._pages(Bucket, Prefix)
-
-
 async def test_s3_file_store_streams_multipart_write_and_read() -> None:
     fake = _FakeS3()
     store = S3FileStore("bucket", part_size=4)  # 小さなパートで分割を起こす
@@ -491,61 +400,7 @@ async def test_s3_exists_propagates_non_404() -> None:
         await store.exists("k")
 
 
-# ── NATS backend（fake object store。実 nats-py の API 形に合わせる） ──
-
-
-class _FakeObjResult:
-    def __init__(self, data: bytes) -> None:
-        self.data = data
-
-
-class _FakeObjInfo:
-    def __init__(self, name: str, size: int, deleted: bool = False) -> None:
-        self.name = name
-        self.size = size
-        self.deleted = deleted
-
-
-class _FakeNatsObs:
-    """最小の fake object store（nats-py の get/get_info/put/delete/list に合わせる）。"""
-
-    def __init__(self) -> None:
-        self.objects: dict[str, bytes] = {}
-
-    async def put(self, name: str, data, meta=None) -> None:
-        self.objects[name] = bytes(data)
-
-    async def get(self, name: str, writeinto=None, show_deleted=False) -> _FakeObjResult:
-        if name not in self.objects:
-            from nats.js.errors import ObjectNotFoundError
-
-            raise ObjectNotFoundError  # 実 nats-py と同形（欠損）
-        return _FakeObjResult(self.objects[name])
-
-    async def get_info(self, name: str, show_deleted=False) -> _FakeObjInfo:
-        if name not in self.objects:
-            from nats.js.errors import ObjectNotFoundError
-
-            raise ObjectNotFoundError
-        return _FakeObjInfo(name, len(self.objects[name]))
-
-    async def delete(self, name: str) -> None:
-        self.objects.pop(name, None)
-
-    async def list(self, ignore_deletes=False) -> list[_FakeObjInfo]:
-        infos = [_FakeObjInfo(n, len(v)) for n, v in self.objects.items()]
-        if not infos:
-            from nats.js.errors import NotFoundError
-
-            raise NotFoundError  # 実 nats-py は空ストアで NotFoundError を上げる
-        return infos
-
-
-def _patch_obs(store, fake: _FakeNatsObs) -> None:
-    async def fake_get_obs() -> _FakeNatsObs:
-        return fake
-
-    store._get_obs = fake_get_obs
+# ── NATS backend（fake object store は tests/fakes.py・実 nats-py の API 形に合わせる） ──
 
 
 async def test_nats_file_store_buffered_read_write() -> None:

@@ -166,6 +166,30 @@ async def _open_nats() -> AsyncIterator[object]:
         yield KeyValueFileStore(store)
 
 
+# ── fake provider（低層クライアントを in-memory fake に差し替え・非 gated＝docker 無し fast）──
+#
+# adapter は本物が走り、aiobotocore/nats-py だけ fake に。docker 無しで契約を流す（網羅）。
+# **並行/CAS は fake では非権威**（単一プロセス）＝`unsupported` で CAS を xfail（認証は実 backend
+# gated＋決定的 white-box・M074）。詳細は `docs/implementing_a_backend.md`。
+
+#: fake が意味論を再現しない契約（＝fake では非権威＝xfail）。実 backend/決定的テストが認証する。
+_FAKE_NON_AUTHORITATIVE = frozenset({"put_if_absent", "put_if_match"})
+
+
+@asynccontextmanager
+async def _open_s3_fake() -> AsyncIterator[object]:
+    from fakes import FakeS3
+
+    store = create_unsafe_file_store("s3", s3_bucket="fake")
+    fake = FakeS3()  # 1 個を使い回す（毎回新インスタンスだと状態が消える）
+    store._session = lambda: fake  # 低層 aiobotocore client を fake に（adapter は本物が走る）
+    await store.connect()  # head_bucket（fake は常に存在）
+    try:
+        yield store
+    finally:
+        await store.aclose()
+
+
 async def _s3_ensure_bucket(impl: S3Impl, addressing_style: str) -> None:
     from aiobotocore.config import AioConfig
     from aiobotocore.session import get_session
@@ -330,6 +354,10 @@ def all_providers() -> list[Provider]:
         Provider("dict", _open_dict),
         Provider("local", _open_local),
         Provider("remote", _open_remote),
+        # fake＝非 gated（docker 無し fast）。CAS は非権威＝xfail。s3 fake は adapter を忠実に駆動。
+        # nats fake は JetStream メタ subject（seq/head/CAS）再現が要るため未 wire（follow-up・嘘の
+        # 温床を避ける）。
+        Provider("s3-fake", _open_s3_fake, unsupported=_FAKE_NON_AUTHORITATIVE),
         Provider("nats", _open_nats, gated=True, reachable=_nats_up),
     ]
     # S3 は実装ごとに path-style を 1 行ずつ（能力差は unsupported で xfail strict に）。

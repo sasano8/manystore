@@ -29,6 +29,7 @@ nav:
   - はじめに: index.md
   - アーキテクチャ: architecture.md
   - Backend レジストリ / プラグイン: backend_registry.md
+  - Backend 実装ガイド: implementing_a_backend.md
   - 名前 URL でストアを開く: url_scheme.md
   - 構成ファイルからストア復元: store_config.md
   - Conformance spec:
