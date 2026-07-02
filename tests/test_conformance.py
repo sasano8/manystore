@@ -66,7 +66,7 @@ def _kvs_instances(tmp_path):
     ]
 
 
-def _file_store_instances(tmp_path):
+def _store_instances(tmp_path):
     return [
         DictStore(),
         LocalStore(tmp_path),
@@ -76,18 +76,18 @@ def _file_store_instances(tmp_path):
     ]
 
 
-def test_all_key_value_stores_have_required_methods(tmp_path) -> None:
+def test_all_buffered_stores_have_required_methods(tmp_path) -> None:
     for store in _kvs_instances(tmp_path):
         assert_buffered_store(store)  # 欠けていれば AssertionError で backend 名つき
 
 
-def test_all_file_stores_have_required_methods(tmp_path) -> None:
+def test_all_stores_have_required_methods(tmp_path) -> None:
     # full Store は KVS + open_reader/open_writer。全 Store がそれを満たす。
-    for store in _file_store_instances(tmp_path):
+    for store in _store_instances(tmp_path):
         assert_store(store)
 
 
-def test_file_store_requires_io_on_top_of_kvs() -> None:
+def test_store_requires_io_on_top_of_kvs() -> None:
     # 包含関係の確認: full Store のメンバ ⊇ KVS のメンバ ＋ open_reader/open_writer。
     kvs = required_members(AsyncBufferedStore)
     fs = required_members(AsyncStreamingStore)
@@ -98,7 +98,7 @@ def test_file_store_requires_io_on_top_of_kvs() -> None:
 # ── 挙動契約テストツール（辞書ストアをオラクルに run_light・report に追記） ──
 
 
-async def test_run_light_local_file_store_matches_oracle(tmp_path) -> None:
+async def test_run_light_local_store_matches_oracle(tmp_path) -> None:
     # 辞書ストアを正に LocalStore の IO/exists/list_all/iter_all を差分検証。
     tester = StoreTester(DictStore(), LocalStore(tmp_path))
     report: list = []
@@ -165,7 +165,7 @@ async def test_run_light_detects_divergence(tmp_path) -> None:
 # ── run_middle（細かい挙動契約・差分検証）＋ writer all-or-nothing 絶対契約（M065） ──
 
 
-async def test_run_middle_local_file_store_matches_oracle(tmp_path) -> None:
+async def test_run_middle_local_store_matches_oracle(tmp_path) -> None:
     # 辞書ストアを正に LocalStore の delete/冪等/複数キー/read 境界/overwrite 縮小を差分検証。
     tester = StoreTester(DictStore(), LocalStore(tmp_path))
     report: list = []
@@ -186,7 +186,7 @@ async def test_run_middle_dict_self_consistent() -> None:
 # ── run_heavy（規模・境界の挙動契約・差分検証・M065） ──
 
 
-async def test_run_heavy_local_file_store_matches_oracle(tmp_path) -> None:
+async def test_run_heavy_local_store_matches_oracle(tmp_path) -> None:
     # 辞書ストアを正に LocalStore の大容量/分割 read/多キー/連続 overwrite を差分検証。
     tester = StoreTester(DictStore(), LocalStore(tmp_path))
     report: list = []
@@ -540,7 +540,7 @@ def test_kvs_base_matches_protocol() -> None:
     assert_base_protocol_parity(BufferedStoreBase, AsyncBufferedStore)
 
 
-def test_file_store_base_matches_protocol() -> None:
+def test_store_base_matches_protocol() -> None:
     # StreamingStoreBase は AsyncStreamingStore（= KVS + open_reader/open_writer）を網羅＆一致。
     assert base_protocol_parity_errors(StreamingStoreBase, AsyncStreamingStore) == []
     assert_base_protocol_parity(StreamingStoreBase, AsyncStreamingStore)

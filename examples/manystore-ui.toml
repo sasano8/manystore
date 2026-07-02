@@ -6,7 +6,7 @@
 default_context = "work"
 
 # ── context マウント（公開するディレクトリ/ストア） ──
-# 名前 → backend。local は `root`、s3/nats/http は create_key_value_store の引数名で書く。
+# 名前 → backend。local は `root`、s3/nats/http は create_unsafe_store の引数名で書く。
 [contexts.work]
 backend = "local"
 root = ".work"

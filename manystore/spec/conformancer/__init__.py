@@ -21,14 +21,14 @@
     from manystore import DictStore
     from manystore.spec.conformancer import assert_store, StoreTester, save_report
 
-    def test_my_file_store():
-        target = MyFileStore()
+    def test_my_store():
+        target = MyStore()
         assert_store(target)                              # メソッドが揃っているか
         tester = StoreTester(DictStore(), target)     # 正=辞書, 対象=target
         report = []                                            # 呼び出し側がレポートを所有
         asyncio.run(tester.run_light(report))                 # 操作順に結果を追記
         assert all(s["passed"] for s in report)
-        save_report(report, "my_file_store.conformance.json") # 全保存
+        save_report(report, "my_store.conformance.json")     # 全保存
 """
 
 import asyncio

@@ -96,7 +96,7 @@ async def test_local_kvs_iter_and_list(tmp_path: Path) -> None:
     assert [i["filename"] for i in await store.list_all(limit=2)] == ["c", "b"]
 
 
-async def test_local_file_store_open_write_read(tmp_path: Path) -> None:
+async def test_local_store_open_write_read(tmp_path: Path) -> None:
     store = LocalStore(tmp_path)
 
     # 書き込みモードは親ディレクトリを作って open できる。
@@ -183,7 +183,7 @@ async def test_put_returns_common_fileinfo(tmp_path: Path) -> None:
     assert (a["filename"], a["size"]) == ("docs/a.txt", 2)
 
 
-async def test_local_file_store_write_is_atomic_on_error(tmp_path: Path) -> None:
+async def test_local_store_write_is_atomic_on_error(tmp_path: Path) -> None:
     store = LocalStore(tmp_path)
 
     async with await store.open_writer("k") as f:
@@ -224,7 +224,7 @@ async def test_kvs_get_default_and_get_or_raise(tmp_path: Path) -> None:
     assert await store.get_or_raise("k") == b"v"
 
 
-async def test_local_file_store_is_full_kvs(tmp_path: Path) -> None:
+async def test_local_store_is_full_kvs(tmp_path: Path) -> None:
     # Store = 値 API(put/get) + IO API(open_*)。LocalStore は IO を持ちつつ KVS としても完全に働く。
     fs = LocalStore(tmp_path)
 
@@ -286,7 +286,7 @@ def test_windows_local_store_is_unimplemented(tmp_path: Path) -> None:
         WindowsLocalStore(tmp_path)
 
 
-async def test_safe_file_store_validates_filename(tmp_path: Path) -> None:
+async def test_safe_store_validates_filename(tmp_path: Path) -> None:
     safe = SafeStore(LocalStore(tmp_path))
 
     async with await safe.open_writer("ok/a.bin") as f:
@@ -316,7 +316,7 @@ async def test_local_kvs_path_fixed_at_init(
 # ── S3 streaming file store（fake S3 client で分割ロジックを検証） ──
 
 
-async def test_s3_file_store_streams_multipart_write_and_read() -> None:
+async def test_s3_store_streams_multipart_write_and_read() -> None:
     fake = _FakeS3()
     store = S3Store("bucket", part_size=4)  # 小さなパートで分割を起こす
     store._session = lambda: fake  # 接続を fake に差し替え
@@ -340,7 +340,7 @@ async def test_s3_file_store_streams_multipart_write_and_read() -> None:
     assert fake.objects["empty"] == b""
 
 
-async def test_s3_file_store_is_full_kvs() -> None:
+async def test_s3_store_is_full_kvs() -> None:
     # S3Store = S3Store + streaming IO。KVS 面（whole get/put）も持つ完全な Store。
     fake = _FakeS3()
     store = S3Store("bucket")
@@ -374,7 +374,7 @@ async def test_s3_exists_propagates_non_404() -> None:
 # ── NATS backend（fake object store は tests/fakes.py・実 nats-py の API 形に合わせる） ──
 
 
-async def test_nats_file_store_buffered_read_write() -> None:
+async def test_nats_store_buffered_read_write() -> None:
     store = NatsStore("nats://x", "bucket")
     fake = _FakeNatsObs()
     _patch_obs(store, fake)
@@ -397,7 +397,7 @@ async def test_nats_file_store_buffered_read_write() -> None:
         await store.open_reader("missing")
 
 
-async def test_nats_file_store_is_full_kvs() -> None:
+async def test_nats_store_is_full_kvs() -> None:
     # NatsStore = NatsStore + buffer 合成 IO。KVS 面も使える完全な Store。
     store = NatsStore("nats://x", "bucket")
     fake = _FakeNatsObs()
@@ -946,7 +946,7 @@ async def test_http_kvs_get_and_exists() -> None:
     assert await store.exists("missing") is False
 
 
-async def test_http_file_store_is_full_read_only_kvs() -> None:
+async def test_http_store_is_full_read_only_kvs() -> None:
     # HttpStore = HttpStore + read IO。KVS 面（read-only）も持つ完全な Store。
     objects = {"a.txt": b"hello"}
     store = HttpStore(base_url=_HTTP_BASE)
@@ -989,7 +989,7 @@ async def test_http_kvs_is_read_only() -> None:
             pass
 
 
-async def test_http_file_store_read() -> None:
+async def test_http_store_read() -> None:
     objects = {"a.txt": b"hello"}
     fs = HttpStore(base_url=_HTTP_BASE)
     fs._client = lambda: _FakeHttpClient(objects, _HTTP_BASE)

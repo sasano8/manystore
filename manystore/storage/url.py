@@ -2,7 +2,7 @@
 
 `scheme`＝backend 名（[registry]）／`netloc`＝bucket（ストア粒度）／`query`＝backend 固有の接続
 オプション、に写る。文法は `docs/url_scheme.md`。ここは純関数＝ストア構築・接続はしない
-（`open_store` が本結果を顔 `open_async_key_value_store` に渡す）。
+（`open_store` が本結果を顔 `open_async_store` に渡す）。
 
 opts は**既存の flat kwargs 形**（`s3_bucket=` / `s3_endpoint=` …）へ写す＝既存 factory を無改修で
 使う（後方互換。backend ネイティブ opts への整理は別途）。

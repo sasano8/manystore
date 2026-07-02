@@ -5,13 +5,14 @@
 
 ## 特徴
 
-- **2 つのストア抽象**（名前空間で分離: `manystore.kv` / `manystore.file`。トップからも再エクスポート）
-  - `KeyValueStore`（`manystore.kv`）— `put` / `get` / `get_or_raise` / `list_all` / `exists` / `delete` / `cp` / `mv`（バイト列をキーで出し入れ）
-  - `FileStore`（`manystore.file`）— `open_reader` / `open_writer` で `FileObject`（ストリーム・**バイナリ専用**）を取得
+- **1 つの Store**（`AsyncStore`。トップ `manystore` から再エクスポート）＝値 API と IO API を同じ面に持つ:
+  - **値 API** — `put` / `get` / `get_or_raise` / `list_all` / `exists` / `delete` / `cp` / `mv`（バイト列をキーで出し入れ）
+  - **IO API** — `open_reader` / `open_writer` で `FileObject`（ストリーム・**バイナリ専用**）を取得
+  - put/get だけ見たい呼び出し側向けに、狭い view 型 `AsyncBufferedStore`（sync は `SyncStore`）も公開する。
 - **backend を差し替えるだけ** — `Local` / `S3` / `NATS Object Store` / `HTTP`（read-only）。ラッパは 1 枚に留め、下で backend を入れ替える。
-- **async が一次実装**、sync ブリッジ（`AsyncToSyncKeyValueStore`）も提供。
+- **async が一次実装**、sync ブリッジ（`AsyncToSyncStore`）も提供。
 - **接続ライフサイクル** — `connect` / retry / timeout / deadline を `ConnectPolicy` で制御。
-- **安全パス** — `validate_safe_path` / `Safe*` ラッパが traversal などの危険な key/filename を既定で弾く。
+- **安全パス** — `validate_safe_path` / `SafeStore` ラッパが traversal などの危険な key/filename を既定で弾く。
 - **アトミック書き込み** — local は temp+`os.replace`、S3/NATS は元々アトミック（all-or-nothing）。
 
 ## 必要環境
@@ -28,10 +29,10 @@ uv sync
 ```python
 import asyncio
 from pathlib import Path
-from manystore import connect_key_value_store
+from manystore import open_async_store
 
 async def main():
-    async with connect_key_value_store("local", local_dir=Path("./data")) as store:
+    async with open_async_store("local", local_dir=Path("./data")) as store:
         await store.put("greeting.txt", b"hello")
         data = await store.get("greeting.txt")        # b"hello"
         print(await store.exists("greeting.txt"))     # True
@@ -42,8 +43,10 @@ async def main():
 asyncio.run(main())
 ```
 
-`connect_key_value_store(backend, *, verify=True, policy=None, **opts)` は「接続前の状態」を返し、
-`async with` で初めて接続する（`verify=True` なら接続失敗を送出、`False` なら無視して遅延接続に委ねる）。
+`open_async_store(backend, *, verify=True, policy=None, **opts)` はライブラリの**顔**＝**Safe 包装込みの接続 CM**。
+「接続前の状態」を返し、`async with` で初めて接続する（`verify=True` なら接続失敗を送出、`False` なら無視して
+遅延接続に委ねる）。返る `store` は値 API も IO API も持つ 1 つの Store。URL や構成ファイルの context 名から開くなら
+`open_store("s3://bucket?…")` / `open_store("mycontext")`。
 
 ## backend ごとの接続
 
@@ -51,7 +54,7 @@ backend 名と接続オプション（`**opts`）だけが違い、得られる 
 
 ```python
 # S3（minio / SeaweedFS 等の S3 互換も可）
-async with connect_key_value_store(
+async with open_async_store(
     "s3",
     s3_bucket="my-bucket",
     s3_endpoint="http://localhost:8333",
@@ -63,7 +66,7 @@ async with connect_key_value_store(
     ...
 
 # NATS Object Store
-async with connect_key_value_store(
+async with open_async_store(
     "nats",
     nats_url="nats://localhost:4222",
     nats_bucket="manystore_files",
@@ -71,7 +74,7 @@ async with connect_key_value_store(
     ...
 
 # HTTP（read-only。GET/HEAD で取得するだけ。書き込み・一覧は非対応）
-async with connect_key_value_store(
+async with open_async_store(
     "http",
     http_base_url="https://example.com/files",
     http_headers={"Authorization": "Bearer ..."},  # 任意（認証等）
@@ -80,24 +83,24 @@ async with connect_key_value_store(
     exists = await store.exists("a.txt")  # HEAD で存在確認
 ```
 
-> **HTTP backend は read-only**: `get` / `exists` と `FileStore.open_reader(...)` のみ。`put` / `delete` /
+> **HTTP backend は read-only**: `get` / `exists` と `open_reader(...)` のみ。`put` / `delete` /
 > `cp` / `mv` / `list_all` / `iter_all` / `open_writer` は `io.UnsupportedOperation` を投げる。
 
-接続を挟まず Safe 包装した実体だけ欲しいなら `create_safe_key_value_store(backend, **opts)`（未接続）、
-生（**キー検証なし**）の実体を直接作るなら `create_unsafe_key_value_store(backend, **opts)` も使える。
+Safe 包装のみ（接続は自前）で欲しいなら `create_safe_store(backend, **opts)`（未接続）、Safe 無しで接続だけ挟むなら
+`connect_store(backend, **opts)`（生・キー検証なし）、生の実体を直接作るなら `create_unsafe_store(backend, **opts)`。
 
 ## 接続ポリシー（ConnectPolicy）
 
 初回 timeout・リトライ・指数バックオフ・全体 deadline をまとめて制御。プリセット 3 種:
 
 ```python
-from manystore import ConnectPolicy, connect_key_value_store
+from manystore import ConnectPolicy, open_async_store
 
 ConnectPolicy.default()    # 既定。指数バックオフで deadline=60s まで粘る
 ConnectPolicy.fail_fast()  # リトライせず短い timeout で 1 回だけ（到達性を素早く判定）
 ConnectPolicy.forever()    # 依存サービスが起動するまで無期限に粘る
 
-async with connect_key_value_store("nats", nats_url=..., policy=ConnectPolicy.fail_fast()) as store:
+async with open_async_store("nats", nats_url=..., policy=ConnectPolicy.fail_fast()) as store:
     ...
 ```
 
@@ -105,12 +108,13 @@ async with connect_key_value_store("nats", nats_url=..., policy=ConnectPolicy.fa
 
 ## 安全パス（Safe ラッパ）
 
-任意の `KeyValueStore` / `FileStore` を 1 枚で包み、`validate_safe_path` で key/filename を検証してから委譲する。
+任意の Store を 1 枚で包み、`validate_safe_path` で key/filename を検証してから委譲する。`open_async_store` は
+これを内蔵する（生 backend を直接触らせない）。
 
 ```python
-from manystore import SafeKeyValueStore, UnsafePathError
+from manystore import SafeStore, UnsafePathError
 
-safe = SafeKeyValueStore(store)
+safe = SafeStore(store)
 await safe.put("a/b.txt", b"...")     # OK
 await safe.put("../escape", b"...")   # UnsafePathError
 ```
@@ -152,8 +156,8 @@ quick_write = true
 ```
 
 UI 本体は特定用途（interrupt 等）を知らず、config が「重点パス」を pin/quick_write するだけ＝
-**汎用 UI のまま**任意のパスを手早く扱える。protocol（REST/WS）は `KeyValueStore` と 1:1 で対応し、
-`manystore.client.RemoteKeyValueStore` で 1 context をサーバ越しの `KeyValueStore` として扱える。
+**汎用 UI のまま**任意のパスを手早く扱える。protocol（REST/WS）は Store と 1:1 で対応し、
+`manystore.client.RemoteStore` で 1 context をサーバ越しの Store として扱える。
 
 - 構成: `manystore.serving.services`（backend 非依存の中核）/ `manystore.serving.server`（FastAPI）/ `manystore.client`（SDK）。
 - 既定 bind は `127.0.0.1`。外部公開は `--host 0.0.0.0` を明示（フル CRUD を晒すため既定は自ホスト）。
@@ -161,10 +165,10 @@ UI 本体は特定用途（interrupt 等）を知らず、config が「重点パ
 
 ## その他の公開 API
 
-- `AsyncToSyncKeyValueStore` — async ストアを同期 IF（`SyncKeyValueStore`）として被せるゼロ依存ブリッジ。
-- `ArrayKeyValueStore` — 論理名（キー先頭セグメント）で複数 backend を束ねる合成ストア。`DownloadCache` 付き。
-- `KeyValueFileStore` — 任意の KVS を `FileStore` 化する汎用アダプタ。
-- backend クラス直指定: `LocalKeyValueStore` / `S3KeyValueStore` / `NatsObjectKeyValueStore` / `HttpKeyValueStore`（および各 `*FileStore`。`Http*` は read-only）。
+- `AsyncToSyncStore` — async ストアを同期 IF（`SyncStore`）として被せるゼロ依存ブリッジ。
+- `ArrayStore` — 論理名（キー先頭セグメント）で複数 backend を束ねる合成ストア。`DownloadCache` 付き。
+- backend クラス直指定: `LocalStore` / `S3Store` / `NatsStore` / `HttpStore` / `DictStore`（`Http*` は read-only）。
+  いずれも値 API と IO API を持つ 1 つの Store（旧「KeyValueStore / FileStore」の 2 抽象は M071 で 1 Store に統合）。
 
 公開シンボルの一覧は `manystore.__all__` を参照。
 
