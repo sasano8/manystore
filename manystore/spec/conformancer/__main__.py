@@ -30,20 +30,20 @@ from . import (
 def _kv_instances(tmp_path: str) -> list:
     """KeyValueStore 実装のロスター（接続はしない＝生成だけ）。"""
     from manystore import (
-        DictKeyValueStore,
-        HttpKeyValueStore,
-        LocalKeyValueStore,
-        NatsObjectKeyValueStore,
-        S3KeyValueStore,
+        DictStore,
+        HttpStore,
+        LocalStore,
+        NatsStore,
+        S3Store,
     )
     from manystore.client import RemoteKeyValueStore
 
     return [
-        DictKeyValueStore(),
-        LocalKeyValueStore(tmp_path),
-        S3KeyValueStore(bucket="b"),
-        NatsObjectKeyValueStore(url="nats://x", bucket="b"),
-        HttpKeyValueStore(base_url="http://x"),
+        DictStore(),
+        LocalStore(tmp_path),
+        S3Store(bucket="b"),
+        NatsStore(url="nats://x", bucket="b"),
+        HttpStore(base_url="http://x"),
         RemoteKeyValueStore("http://x", "ctx"),
     ]
 
@@ -51,19 +51,19 @@ def _kv_instances(tmp_path: str) -> list:
 def _file_instances(tmp_path: str) -> list:
     """FileStore 実装のロスター（接続はしない＝生成だけ）。"""
     from manystore import (
-        DictFileStore,
-        HttpFileStore,
-        LocalFileStore,
-        NatsFileStore,
-        S3FileStore,
+        DictStore,
+        HttpStore,
+        LocalStore,
+        NatsStore,
+        S3Store,
     )
 
     return [
-        DictFileStore(),
-        LocalFileStore(tmp_path),
-        S3FileStore(bucket="b"),
-        NatsFileStore(url="nats://x", bucket="b"),
-        HttpFileStore(base_url="http://x"),
+        DictStore(),
+        LocalStore(tmp_path),
+        S3Store(bucket="b"),
+        NatsStore(url="nats://x", bucket="b"),
+        HttpStore(base_url="http://x"),
     ]
 
 
@@ -138,7 +138,7 @@ def _render_behavioral(absolute: list, differential: list) -> str:
         "1. `KeyValueStore` / `FileStore` の Protocol メソッドを実装（`kv_spec.md` /",
         "   `file_storage_spec.md` の ✅ を埋める）。`assert_key_value_store` 等で存在チェック。",
         "2. 上記**絶対契約**の assert を接続済みストアに対して呼び、全て緑にする。",
-        "3. `FileStoreTester(DictFileStore(), <your_store>)` の `run_light`/`run_middle`/",
+        "3. `FileStoreTester(DictStore(), <your_store>)` の `run_light`/`run_middle`/",
         "   `run_heavy` を回し差分観点をオラクルに一致させる（run_* は非破壊）。",
         "   `run_full` は差分（light+middle+heavy）＋絶対契約を 1 レポートに集約する一括実行。",
         "",

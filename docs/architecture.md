@@ -1,7 +1,8 @@
 # manystore アーキテクチャと設計原則（正本）
 
-> このファイルが設計原則の **正本**。実行可能な正本は公開 Protocol（`manystore.kv` / `manystore.file`）と
-> 準拠テスト（`manystore.spec.conformancer` / `tests/test_conformance.py`）。
+> このファイルが設計原則の **正本**。実行可能な正本は公開 Protocol（`manystore.spec`）と統合 facade
+> `manystore.store`（M071＝1 つの Store）、準拠テスト（`manystore.spec.conformancer` /
+> `tests/test_conformance.py`）。
 
 ## 2 つのストア抽象と包含関係
 

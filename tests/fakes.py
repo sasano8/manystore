@@ -36,7 +36,7 @@ class FakeBody:
 
 
 class FakeS3:
-    """`S3FileStore`/`S3KeyValueStore` を駆動する最小の in-memory S3 client（async・CM 兼）。"""
+    """`S3Store`/`S3Store` を駆動する最小の in-memory S3 client（async・CM 兼）。"""
 
     class exceptions:  # noqa: N801  aiobotocore の client.exceptions.NoSuchKey 形に合わせる
         class NoSuchKey(Exception): ...

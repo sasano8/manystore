@@ -15,7 +15,7 @@ from manystore.serving.services.service import (
     StorageService,
 )
 from manystore.serving.services.watcher import PollingWatcher
-from manystore.storage.backends import LocalKeyValueStore
+from manystore.storage.backends import LocalStore
 
 
 def _config(tmp_path: Path) -> object:
@@ -120,7 +120,7 @@ async def test_service_readonly_and_unknown_context(tmp_path: Path) -> None:
 
 @pytest.mark.slow  # ポーリング検知を asyncio.sleep で待つ＝待ち支配（R13）
 async def test_polling_watcher_detects_changes(tmp_path: Path) -> None:
-    store = LocalKeyValueStore(tmp_path)
+    store = LocalStore(tmp_path)
     watcher = PollingWatcher(store, "work", interval=0.05)
     await watcher.start()
     gen = watcher.subscribe()

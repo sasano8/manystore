@@ -88,7 +88,7 @@
 1. `KeyValueStore` / `FileStore` の Protocol メソッドを実装（`kv_spec.md` /
    `file_storage_spec.md` の ✅ を埋める）。`assert_key_value_store` 等で存在チェック。
 2. 上記**絶対契約**の assert を接続済みストアに対して呼び、全て緑にする。
-3. `FileStoreTester(DictFileStore(), <your_store>)` の `run_light`/`run_middle`/
+3. `FileStoreTester(DictStore(), <your_store>)` の `run_light`/`run_middle`/
    `run_heavy` を回し差分観点をオラクルに一致させる（run_* は非破壊）。
    `run_full` は差分（light+middle+heavy）＋絶対契約を 1 レポートに集約する一括実行。
 

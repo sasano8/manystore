@@ -18,13 +18,13 @@
 使い方（サードパーティ backend のテスト例）::
 
     import asyncio
-    from manystore import DictFileStore
+    from manystore import DictStore
     from manystore.spec.conformancer import assert_file_store, FileStoreTester, save_report
 
     def test_my_file_store():
         target = MyFileStore()
         assert_file_store(target)                              # メソッドが揃っているか
-        tester = FileStoreTester(DictFileStore(), target)     # 正=辞書, 対象=target
+        tester = FileStoreTester(DictStore(), target)     # 正=辞書, 対象=target
         report = []                                            # 呼び出し側がレポートを所有
         asyncio.run(tester.run_light(report))                 # 操作順に結果を追記
         assert all(s["passed"] for s in report)
@@ -705,11 +705,11 @@ async def differential_contract_aspects() -> list[tuple[str, str]]:
     差分契約は「辞書ストアをオラクルに観測一致を見る観点」で、一覧は run_* の実行で確定する。
     宣言を二重持ちしない＝カタログ（仕様書）が実態と乖離しない。spec 文書生成（`__main__`）が呼ぶ。
     """
-    from manystore import DictFileStore  # 遅延 import（manystore __init__ の循環を避ける）
+    from manystore import DictStore  # 遅延 import（manystore __init__ の循環を避ける）
 
     out: list[tuple[str, str]] = []
     for level in ("light", "middle", "heavy"):
-        tester = FileStoreTester(DictFileStore(), DictFileStore())
+        tester = FileStoreTester(DictStore(), DictStore())
         report: list = []
         await getattr(tester, f"run_{level}")(report)
         out.extend((level, step["aspect"]) for step in report)
@@ -752,7 +752,7 @@ def scaffold_backend(class_name: str, *, kind: str = "file") -> str:
     ]
     head += [f"  - {c.id}: {c.summary}" for c in ABSOLUTE_CONTRACTS]
     head += [
-        "差分契約は FileStoreTester(DictFileStore(), <store>) の run_light/run_middle で。",
+        "差分契約は FileStoreTester(DictStore(), <store>) の run_light/run_middle で。",
         '"""',
         "",
         f"from manystore.spec import {base_name}",
