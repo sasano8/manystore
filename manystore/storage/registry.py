@@ -15,7 +15,7 @@ import warnings
 from collections.abc import Callable
 from dataclasses import dataclass
 
-from ...spec import AsyncStreamingStore
+from ..spec import AsyncStreamingStore
 
 #: plugin 発見に使う entry-point group（EP 名＝backend/scheme 名）。
 ENTRY_POINT_GROUP = "manystore.stores"

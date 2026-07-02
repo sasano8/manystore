@@ -14,6 +14,7 @@ from manystore import (
     list_backends,
     register_backend,
 )
+from manystore.storage import registry as reg
 from manystore.storage.backends import (
     DictKeyValueStore,
     S3KeyValueStore,
@@ -21,7 +22,6 @@ from manystore.storage.backends import (
     create_unsafe_key_value_store,
     create_unsafe_store,
 )
-from manystore.storage.backends import registry as reg
 
 
 @pytest.fixture(autouse=True)

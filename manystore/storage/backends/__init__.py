@@ -7,6 +7,13 @@ httpx / client）は factory 内で遅延 import。
 """
 
 from ...spec import AsyncBufferedStore, AsyncStreamingStore
+from ..registry import (
+    BackendSpec,
+    get_backend_spec,
+    list_backends,
+    register_backend,
+    register_builtin_backend,
+)
 from .http_store import HttpFileStore, HttpKeyValueStore, HttpStore
 from .local import (
     LocalFileObject,
@@ -18,13 +25,6 @@ from .local import (
 )
 from .memory import DictFileStore, DictKeyValueStore, DictStore
 from .nats import NatsFileStore, NatsObjectKeyValueStore, NatsStore
-from .registry import (
-    BackendSpec,
-    get_backend_spec,
-    list_backends,
-    register_backend,
-    register_builtin_backend,
-)
 from .s3 import S3FileStore, S3KeyValueStore, S3Store
 
 __all__ = [
