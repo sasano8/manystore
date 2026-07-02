@@ -7,7 +7,7 @@
 from collections.abc import Mapping
 from contextlib import asynccontextmanager
 
-from ..protocols import (
+from ..spec import (
     AsyncBufferedStore,
     BufferedStoreBase,
     FileInfo,

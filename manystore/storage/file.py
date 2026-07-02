@@ -5,7 +5,7 @@
 トップ `manystore` からも再エクスポートする。
 """
 
-from ..protocols import (
+from ..spec import (
     AsyncBufferedStore,
     AsyncFileObject,
     AsyncStreamingStore,

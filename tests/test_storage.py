@@ -1255,7 +1255,7 @@ async def test_create_safe_factories_wrap_without_connecting(tmp_path: Path) -> 
 
 async def test_create_new_key_then_conflict_on_existing() -> None:
     """create は新規なら put 同様に書け、既存キーへは ConflictError（create-if-not-exists）。"""
-    from manystore.exceptions import ConflictError
+    from manystore.spec.exceptions import ConflictError
 
     store = DictKeyValueStore()
     info = await store.create("a/b", b"hello")
@@ -1348,7 +1348,7 @@ class _LifecycleSpy:
 
 async def test_connect_all_rolls_back_established_on_failure() -> None:
     # M057: N 番目の connect 失敗で、確立済み（1..N-1）を巻き戻してから元の例外を再送出する。
-    from manystore.protocols import _connect_all
+    from manystore.spec import _connect_all
 
     ok1, ok2, boom = _LifecycleSpy(), _LifecycleSpy(), _LifecycleSpy(fail_connect=True)
     with pytest.raises(RuntimeError, match="connect boom"):
@@ -1359,7 +1359,7 @@ async def test_connect_all_rolls_back_established_on_failure() -> None:
 
 async def test_aclose_all_closes_every_store_despite_failure() -> None:
     # M057: 途中の aclose 失敗で残りを閉じ漏らさない（全件試行し最初の例外を送出）。
-    from manystore.protocols import _aclose_all
+    from manystore.spec import _aclose_all
 
     a, bad, c = _LifecycleSpy(), _LifecycleSpy(fail_close=True), _LifecycleSpy()
     with pytest.raises(RuntimeError, match="close boom"):

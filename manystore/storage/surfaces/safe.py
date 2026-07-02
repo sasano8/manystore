@@ -7,8 +7,7 @@
 
 from collections.abc import AsyncIterator
 
-from ...exceptions import UnsafePathError  # 集約先（後方互換: ここからも import できる）
-from ...protocols import (
+from ...spec import (
     AsyncBufferedStore,
     AsyncFileObject,
     AsyncStreamingStore,
@@ -16,6 +15,7 @@ from ...protocols import (
     FileInfo,
     IfMatch,
 )
+from ...spec.exceptions import UnsafePathError  # 集約先（後方互換: ここからも import できる）
 
 __all__ = ["UnsafePathError", "validate_safe_path", "SafeKeyValueStore", "SafeFileStore"]
 

@@ -12,7 +12,7 @@ M071 で kv/file の二本立て（`manystore.kv` / `manystore.file`）を 1 つ
 
 # manystore backend の remote client を store 面から辿れるように再輸出。
 from ..client import RemoteStore  # noqa: E402  （client は storage の外＝末尾で import）
-from ..protocols import AsyncBufferedStore, AsyncStore, FileInfo, IfMatch, SyncStore, Verify
+from ..spec import AsyncBufferedStore, AsyncStore, FileInfo, IfMatch, SyncStore, Verify
 from .backends import (
     BackendSpec,
     DictStore,

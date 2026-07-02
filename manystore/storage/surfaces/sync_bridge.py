@@ -13,7 +13,7 @@
 import asyncio
 from collections.abc import Iterator
 
-from ...protocols import AsyncBufferedStore, FileInfo, IfMatch
+from ...spec import AsyncBufferedStore, FileInfo, IfMatch
 
 
 class AsyncToSyncKeyValueStore:

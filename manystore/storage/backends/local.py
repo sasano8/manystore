@@ -23,8 +23,7 @@ from typing import BinaryIO
 
 import anyio.to_thread
 
-from ...exceptions import ConflictError, NotFoundError, UnsupportedOperation
-from ...protocols import (
+from ...spec import (
     AsyncFileObject,
     FileInfo,
     IfMatch,
@@ -32,6 +31,7 @@ from ...protocols import (
     _atomic_write_bytes,
     _kv_copy,
 )
+from ...spec.exceptions import ConflictError, NotFoundError, UnsupportedOperation
 
 # 同期関数をワーカースレッドへ逃がす（event loop を塞がない）。
 # 位置引数のみ＝kwargs は partial で畳む。

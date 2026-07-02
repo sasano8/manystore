@@ -21,8 +21,8 @@
 
 from typing import Protocol, runtime_checkable
 
-from manystore.exceptions import UnsupportedOperation
-from manystore.protocols import AsyncFileObject
+from manystore.spec import AsyncFileObject
+from manystore.spec.exceptions import UnsupportedOperation
 
 
 @runtime_checkable

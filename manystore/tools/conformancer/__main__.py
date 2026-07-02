@@ -17,7 +17,7 @@ import asyncio
 import tempfile
 from pathlib import Path
 
-from ...protocols import AsyncBufferedStore, AsyncStreamingStore
+from ...spec import AsyncBufferedStore, AsyncStreamingStore
 from . import (
     ABSOLUTE_CONTRACTS,
     differential_contract_aspects,

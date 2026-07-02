@@ -10,15 +10,15 @@
 重い backend（nats / aiobotocore / httpx 等）は各 backend のメソッド内で遅延 import する。
 """
 
-from .exceptions import PROBLEM_JSON as PROBLEM_JSON
-from .exceptions import ContextNotFound as ContextNotFound
-from .exceptions import IntegrityError as IntegrityError
-from .exceptions import ManystoreError as ManystoreError
-from .exceptions import NoSuchUpload as NoSuchUpload
-from .exceptions import NotFoundError as NotFoundError
-from .exceptions import ReadOnlyContext as ReadOnlyContext
-from .exceptions import UnsafePathError as UnsafePathError
-from .exceptions import to_problem as to_problem
+from .spec.exceptions import PROBLEM_JSON as PROBLEM_JSON
+from .spec.exceptions import ContextNotFound as ContextNotFound
+from .spec.exceptions import IntegrityError as IntegrityError
+from .spec.exceptions import ManystoreError as ManystoreError
+from .spec.exceptions import NoSuchUpload as NoSuchUpload
+from .spec.exceptions import NotFoundError as NotFoundError
+from .spec.exceptions import ReadOnlyContext as ReadOnlyContext
+from .spec.exceptions import UnsafePathError as UnsafePathError
+from .spec.exceptions import to_problem as to_problem
 from .storage import file, kv, store
 from .storage.backends import BackendSpec as BackendSpec
 from .storage.backends import get_backend_spec as get_backend_spec

@@ -11,8 +11,8 @@ KVS の get/exists と FileStore の read のみ実装する。httpx はメソ�
 
 from collections.abc import AsyncIterator
 
-from ...exceptions import NotFoundError, UnsupportedOperation
-from ...protocols import AsyncFileObject, BufferedStoreBase, FileInfo, IfMatch
+from ...spec import AsyncFileObject, BufferedStoreBase, FileInfo, IfMatch
+from ...spec.exceptions import NotFoundError, UnsupportedOperation
 
 
 def _read_only(op: str) -> None:

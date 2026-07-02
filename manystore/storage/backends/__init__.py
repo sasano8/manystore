@@ -6,7 +6,7 @@
 httpx / client）は factory 内で遅延 import。
 """
 
-from ...protocols import AsyncBufferedStore, AsyncStreamingStore
+from ...spec import AsyncBufferedStore, AsyncStreamingStore
 from .http_store import HttpFileStore, HttpKeyValueStore, HttpStore
 from .local import (
     LocalFileObject,

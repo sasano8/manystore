@@ -5,12 +5,15 @@
 
 ## 現在のフォーカス
 
-**M071（公開 1 Store 統合）を段階実装中＝Stage 1〜4 完了・次は Stage 5（M073 spec/impl 分離）**（2026-07-02 で区切り）。
+**M071（公開 1 Store 統合）を段階実装中＝Stage 1〜5 完了・次は Stage 6（docs 更新）**（2026-07-02 で区切り）。
 設計は `plans/m071-unify-store-plan.md`（6 段階・各段 alias で非破壊）。完了＝(1)backend 1 クラス `S3Store` 等
-(2)BackendSpec 単一 factory (3)アダプタ非推奨化 (4)公開型 `AsyncStore`＋`manystore.store` facade。**残＝Stage 5
-（`manystore/spec/` 新設で protocols.py の契約/型と conformance 挙動契約カタログを集約・既定実装/検証ハーネスは層を保つ＝
-最大の構造リファクタ・doc-first で分割方針を再確認してから着手）→ Stage 6（docs 更新）**。全 Stage は独立コミット・
-`make check`＋`make test-heavy` 緑済＝いつでも安全に再開可。
+(2)BackendSpec 単一 factory (3)アダプタ非推奨化 (4)公開型 `AsyncStore`＋`manystore.store` facade
+(5)**M073 spec/impl 分離＝`manystore/spec/`（`protocols`=純粋な契約/型・`base`=既定実装＝`*StoreBase`/アダプタ/IO/`_kv_*`/
+`_sha256_hex`・`exceptions`）へ集約、旧 top-level `protocols.py`/`exceptions.py` 削除、全 importer を `from ...spec import`
+へ追随、後方互換 shim なし全面移行**（make check 緑 271）。**残＝Stage 6（docs 更新＝architecture/backend_registry/
+implementing_a_backend を「spec が単一源泉・実装は base・1-Store」へ）＋ M073(B残)＝conformance 挙動契約カタログを
+`spec/contracts_catalog.py` へ移送（検証ハーネスは conformancer に残す）**。Stage 1〜5 は独立コミット・`make check` 緑済＝
+いつでも安全に再開可。
 
 次サイクル候補（M071 と別筋）＝**M051（k8s secrets backend＝当初 5 要望の最後）** ／ M076（nats-fake）／
 **M078（横断関心のミドルウェア合成層＝logging/retry/metrics/cache・M014/M015 包含・M071 完了後 doc-first）**。

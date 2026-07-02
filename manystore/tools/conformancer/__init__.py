@@ -42,8 +42,7 @@ from collections.abc import AsyncIterator
 from dataclasses import dataclass, fields
 from pathlib import Path
 
-from ...exceptions import ConflictError, NotFoundError, UnsupportedOperation
-from ...protocols import (
+from ...spec import (
     DEFAULT_LIST_LIMIT,
     AsyncBufferedStore,
     AsyncFileObject,
@@ -52,6 +51,7 @@ from ...protocols import (
     FileInfo,
     StreamingStoreBase,
 )
+from ...spec.exceptions import ConflictError, NotFoundError, UnsupportedOperation
 
 
 def required_members(protocol: type) -> frozenset[str]:
@@ -206,14 +206,15 @@ def signature_drift(protocol: type, expected: dict[str, str]) -> list[str]:
 _PINNED_STORE_SIGNATURES = {
     "exists": "(self, key: str) -> bool",
     "delete": "(self, key: str) -> None",
-    "open_reader": "(self, filename: str) -> manystore.protocols.AsyncFileObject",
-    "open_writer": "(self, filename: str) -> manystore.protocols.AsyncFileObject",
+    "open_reader": "(self, filename: str) -> manystore.spec.protocols.AsyncFileObject",
+    "open_writer": "(self, filename: str) -> manystore.spec.protocols.AsyncFileObject",
     "iter_all": (
         "(self, limit: int | None = None, prefix: str = '') -> "
-        "collections.abc.AsyncIterable[manystore.protocols.FileInfo]"
+        "collections.abc.AsyncIterable[manystore.spec.protocols.FileInfo]"
     ),
     "list_all": (
-        "(self, limit: int | None = None, prefix: str = '') -> list[manystore.protocols.FileInfo]"
+        "(self, limit: int | None = None, prefix: str = '') -> "
+        "list[manystore.spec.protocols.FileInfo]"
     ),
 }
 _PINNED_FILEOBJECT_SIGNATURES = {
@@ -754,7 +755,7 @@ def scaffold_backend(class_name: str, *, kind: str = "file") -> str:
         "差分契約は FileStoreTester(DictFileStore(), <store>) の run_light/run_middle で。",
         '"""',
         "",
-        f"from manystore.protocols import {base_name}",
+        f"from manystore.spec import {base_name}",
         "",
         "",
         f"class {class_name}({base_name}):",

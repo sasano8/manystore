@@ -25,8 +25,8 @@ from manystore import (
     SafeKeyValueStore,
 )
 from manystore.client import RemoteKeyValueStore
-from manystore.exceptions import ConflictError, NotFoundError
-from manystore.protocols import BufferedStoreBase, FileInfo, StreamingStoreBase
+from manystore.spec import BufferedStoreBase, FileInfo, StreamingStoreBase
+from manystore.spec.exceptions import ConflictError, NotFoundError
 from manystore.storage.file import AsyncStreamingStore
 from manystore.storage.kv import AsyncBufferedStore
 from manystore.tools.conformancer import (
@@ -591,7 +591,7 @@ def test_concrete_store_signatures_tolerate_return_narrowing() -> None:
 
     from collections.abc import AsyncIterable, AsyncIterator
 
-    from manystore.protocols import FileInfo
+    from manystore.spec import FileInfo
 
     class _NarrowedReturn(
         BufferedStoreBase
