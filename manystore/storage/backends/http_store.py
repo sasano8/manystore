@@ -105,8 +105,3 @@ class HttpStore(_HttpBase, BufferedStoreBase):
         # read-only＝open 時点で fail-fast（基底合成だと close の put まで遅延するので override）。
         _read_only("open_writer")
         # open_reader は基底 [BufferedStoreBase] の buffer 合成（whole GET）をそのまま使う。
-
-
-# 旧名は alias（非推奨・M071）。
-HttpKeyValueStore = HttpStore
-HttpFileStore = HttpStore

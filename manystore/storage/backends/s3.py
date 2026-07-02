@@ -323,8 +323,3 @@ class _S3MultipartWriter:
             await self._abort()  # 例外時は multipart を破棄（確定しない）
         else:
             await self.close()
-
-
-# 旧名は alias（非推奨・M071）＝1 backend=1 Store（S3 は両軸 native）。
-S3KeyValueStore = S3Store
-S3FileStore = S3Store

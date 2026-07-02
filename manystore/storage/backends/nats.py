@@ -316,8 +316,3 @@ class NatsStore(_NatsBase, BufferedStoreBase):
 
 
 # ── FileStore（= KVS ＋ buffer 合成 IO） ──
-
-
-# 旧名は alias（非推奨・M071）。NatsFileStore の明示 open_* は基底合成と同一で冗長。
-NatsObjectKeyValueStore = NatsStore
-NatsFileStore = NatsStore

@@ -36,7 +36,7 @@ def _kv_instances(tmp_path: str) -> list:
         NatsStore,
         S3Store,
     )
-    from manystore.client import RemoteKeyValueStore
+    from manystore.client import RemoteStore
 
     return [
         DictStore(),
@@ -44,7 +44,7 @@ def _kv_instances(tmp_path: str) -> list:
         S3Store(bucket="b"),
         NatsStore(url="nats://x", bucket="b"),
         HttpStore(base_url="http://x"),
-        RemoteKeyValueStore("http://x", "ctx"),
+        RemoteStore("http://x", "ctx"),
     ]
 
 

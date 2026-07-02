@@ -17,7 +17,7 @@ from manystore import (
     NatsStore,
     S3Store,
 )
-from manystore.client import RemoteKeyValueStore
+from manystore.client import RemoteStore
 from manystore.spec import (
     AsyncBufferedStore,
     AsyncStreamingStore,
@@ -55,7 +55,7 @@ from manystore.storage.surfaces.safe import SafeStore
 
 
 def _kvs_instances(tmp_path):
-    # 接続はしない（メソッド存在チェックは生成だけで十分）。サーバ越しの RemoteKeyValueStore も
+    # 接続はしない（メソッド存在チェックは生成だけで十分）。サーバ越しの RemoteStore も
     # 「関係するストア」として roster に含める（get_or_raise 未実装などの取りこぼしを検知する）。
     return [
         DictStore(),
@@ -63,7 +63,7 @@ def _kvs_instances(tmp_path):
         S3Store(bucket="b"),
         NatsStore(url="nats://x", bucket="b"),
         HttpStore(base_url="http://x"),
-        RemoteKeyValueStore("http://x", "ctx"),
+        RemoteStore("http://x", "ctx"),
     ]
 
 

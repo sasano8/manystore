@@ -137,7 +137,7 @@ def concrete_store_signature_errors(impl: type, protocol: type) -> list[str]:
     `AsyncIterable`（Protocol）でなく部分型 `AsyncIterator` で返す（LSP 的に安全な共変 narrowing）。
     よって concrete store の署名検証は メンバ存在＋パラメータ部（名前・既定値・並び・種別）を見、
     戻り注釈の narrowing は許容する。引数 drift（`if_match` 欠落など caller を壊す実害）は loud に
-    捕える。`RemoteKeyValueStore`↔`AsyncBufferedStore` 等、HTTP 越し含む concrete store 用。
+    捕える。`RemoteStore`↔`AsyncBufferedStore` 等、HTTP 越し含む concrete store 用。
     違反メッセージ list（空＝OK）。
     """
     errors: list[str] = []
@@ -581,7 +581,7 @@ async def assert_fail_loud_over_transport(store: object, *, key: str = "faultlou
     """**既に「壊れた下層」に繋がった** store が fail-loud 感応 op で握り潰さず loud に失敗するか。
 
     [assert_fail_loud_propagation] の transport 版＝HTTP 越し（500 を返す transport の
-    `RemoteKeyValueStore`）や leaf backend（障害を返す transport を仕込んだ実 backend）に当てる。
+    `RemoteStore`）や leaf backend（障害を返す transport を仕込んだ実 backend）に当てる。
     障害の型は HTTP で変わる（`InjectedFault`→`HTTPStatusError`）ので**型は問わず**、raise したか・
     NotFound/正常終了に化けてないかだけ見る。store は常に障害を返す前提（probe ごと作り直さない）。
     """

@@ -170,7 +170,7 @@ class StreamingStoreBase(_StoreBase):
 
     KVS 面（get_or_raise/put）は **IO から導出**する＝get_or_raise は open_reader で全体読み、put は
     open_writer で全体書き（**値境界でのみバッファ**。ストリーム性能は open_reader/open_writer を
-    直接使えば得られる）。`LocalFileStore` 等「真実が IO 側」の backend が継ぐ。
+    直接使えば得られる）。`LocalStore` 等「真実が IO 側」の backend が継ぐ。
     iter_all/exists/delete/connect/aclose は依然 [_StoreBase] の abstract（backend が実装）。
 
     対して **kv 寄り** backend は [BufferedStoreBase] を継承し IO は whole の上に buffer 合成する。
@@ -381,7 +381,7 @@ class KeyValueFileStore(BufferedStoreBase):
 
     KVS は FileStore から open_reader/open_writer を除いた部分集合なので、KVS→FileStore は
     その 2 つを合成すれば済む（put/get/get_or_raise・iter_all/list_all/exists/delete/cp/mv・
-    connect/aclose は下層 KVS へそのまま委譲＝流用）。例 `KeyValueFileStore(S3KeyValueStore(...))`＝
+    connect/aclose は下層 KVS へそのまま委譲＝流用）。例 `KeyValueFileStore(S3Store(...))`＝
     S3 を FileStore 化。合成する IO は真のストリーミングではなく、read=全体取得・write=close で
     全体 put（メモリにバッファ）。backend 固有のストリーミング実装は [backends] の各 FileStore を
     参照。
@@ -444,7 +444,7 @@ class KeyValueFromFileStore(BufferedStoreBase):
     get_or_raise を捕捉して与える。
 
     用途: ローカルのように「真実の実装が FileStore 側」にある backend で、open_reader/open_writer を
-    隠した KVS ビューを得る（`LocalKeyValueStore = KeyValueFromFileStore(LocalFileStore)`）。
+    隠した KVS ビューを得る（`LocalStore = KeyValueFromFileStore(LocalStore)`）。
     """
 
     def __init__(self, store: AsyncStreamingStore) -> None:

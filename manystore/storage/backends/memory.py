@@ -110,8 +110,3 @@ class DictStore(BufferedStoreBase):
 
     async def aclose(self) -> None:
         return None
-
-
-# 旧名は alias（非推奨・M071）。DictFileStore の明示 open_* は基底合成と同一で冗長。
-DictKeyValueStore = DictStore
-DictFileStore = DictStore

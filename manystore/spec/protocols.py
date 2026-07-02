@@ -18,7 +18,7 @@ from typing import Protocol
 DEFAULT_LIST_LIMIT = 1000
 
 #: HTTP 越し list の実上限。native REST は「無制限（limit=None）」を表現できないため、None 指定や
-#: prefix 絞り込み時はこの件数を取得してからクライアント側で絞る（[RemoteKeyValueStore]）。
+#: prefix 絞り込み時はこの件数を取得してからクライアント側で絞る（[RemoteStore]）。
 MAX_HTTP_LIST_FETCH = 10_000
 
 

@@ -3,7 +3,7 @@
 汎用 HTTP backend（`backends/http_store.py` の単純な GET クライアント）とは別物で、
 **manystore API 前提**のクライアント:
 - [ManystoreClient] … manystore.server の API を呼ぶ薄い SDK（list/get/put/delete）。
-- [RemoteKeyValueStore] … 1 bucket を [KeyValueStore] 準拠で被せ、サーバ越しに
+- [RemoteStore] … 1 bucket を [KeyValueStore] 準拠で被せ、サーバ越しに
   put/get/list/exists/delete/cp/mv を行う（read-only `http_store` の RW 版に相当）。
 
 addressing は `{bucket}/{path}`（M025改）。`base_url` は native NS のルートを指す
@@ -204,10 +204,6 @@ class RemoteStore(BufferedStoreBase):
 
     async def aclose(self) -> None:
         await self._client.aclose()
-
-
-# 旧名は alias（非推奨・M071）。
-RemoteKeyValueStore = RemoteStore
 
 
 # TODO(M042): transport 層の整理（Safepath Client / RemoteStore の所属の切り分け）

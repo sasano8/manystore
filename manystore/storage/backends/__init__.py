@@ -14,18 +14,16 @@ from ..registry import (
     register_backend,
     register_builtin_backend,
 )
-from .http_store import HttpFileStore, HttpKeyValueStore, HttpStore
+from .http_store import HttpStore
 from .local import (
     LocalFileObject,
-    LocalFileStore,
-    LocalKeyValueStore,
     LocalStore,
     PosixLocalStore,
     WindowsLocalStore,
 )
-from .memory import DictFileStore, DictKeyValueStore, DictStore
-from .nats import NatsFileStore, NatsObjectKeyValueStore, NatsStore
-from .s3 import S3FileStore, S3KeyValueStore, S3Store
+from .memory import DictStore
+from .nats import NatsStore
+from .s3 import S3Store
 
 __all__ = [
     # 1 backend = 1 Store（M071・full Store）
@@ -37,17 +35,6 @@ __all__ = [
     "NatsStore",
     "HttpStore",
     "LocalFileObject",
-    # 旧名 alias（非推奨・M071）
-    "DictKeyValueStore",
-    "DictFileStore",
-    "LocalKeyValueStore",
-    "LocalFileStore",
-    "S3KeyValueStore",
-    "S3FileStore",
-    "NatsObjectKeyValueStore",
-    "NatsFileStore",
-    "HttpKeyValueStore",
-    "HttpFileStore",
     "BackendSpec",
     "register_backend",
     "get_backend_spec",
