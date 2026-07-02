@@ -44,18 +44,29 @@ manystore の **conformance（挙動契約）を仕様の単一源泉**とし、
 - fake の作り方は `tests/fakes.py`（低層トランスポート模型）。差し替えは backend の接続点だけ
   （S3=`_session`／NATS=`_get_obs`）で、adapter コード自体は本物を走らせる。
 
-## conformance matrix に足す
+## conformance matrix に足す（registry 駆動・profile 宣言）
 
-`tests/conformance_providers.py` の `all_providers()` に 1 行:
+**構築は registry に委ねる**ので、テスト側に construct を書かない。`tests/conformance_providers.py` の
+`_gated_profiles()` に **`BackendProfile` を 1 つ**足すだけ（M077）:
 
 ```python
-Provider("mybackend", _open_mybackend, gated=True, reachable=_mybackend_up,
-         unsupported=frozenset({...}))  # 保証しない契約キーは unsupported＝xfail 明示
+BackendProfile(
+    "mybackend", "mybackend",          # id, registry 名
+    opts={"...": "..."},               # 接続 opts（registry factory へ渡る flat kwargs）
+    gated=True, reachable=_mybackend_up,
+    unsupported=frozenset({...}),      # 保証しない契約キー＝xfail 明示
+    setup=_mybackend_setup,            # 任意: 接続前の準備（例 s3 の bucket 作成）
+)
 ```
 
-- `gated=True` … 実 backend（未到達なら skip・`slow`）。docker 無しで回したいなら **fake provider**
-  （`_open_*_fake`・非 gated）を併せて足す（低層 client を fake に差し替え）。
-- `unsupported` … その実装が保証しない契約キー（能力差・fake の非権威）を宣言＝暗黙 skip でなく
-  **明示の xfail 行**として表に出す（例: SeaweedFS の CAS 非対応、fake の並行/CAS）。
+`_profile_opener` が **registry（`get_backend_spec`）で store を構築 → connect → cleanup** を一元化する
+（`_build_filestore` が `file_factory`／KVS を wrap）。ベタな construct/connect は書かない。
 
-これで新 backend は「契約一覧＝実装の TODO」を潰し、matrix が緑になれば横断的に準拠が保証される。
+- `gated=True` … 実 backend（未到達なら skip・`slow`）。docker 無しで回したいなら **fake provider**
+  （低層 client を fake に差し替え・非 gated）を併せて足す。
+- `unsupported` … 保証しない契約キー（能力差・fake の非権威）を宣言＝暗黙 skip でなく**明示の xfail 行**。
+- **per-open リソースが要る**もの（tmp dir・in-process サーバ・fault 注入）だけ custom opener を書く
+  （registry はテスト環境の結線を知らない＝そこだけ手当て）。
+
+これで新 backend は「**registry 登録（M068）＋ profile 1 行**」で matrix に参加し、契約一覧
+（＝実装の TODO）を潰して緑にすれば横断的に準拠が保証される。

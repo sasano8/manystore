@@ -28,7 +28,7 @@ import contextlib
 import os
 import socket
 import tempfile
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -37,7 +37,6 @@ import httpx
 
 from manystore import (
     ConnectPolicy,
-    DictFileStore,
     KeyValueFileStore,
     LocalFileStore,
     connect_key_value_store,
@@ -47,7 +46,7 @@ from manystore.serving.server.app import create_app
 from manystore.serving.server.routes import KV_RAW_PREFIX
 from manystore.serving.services.config import parse_config
 from manystore.serving.services.service import StorageService
-from manystore.storage.backends import create_unsafe_file_store
+from manystore.storage.backends import create_unsafe_file_store, get_backend_spec
 from manystore.storage.connect import connecting
 from manystore.tools.conformancer import InjectedFault
 
@@ -126,12 +125,60 @@ def backend_reachability() -> list[tuple[str, bool]]:
     return [("nats", _nats_up()), *[(impl.id, _impl_up(impl)()) for impl in S3_IMPLS]]
 
 
-# ── provider（接続済み FileStore を yield する async CM）の宣言 ──
+# ── registry 駆動の汎用 provider（M077）──
+#
+# store の**構築は registry**（`BackendSpec.kv_factory`/`file_factory`＝M068）に委ね、テスト側で
+# construct を再実装しない。各 backend は `BackendProfile`（接続 opts・reachability・gated 等）の
+# **宣言 1 つ**にでき、`_profile_opener` が construct→connect→cleanup を一元化（ベタ実装削減）。
+# per-open リソース（local tmp dir・remote の in-process サーバ・fault 注入）は下の custom opener を
+# 残す（registry はテスト環境の結線を知らない＝そこだけ手当て）。
 
 
-@asynccontextmanager
-async def _open_dict() -> AsyncIterator[object]:
-    yield DictFileStore()
+def _build_filestore(backend: str, opts: dict, *, native: bool) -> object:
+    """registry から（未接続の）FileStore を作る。native=native FileStore／既定=KVS を wrap。"""
+    spec = get_backend_spec(backend)
+    if native:
+        if spec.file_factory is None:
+            raise ValueError(f"backend {backend!r} は native FileStore 非対応")
+        return spec.file_factory(**opts)
+    return KeyValueFileStore(spec.kv_factory(**opts))  # KVS-native は wrap（既存 provider と同形）
+
+
+@dataclass(frozen=True)
+class BackendProfile:
+    """「この backend をここでどう試すか」の宣言。構築は registry・結線だけここに書く（M077）。"""
+
+    id: str
+    backend: str  # registry 名
+    opts: dict = field(default_factory=dict)
+    native: bool = False  # True=native FileStore を直接／False=KVS を KeyValueFileStore で wrap
+    gated: bool = False
+    reachable: Callable[[], bool] = lambda: True
+    unsupported: frozenset[str] = frozenset()
+    setup: Callable[[], Awaitable[None]] | None = None  # 実行前の準備（s3 bucket 作成 等）
+
+
+def _profile_opener(p: BackendProfile) -> Callable[[], object]:
+    @asynccontextmanager
+    async def opener() -> AsyncIterator[object]:
+        if p.setup is not None:
+            await p.setup()  # 実 backend の準備（bucket 作成 等）＝結線の一部
+        async with connecting(
+            lambda: _build_filestore(p.backend, p.opts, native=p.native),
+            policy=ConnectPolicy.fail_fast(),
+        ) as store:
+            yield store
+
+    return opener
+
+
+def _profile_provider(p: BackendProfile) -> Provider:
+    return Provider(
+        p.id, _profile_opener(p), gated=p.gated, reachable=p.reachable, unsupported=p.unsupported
+    )
+
+
+# ── custom opener（per-open リソース／特殊構築が要るもの＝registry だけでは作れない）──
 
 
 @asynccontextmanager
@@ -156,14 +203,6 @@ async def _open_remote() -> AsyncIterator[object]:
         finally:
             await remote.aclose()
             await service.aclose()
-
-
-@asynccontextmanager
-async def _open_nats() -> AsyncIterator[object]:
-    async with connect_key_value_store(
-        "nats", nats_url=NATS_URL, nats_bucket="manystore_e2e", policy=ConnectPolicy.fail_fast()
-    ) as store:
-        yield KeyValueFileStore(store)
 
 
 # ── fake provider（低層クライアントを in-memory fake に差し替え・非 gated＝docker 無し fast）──
@@ -207,49 +246,24 @@ async def _s3_ensure_bucket(impl: S3Impl, addressing_style: str) -> None:
             await client.create_bucket(Bucket=S3_BUCKET)
 
 
-def _open_s3(impl: S3Impl, addressing_style: str) -> Callable[[], object]:
-    @asynccontextmanager
-    async def opener() -> AsyncIterator[object]:
+def _s3_opts(impl: S3Impl, addressing_style: str) -> dict:
+    """S3 の接続 opts（registry factory 用の flat kwargs）。profile に載せる。"""
+    return {
+        "s3_bucket": S3_BUCKET,
+        "s3_endpoint": impl.endpoint,
+        "s3_access_key": impl.access,
+        "s3_secret_key": impl.secret,
+        "s3_addressing_style": addressing_style,
+    }
+
+
+def _s3_setup(impl: S3Impl, addressing_style: str) -> Callable[[], Awaitable[None]]:
+    """profile の `setup`＝接続前に bucket を用意する（テスト環境の結線＝registry は知らない）。"""
+
+    async def setup() -> None:
         await _s3_ensure_bucket(impl, addressing_style)
-        async with connect_key_value_store(
-            "s3",
-            s3_bucket=S3_BUCKET,
-            s3_endpoint=impl.endpoint,
-            s3_access_key=impl.access,
-            s3_secret_key=impl.secret,
-            s3_addressing_style=addressing_style,
-            policy=ConnectPolicy.fail_fast(),
-        ) as store:
-            yield KeyValueFileStore(store)
 
-    return opener
-
-
-def _open_s3_native_file(impl: S3Impl, addressing_style: str) -> Callable[[], object]:
-    """**native FileStore**（`S3FileStore`）を直接 yield する（M066③）。
-
-    既定の `_open_s3` は KVS を `KeyValueFileStore` で包む＝open_writer/open_reader が **バッファ
-    writer 経由**になり S3 の native streaming IO（multipart writer / range reader）を検査できない。
-    こちらは `create_unsafe_file_store` の native FileStore をそのまま接続して渡す。
-    """
-
-    @asynccontextmanager
-    async def opener() -> AsyncIterator[object]:
-        await _s3_ensure_bucket(impl, addressing_style)
-        async with connecting(
-            lambda: create_unsafe_file_store(
-                "s3",
-                s3_bucket=S3_BUCKET,
-                s3_endpoint=impl.endpoint,
-                s3_access_key=impl.access,
-                s3_secret_key=impl.secret,
-                s3_addressing_style=addressing_style,
-            ),
-            policy=ConnectPolicy.fail_fast(),
-        ) as fs:
-            yield fs  # native S3FileStore（multipart writer / streaming range reader）
-
-    return opener
+    return setup
 
 
 # ── leaf backend の「障害を返す transport」（fail-loud 契約を実 backend へ・M065 step5 / M066②） ──
@@ -348,41 +362,64 @@ class Provider:
     unsupported: frozenset[str] = frozenset()  # 満たさない契約キー（matrix が xfail strict）
 
 
-def all_providers() -> list[Provider]:
-    """全 provider の宣言（ここ 1 か所に backend を集約）。"""
-    providers = [
-        Provider("dict", _open_dict),
-        Provider("local", _open_local),
-        Provider("remote", _open_remote),
-        # fake＝非 gated（docker 無し fast）。CAS は非権威＝xfail。s3 fake は adapter を忠実に駆動。
-        # nats fake は JetStream メタ subject（seq/head/CAS）再現が要るため未 wire（follow-up・嘘の
-        # 温床を避ける）。
-        Provider("s3-fake", _open_s3_fake, unsupported=_FAKE_NON_AUTHORITATIVE),
-        Provider("nats", _open_nats, gated=True, reachable=_nats_up),
+def _gated_profiles() -> list[BackendProfile]:
+    """registry 駆動で構築できる gated backend の宣言（構築は registry・結線だけここ・M077）。"""
+    seaweed = _S3_BY_ID["seaweedfs"]
+    profiles = [
+        BackendProfile(
+            "nats",
+            "nats",
+            opts={"nats_url": NATS_URL, "nats_bucket": "manystore_e2e"},
+            gated=True,
+            reachable=_nats_up,
+        ),
     ]
-    # S3 は実装ごとに path-style を 1 行ずつ（能力差は unsupported で xfail strict に）。
+    # S3 は実装ごとに path-style（能力差は unsupported で xfail）。bucket 作成は setup で。
     for impl in S3_IMPLS:
-        providers.append(
-            Provider(
+        profiles.append(
+            BackendProfile(
                 f"s3-{impl.id}-path",
-                _open_s3(impl, "path"),
+                "s3",
+                opts=_s3_opts(impl, "path"),
                 gated=True,
                 reachable=_impl_up(impl),
                 unsupported=impl.unsupported,
+                setup=_s3_setup(impl, "path"),
             )
         )
     # virtual-host は SeaweedFS で代表（DNS 環境のみ・既定 skip）。
-    seaweed = _S3_BY_ID["seaweedfs"]
-    providers.append(
-        Provider(
+    profiles.append(
+        BackendProfile(
             "s3-seaweedfs-virtual",
-            _open_s3(seaweed, "virtual"),
+            "s3",
+            opts=_s3_opts(seaweed, "virtual"),
             gated=True,
             reachable=_s3_virtual_up,
             unsupported=seaweed.unsupported,
+            setup=_s3_setup(seaweed, "virtual"),
         )
     )
-    return providers
+    return profiles
+
+
+def all_providers() -> list[Provider]:
+    """全 provider の宣言（backend を 1 か所に集約）。構築は registry・profile 駆動（M068/M077）。
+
+    - profile で作れるもの（memory/nats/s3-real）は宣言 1 つ（`_profile_provider`＝construct/connect
+      を registry に委譲）。
+    - per-open リソース／特殊構築（local の tmp dir・remote の in-process サーバ・s3-fake の client
+      差し替え）は custom opener を残す。
+    """
+    return [
+        # memory=dict（run_* のオラクルと同型・native FileStore）。registry から構築。
+        _profile_provider(BackendProfile("dict", "memory", native=True)),
+        Provider("local", _open_local),  # tmp dir（per-open）＝custom
+        Provider("remote", _open_remote),  # in-process ASGI サーバ＝custom
+        # fake＝非 gated（docker 無し fast）。CAS は非権威＝xfail。nats fake は JetStream メタ再現が
+        # 要るため未 wire（M076）。
+        Provider("s3-fake", _open_s3_fake, unsupported=_FAKE_NON_AUTHORITATIVE),
+        *[_profile_provider(p) for p in _gated_profiles()],  # 実 backend＝registry 駆動
+    ]
 
 
 def leaf_fault_providers() -> list[Provider]:
@@ -412,13 +449,19 @@ def native_file_providers() -> list[Provider]:
     open_writer/open_reader（S3=multipart/range）を直接検査する別系統。multipart/range は実装差が
     出うる＝S3 実装ごとに行を立てる。local/dict は元々 matrix で native を流すのでここには入れない。
     """
+    # profile の native=True＝registry の file_factory で native S3FileStore を直接構築（M077）。
     return [
-        Provider(
-            f"s3-{impl.id}-path-native",
-            _open_s3_native_file(impl, "path"),
-            gated=True,
-            reachable=_impl_up(impl),
-            unsupported=impl.unsupported,
+        _profile_provider(
+            BackendProfile(
+                f"s3-{impl.id}-path-native",
+                "s3",
+                opts=_s3_opts(impl, "path"),
+                native=True,
+                gated=True,
+                reachable=_impl_up(impl),
+                unsupported=impl.unsupported,
+                setup=_s3_setup(impl, "path"),
+            )
         )
         for impl in S3_IMPLS
     ]
