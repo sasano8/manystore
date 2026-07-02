@@ -19,7 +19,7 @@
 
     import asyncio
     from manystore import DictFileStore
-    from manystore.tools.conformancer import assert_file_store, FileStoreTester, save_report
+    from manystore.spec.conformancer import assert_file_store, FileStoreTester, save_report
 
     def test_my_file_store():
         target = MyFileStore()
@@ -42,7 +42,7 @@ from collections.abc import AsyncIterator
 from dataclasses import dataclass, fields
 from pathlib import Path
 
-from ...spec import (
+from .. import (
     DEFAULT_LIST_LIMIT,
     AsyncBufferedStore,
     AsyncFileObject,
@@ -51,7 +51,7 @@ from ...spec import (
     FileInfo,
     StreamingStoreBase,
 )
-from ...spec.exceptions import ConflictError, NotFoundError, UnsupportedOperation
+from ..exceptions import ConflictError, NotFoundError, UnsupportedOperation
 
 
 def required_members(protocol: type) -> frozenset[str]:
@@ -593,7 +593,7 @@ async def assert_fail_loud_over_transport(store: object, *, key: str = "faultlou
 #
 # 「ストア実装が満たすべき挙動契約」を 1 か所のカタログに宣言し、ここから 4 つの価値を同時に得る:
 #   ① テスト可能（各契約は assert_*／run_* として実行）／② pytest-cov に現れる（網羅の可視化）／
-#   ③ 仕様書として出力（`python -m manystore.tools.conformancer` が conformance_spec.md を生成）／
+#   ③ 仕様書として出力（`python -m manystore.spec.conformancer` が conformance_spec.md を生成）／
 #   ④ 新 backend のスキャフォールド材料（契約一覧＝実装の TODO）。
 # 絶対契約（オラクル非依存）はここに宣言＝`check` で実装する assert 関数名を指す（drift ガード付）。
 # 差分契約（run_light/middle の観点）は **実行から導出**するので、ここには宣言しない（実態が正）。
@@ -745,7 +745,7 @@ def scaffold_backend(class_name: str, *, kind: str = "file") -> str:
 
     abstracts = sorted(base.__abstractmethods__)
     head = [
-        '"""自動生成スキャフォールド（`python -m manystore.tools.conformancer --scaffold`）。',
+        '"""自動生成スキャフォールド（`python -m manystore.spec.conformancer --scaffold`）。',
         "",
         f"{class_name}（{base_name} 派生）の未実装メソッドを埋め conformancer の契約を満たすこと。",
         "満たすべき絶対契約（conformancer の各 assert で機械検証）:",

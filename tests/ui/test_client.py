@@ -15,12 +15,12 @@ from manystore.serving.server.routes import KV_RAW_PREFIX  # native NS prefix ã
 from manystore.serving.services.config import parse_config
 from manystore.serving.services.service import StorageService
 from manystore.spec import AsyncBufferedStore, FileInfo
-from manystore.spec.exceptions import ConflictError, NotFoundError
-from manystore.tools.conformancer import (
+from manystore.spec.conformancer import (
     assert_concrete_store_signatures,
     assert_fail_loud_over_transport,
     concrete_store_signature_errors,
 )
+from manystore.spec.exceptions import ConflictError, NotFoundError
 
 
 async def _remote_store(tmp_path: Path) -> tuple[StorageService, RemoteKeyValueStore]:

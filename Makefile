@@ -87,7 +87,7 @@ grep-todo:
 # conformance 結果を docs の spec 表へ出力（メソッド × 実装の Implemented/Not）。
 # 接続不要・決定的。docs/kv_spec.md / docs/file_storage_spec.md を再生成する。
 conformance-docs:
-	uv run python -m manystore.tools.conformancer
+	uv run python -m manystore.spec.conformancer
 
 # docs サイト（MkDocs Material）をビルド。先に conformance spec を再生成して常に最新化。
 # 出力は site/（CI の Pages デプロイがこれを公開）。--strict で警告を失敗にする。

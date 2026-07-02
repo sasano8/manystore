@@ -26,10 +26,7 @@ from manystore import (
 )
 from manystore.client import RemoteKeyValueStore
 from manystore.spec import BufferedStoreBase, FileInfo, StreamingStoreBase
-from manystore.spec.exceptions import ConflictError, NotFoundError
-from manystore.storage.file import AsyncStreamingStore
-from manystore.storage.kv import AsyncBufferedStore
-from manystore.tools.conformancer import (
+from manystore.spec.conformancer import (
     ABSOLUTE_CONTRACTS,
     FileStoreTester,
     assert_base_protocol_parity,
@@ -53,6 +50,9 @@ from manystore.tools.conformancer import (
     scaffold_backend,
     signature_drift,
 )
+from manystore.spec.exceptions import ConflictError, NotFoundError
+from manystore.storage.file import AsyncStreamingStore
+from manystore.storage.kv import AsyncBufferedStore
 
 
 def _kvs_instances(tmp_path):

@@ -10,10 +10,12 @@
 (2)BackendSpec 単一 factory (3)アダプタ非推奨化 (4)公開型 `AsyncStore`＋`manystore.store` facade
 (5)**M073 spec/impl 分離＝`manystore/spec/`（`protocols`=純粋な契約/型・`base`=既定実装＝`*StoreBase`/アダプタ/IO/`_kv_*`/
 `_sha256_hex`・`exceptions`）へ集約、旧 top-level `protocols.py`/`exceptions.py` 削除、全 importer を `from ...spec import`
-へ追随、後方互換 shim なし全面移行**（make check 緑 271）。**残＝Stage 6（docs 更新＝architecture/backend_registry/
-implementing_a_backend を「spec が単一源泉・実装は base・1-Store」へ）＋ M073(B残)＝conformance 挙動契約カタログを
-`spec/contracts_catalog.py` へ移送（検証ハーネスは conformancer に残す）**。Stage 1〜5 は独立コミット・`make check` 緑済＝
-いつでも安全に再開可。
+へ追随、後方互換 shim なし全面移行**（make check 緑 271）。さらに **M073(B) conformancer 同居 完了（2026-07-02）**＝
+`manystore/tools/conformancer/` を **`manystore/spec/conformancer/`** へ丸ごと移設（カタログも検証ハーネスも一括で spec 配下）・
+旧パス（`manystore.tools.conformancer`／`manystore/protocols.py`）を CLI/scaffold/文字列/Makefile/手書き docs で新パスへ・
+自動生成 docs 再生成・旧 `manystore/tools/` 削除（make check 緑 271・test-heavy 緑 44・mkdocs --strict 緑）。**残＝Stage 6
+（docs の概念更新＝architecture/backend_registry/implementing_a_backend を「spec が単一源泉・実装は base・1-Store」へ）**。
+Stage 1〜5＋M073(B) は独立コミット・`make check` 緑済＝いつでも安全に再開可。
 
 次サイクル候補（M071 と別筋）＝**M051（k8s secrets backend＝当初 5 要望の最後）** ／ M076（nats-fake）／
 **M078（横断関心のミドルウェア合成層＝logging/retry/metrics/cache・M014/M015 包含・M071 完了後 doc-first）**。

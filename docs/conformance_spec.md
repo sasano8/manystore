@@ -7,7 +7,7 @@
 
 ## 絶対契約（オラクル非依存・全実装が満たす製品必須挙動）
 
-`manystore.tools.conformancer` の各 assert 関数で検査する。新 backend は接続済みストアを
+`manystore.spec.conformancer` の各 assert 関数で検査する。新 backend は接続済みストアを
 渡してこれらを呼べば、実装漏れが loud に落ちる。
 
 | 契約ID | 内容 | 実装する検査 |
@@ -83,7 +83,7 @@
 
 ## 新しい backend の作り方（scaffold の出発点）
 
-0. 雛形生成: `python -m manystore.tools.conformancer --scaffold MyStore --kind kv|file`
+0. 雛形生成: `python -m manystore.spec.conformancer --scaffold MyStore --kind kv|file`
    ＝未実装メソッド（`raise NotImplementedError`）＋満たすべき契約 TODO＋配線手順が出る。
 1. `KeyValueStore` / `FileStore` の Protocol メソッドを実装（`kv_spec.md` /
    `file_storage_spec.md` の ✅ を埋める）。`assert_key_value_store` 等で存在チェック。

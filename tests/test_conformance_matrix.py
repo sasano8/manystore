@@ -30,7 +30,7 @@ from conformance_providers import (
 )
 
 from manystore import DictFileStore
-from manystore.tools.conformancer import (
+from manystore.spec.conformancer import (
     FileStoreTester,
     assert_concurrent_delete_safe,
     assert_concurrent_overwrite_atomic,
