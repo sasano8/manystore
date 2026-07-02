@@ -11,6 +11,6 @@
 httpx を使う（本体依存に含む）。
 """
 
-from .remote import ManystoreClient, RemoteKeyValueStore
+from .remote import ManystoreClient, RemoteKeyValueStore, RemoteStore
 
-__all__ = ["ManystoreClient", "RemoteKeyValueStore"]
+__all__ = ["ManystoreClient", "RemoteStore", "RemoteKeyValueStore"]

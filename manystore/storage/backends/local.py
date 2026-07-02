@@ -27,7 +27,6 @@ from ...protocols import (
     AsyncFileObject,
     FileInfo,
     IfMatch,
-    KeyValueFromFileStore,
     StreamingStoreBase,
     _atomic_write_bytes,
     _kv_copy,
@@ -165,16 +164,13 @@ class _LocalAtomicWriter:
             await self.close()
 
 
-class LocalFileStore(StreamingStoreBase):
-    """ローカルファイルシステムの「真実の実装」（完全な [FileStore]＝KeyValueStore + IO）。
+class LocalStore(StreamingStoreBase):
+    """ローカルファイルシステムの **full Store**＝file 寄り（M071）。
 
-    **file 寄り**＝primitive は `open_reader`/`open_writer`（ストリーム）なので
-    [StreamingStoreBase] を継承し、put/get/get_or_raise（全体）は基底が IO から導出する（値境界での
-    みバッファ）。本クラスは
-    IO 2 つ＋名前空間操作（iter/list/exists/delete・cp/mv・vacuum）を filesystem-native に実装する
-    ＝KeyValueStore も満たす。KVS ビュー（IO を隠したもの）は
-    `KeyValueFromFileStore(LocalFileStore(...))`（＝[LocalKeyValueStore]）で被せる＝実装の二重持ちを
-    避ける。書き込みは open_writer の temp+rename で原子的（all-or-nothing）。バイナリ専用。
+    **file 寄り**＝primitive は `open_reader`/`open_writer`（ストリーム）なので [StreamingStoreBase]
+    を継承し、put/get/get_or_raise（全体）は基底が IO から導出（値境界でのみバッファ）。IO 2 つ＋
+    名前空間操作（iter/list/exists/delete・cp/mv・vacuum）を filesystem-native に実装。full Store。
+    書き込みは open_writer の temp+rename で原子的（all-or-nothing）。バイナリ専用。
     """
 
     def __init__(self, directory: Path) -> None:
@@ -319,17 +315,6 @@ class LocalFileStore(StreamingStoreBase):
         return None
 
 
-class LocalKeyValueStore(KeyValueFromFileStore):
-    """[LocalFileStore] を KVS ビューとして被せた薄いラッパ（実装は LocalFileStore に集約）。
-
-    get/put は下層 open_reader/open_writer 越し、iter/list/exists/delete/cp/mv は素通し委譲
-    （[KeyValueFromFileStore]）。vacuum だけは Local 固有（空ディレクトリ掃除・KVS Protocol 外）
-    なのでここで足す。
-    """
-
-    def __init__(self, directory: Path) -> None:
-        self._fs = LocalFileStore(directory)  # Local 固有操作（vacuum）用に concrete 参照を保持
-        super().__init__(self._fs)
-
-    async def vacuum(self) -> None:
-        await self._fs.vacuum()
+# 旧名は alias（非推奨・M071）。LocalStore が既に full Store＋vacuum を持つ（KVS ビュー不要）。
+LocalFileStore = LocalStore
+LocalKeyValueStore = LocalStore

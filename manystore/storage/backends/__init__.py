@@ -7,10 +7,10 @@ httpx / client）は factory 内で遅延 import。
 """
 
 from ...protocols import AsyncBufferedStore, AsyncStreamingStore
-from .http_store import HttpFileStore, HttpKeyValueStore
-from .local import LocalFileObject, LocalFileStore, LocalKeyValueStore
-from .memory import DictFileStore, DictKeyValueStore
-from .nats import NatsFileStore, NatsObjectKeyValueStore
+from .http_store import HttpFileStore, HttpKeyValueStore, HttpStore
+from .local import LocalFileObject, LocalFileStore, LocalKeyValueStore, LocalStore
+from .memory import DictFileStore, DictKeyValueStore, DictStore
+from .nats import NatsFileStore, NatsObjectKeyValueStore, NatsStore
 from .registry import (
     BackendSpec,
     get_backend_spec,
@@ -18,14 +18,21 @@ from .registry import (
     register_backend,
     register_builtin_backend,
 )
-from .s3 import S3FileStore, S3KeyValueStore
+from .s3 import S3FileStore, S3KeyValueStore, S3Store
 
 __all__ = [
+    # 1 backend = 1 Store（M071・full Store）
+    "DictStore",
+    "LocalStore",
+    "S3Store",
+    "NatsStore",
+    "HttpStore",
+    "LocalFileObject",
+    # 旧名 alias（非推奨・M071）
     "DictKeyValueStore",
     "DictFileStore",
     "LocalKeyValueStore",
     "LocalFileStore",
-    "LocalFileObject",
     "S3KeyValueStore",
     "S3FileStore",
     "NatsObjectKeyValueStore",

@@ -17,14 +17,11 @@ from collections.abc import AsyncIterator
 
 from ...exceptions import ConflictError, NotFoundError
 from ...protocols import (
-    AsyncFileObject,
     BufferedStoreBase,
     FileInfo,
     IfMatch,
     _kv_copy,
     _kv_move,
-    _KvReadFileObject,
-    _KvWriteFileObject,
 )
 
 # JetStream が「期待した最終 subject シーケンスと不一致」を返すときの err_code（CAS 失敗の判別）。
@@ -99,7 +96,13 @@ class _NatsBase:
             self._obs = None
 
 
-class NatsObjectKeyValueStore(_NatsBase, BufferedStoreBase):
+class NatsStore(_NatsBase, BufferedStoreBase):
+    """NATS Object Store の **full Store**（put/get＋open_* を両備・M071）。
+
+    kv 寄り＝whole get/put が native、open_* は基底 [BufferedStoreBase] の buffer 合成
+    （真の bounded ストリーミングは nats-py 仕様で未採用＝deferred）。
+    """
+
     def _meta_subject(self, key: str) -> str:
         """オブジェクトのメタ subject（`$O.<bucket>.M.<b64url(name)>`）。CAS の version 担体。"""
         import base64
@@ -315,18 +318,6 @@ class NatsObjectKeyValueStore(_NatsBase, BufferedStoreBase):
 # ── FileStore（= KVS ＋ buffer 合成 IO） ──
 
 
-class NatsFileStore(NatsObjectKeyValueStore):
-    """NATS の完全な [FileStore]（= [NatsObjectKeyValueStore] ＋ buffer 合成 IO）。
-
-    NATS Object Store は **kv 寄り**＝whole get/put が native（核は KVS 側）。真の bounded
-    ストリーミングは `get(writeinto=...)` の逐次配送が nats-py 仕様で executor スレッドから呼ばれ、
-    スレッド安全な受け渡しが要るため未採用＝deferred。よって open_reader/open_writer は **whole
-    get/put の上に buffer で被せた擬似ストリーム**（共有の [_KvReadFileObject]/[_KvWriteFileObject]
-    を流用）。KVS 面は継承。
-    """
-
-    async def open_reader(self, filename: str) -> AsyncFileObject:
-        return _KvReadFileObject(await self.get_or_raise(filename))  # whole get を buffer 化
-
-    async def open_writer(self, filename: str) -> AsyncFileObject:
-        return _KvWriteFileObject(self, filename)  # close で whole put
+# 旧名は alias（非推奨・M071）。NatsFileStore の明示 open_* は基底合成と同一で冗長。
+NatsObjectKeyValueStore = NatsStore
+NatsFileStore = NatsStore

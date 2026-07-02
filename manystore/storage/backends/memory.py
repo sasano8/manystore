@@ -10,20 +10,19 @@ from collections.abc import AsyncIterator
 
 from ...exceptions import ConflictError, NotFoundError
 from ...protocols import (
-    AsyncFileObject,
     BufferedStoreBase,
     FileInfo,
     IfMatch,
     _kv_copy,
     _kv_move,
-    _KvReadFileObject,
-    _KvWriteFileObject,
     _sha256_hex,
 )
 
 
-class DictKeyValueStore(BufferedStoreBase):
-    """`dict[str, bytes]` を保持するインメモリ [KeyValueStore]。
+class DictStore(BufferedStoreBase):
+    """`dict[str, bytes]` を保持するインメモリ **full Store**（put/get＋open_* を両備・M071）。
+
+    kv 寄り＝put/get が native、open_reader/open_writer は基底 [BufferedStoreBase] の buffer 合成。
 
     外から既存 dict を渡せば共有・観測できる（テストの fake 兼参照実装）。iter は他 backend と
     同じく名前降順。get の primitive は get_or_raise（欠損で FileNotFoundError）で、get(default) は
@@ -113,15 +112,6 @@ class DictKeyValueStore(BufferedStoreBase):
         return None
 
 
-class DictFileStore(DictKeyValueStore):
-    """`dict` を保持する完全な [FileStore]（= [DictKeyValueStore] ＋ buffer 合成 IO）。
-
-    dict は kv 寄りなので KVS 面を継承し、open_reader/open_writer は whole get/put の上に
-    buffer を被せた擬似ストリーム（共有 [_KvReadFileObject]/[_KvWriteFileObject] を流用）。
-    """
-
-    async def open_reader(self, filename: str) -> AsyncFileObject:
-        return _KvReadFileObject(await self.get_or_raise(filename))  # 欠損は FileNotFoundError
-
-    async def open_writer(self, filename: str) -> AsyncFileObject:
-        return _KvWriteFileObject(self, filename)  # close で whole put
+# 旧名は alias（非推奨・M071）。DictFileStore の明示 open_* は基底合成と同一で冗長。
+DictKeyValueStore = DictStore
+DictFileStore = DictStore

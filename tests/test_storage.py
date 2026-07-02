@@ -303,15 +303,17 @@ async def test_key_value_from_file_store_derives_kvs(tmp_path: Path) -> None:
     assert await kv.exists("a/b.bin") is False
 
 
-async def test_local_kvs_is_thin_view_over_file_store(tmp_path: Path) -> None:
-    # LocalKeyValueStore は LocalFileStore を被せた薄い KVS ビュー（実装は FileStore 側に集約）。
-    store = LocalKeyValueStore(tmp_path)
-    assert isinstance(store, KeyValueFromFileStore)
+async def test_local_kvs_and_file_store_are_one_class(tmp_path: Path) -> None:
+    # M071＝LocalKeyValueStore/LocalFileStore は同一クラス LocalStore の alias。
+    from manystore.storage.backends.local import LocalStore
 
-    # KVS 経由の put は、同じ dir の FileStore から open_reader でも読める（同一の真実）。
+    assert LocalKeyValueStore is LocalStore
+    assert LocalFileStore is LocalStore
+    store = LocalStore(tmp_path)
+
+    # put した値は open_reader でも読める（put/get も open_* も同じ 1 ストアの表面）。
     await store.put("shared.bin", b"xyz")
-    fs = LocalFileStore(tmp_path)
-    async with await fs.open_reader("shared.bin") as f:
+    async with await store.open_reader("shared.bin") as f:
         assert await f.read() == b"xyz"
 
 

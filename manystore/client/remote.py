@@ -123,11 +123,11 @@ class ManystoreClient:
         await self._client.aclose()
 
 
-class RemoteKeyValueStore(BufferedStoreBase):
-    """1 つの context をサーバ越しに [KeyValueStore] として扱うストア（RW）。
+class RemoteStore(BufferedStoreBase):
+    """1 つの context をサーバ越しに扱う **full Store**（RW・M071）。
 
-    primitive `get_or_raise` だけ実装し、`get(key, default=None)` は基底 [BufferedStoreBase]
-    から受け取る（欠損は基底が捕捉して `default`）。
+    kv 寄り＝put/get が native（サーバ往復）、open_reader/open_writer は基底 [BufferedStoreBase] の
+    buffer 合成。primitive `get_or_raise` だけ実装し `get(default)` は基底から受け取る。
     """
 
     def __init__(
@@ -206,4 +206,8 @@ class RemoteKeyValueStore(BufferedStoreBase):
         await self._client.aclose()
 
 
-# TODO(M042): transport 層の整理（Safepath Client / RemoteKVS の所属の切り分け）
+# 旧名は alias（非推奨・M071）。
+RemoteKeyValueStore = RemoteStore
+
+
+# TODO(M042): transport 層の整理（Safepath Client / RemoteStore の所属の切り分け）

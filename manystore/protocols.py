@@ -390,12 +390,32 @@ class StreamingStoreBase(_StoreBase):
     async def put(self, key: str, value: bytes, *, if_match: IfMatch = None) -> FileInfo:
         # open_writer（ストリーム primitive）で全体書き＝値境界でバッファ。conditional put は
         # open_writer 由来では原子的 CAS を保証できない＝fail-loud（native CAS を持つ file 寄り
-        # backend は put を override する＝LocalFileStore）。
+        # backend は put を override する＝LocalStore）。
         if if_match is not None:
             raise NotImplementedError("conditional put requires backend-native CAS; override put")
         async with await self.open_writer(key) as f:
             await f.write(value)
         return FileInfo(filename=key, size=len(value))
+
+
+class StreamableBufferedStoreBase(_StoreBase):
+    """**両軸 native** backend の基底＝put/get も open_* も **native**（合成なし・M071）。
+
+    S3 のように whole（put_object/get_object）も streaming（multipart/range）も native な backend が
+    継承する。`_StoreBase`（put/get_or_raise 等 abstract）に IO の abstract を足すだけ＝**4 つを
+    native 実装させる**（[BufferedStoreBase]/[StreamingStoreBase] の片側合成に落とさない）。
+    多重継承は使わない（両基底の合成が衝突）。「両方 native」を型で表すタグ。
+    """
+
+    @abc.abstractmethod
+    async def open_reader(self, filename: str) -> AsyncFileObject:
+        """読み取りストリームを開く。欠損は `NotFoundError`。**サブクラス必須**（native）。"""
+        raise NotImplementedError
+
+    @abc.abstractmethod
+    async def open_writer(self, filename: str) -> AsyncFileObject:
+        """書き込みストリームを開く。**サブクラス必須**（native）。"""
+        raise NotImplementedError
 
 
 # ════════════════════════════════════════════════════════════════════════════

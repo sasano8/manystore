@@ -7,7 +7,13 @@ import contextlib
 from collections.abc import AsyncIterator
 
 from ...exceptions import ConflictError, NotFoundError, UnsupportedOperation
-from ...protocols import AsyncFileObject, BufferedStoreBase, FileInfo, IfMatch, _sha256_hex
+from ...protocols import (
+    AsyncFileObject,
+    FileInfo,
+    IfMatch,
+    StreamableBufferedStoreBase,
+    _sha256_hex,
+)
 
 
 class _S3Base:
@@ -53,7 +59,41 @@ class _S3Base:
         return None
 
 
-class S3KeyValueStore(_S3Base, BufferedStoreBase):
+class S3Store(_S3Base, StreamableBufferedStoreBase):
+    """S3 の **full Store**＝**両軸 native**（M071）。
+
+    whole（put_object/get_object）も streaming（range GET / multipart）も native ゆえ
+    [StreamableBufferedStoreBase] を継承し 4 つを native 実装（合成に落とさない）。小さい値は
+    whole が最適・大きい値は open_* の streaming で一定メモリ。`part_size` は multipart の
+    1 パートサイズ（実 S3 は最終パート以外 5MB 以上・既定 8MiB）。
+    """
+
+    def __init__(
+        self,
+        bucket: str,
+        endpoint_url: str = "",
+        region: str = "us-east-1",
+        access_key: str = "",
+        secret_key: str = "",
+        addressing_style: str = "virtual",
+        part_size: int = 8 * 1024 * 1024,
+    ) -> None:
+        super().__init__(bucket, endpoint_url, region, access_key, secret_key, addressing_style)
+        self._part_size = part_size
+
+    async def open_reader(self, filename: str) -> AsyncFileObject:
+        cm = self._session()
+        client = await cm.__aenter__()
+        try:
+            resp = await client.get_object(Bucket=self._bucket, Key=filename)
+        except client.exceptions.NoSuchKey as e:
+            await cm.__aexit__(type(e), e, e.__traceback__)  # 開いた session を後始末
+            raise NotFoundError(filename) from e  # 欠損は NotFoundError に正規化（streaming 経路）
+        return _S3StreamReader(cm, resp["Body"])
+
+    async def open_writer(self, filename: str) -> AsyncFileObject:
+        return _S3MultipartWriter(self, filename, self._part_size)
+
     async def put(self, key: str, value: bytes, *, if_match: IfMatch = None) -> FileInfo:
         # conditional put はサーバ側で原子的: 不在 FileInfo=IfNoneMatch="*"（create-only）／
         # 他 FileInfo=IfMatch=etag（update CAS）。412/409 は ConflictError へ正規化。
@@ -285,38 +325,6 @@ class _S3MultipartWriter:
             await self.close()
 
 
-class S3FileStore(S3KeyValueStore):
-    """S3 の完全な [FileStore]（= [S3KeyValueStore] ＋ 真のストリーミング IO）。
-
-    S3 は **file 寄り**＝streaming（range body / multipart）が強みなので、open_reader/open_writer を
-    **native streaming** で実装し（核をこちらに置く）、大きなオブジェクトでも一定メモリで扱える。
-    KVS 面（whole get/put・iter/list/exists/delete/cp/mv・connect/aclose）は S3KeyValueStore から
-    継承＝小さい値は get_object/put_object の whole が最適（二重持ちしない）。`part_size` は
-    multipart の 1 パートサイズ（実 S3 は最終パート以外 5MB 以上が必要。既定 8MiB）。
-    """
-
-    def __init__(
-        self,
-        bucket: str,
-        endpoint_url: str = "",
-        region: str = "us-east-1",
-        access_key: str = "",
-        secret_key: str = "",
-        addressing_style: str = "virtual",
-        part_size: int = 8 * 1024 * 1024,
-    ) -> None:
-        super().__init__(bucket, endpoint_url, region, access_key, secret_key, addressing_style)
-        self._part_size = part_size
-
-    async def open_reader(self, filename: str) -> AsyncFileObject:
-        cm = self._session()
-        client = await cm.__aenter__()
-        try:
-            resp = await client.get_object(Bucket=self._bucket, Key=filename)
-        except client.exceptions.NoSuchKey as e:
-            await cm.__aexit__(type(e), e, e.__traceback__)  # 開いた session を後始末
-            raise NotFoundError(filename) from e  # 欠損は NotFoundError に正規化（streaming 経路）
-        return _S3StreamReader(cm, resp["Body"])
-
-    async def open_writer(self, filename: str) -> AsyncFileObject:
-        return _S3MultipartWriter(self, filename, self._part_size)
+# 旧名は alias（非推奨・M071）＝1 backend=1 Store（S3 は両軸 native）。
+S3KeyValueStore = S3Store
+S3FileStore = S3Store
