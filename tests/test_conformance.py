@@ -23,7 +23,6 @@ from manystore.spec import (
     AsyncStreamingStore,
     BufferedStoreBase,
     FileInfo,
-    KeyValueFileStore,
     StreamingStoreBase,
 )
 from manystore.spec.conformancer import (
@@ -358,7 +357,6 @@ async def test_run_full_records_absolute_violation_without_raising() -> None:
     [
         pytest.param(lambda inner: inner, id="base_duality"),
         pytest.param(lambda inner: SafeStore(inner), id="safe"),
-        pytest.param(lambda inner: KeyValueFileStore(inner), id="kv_file_store"),
         pytest.param(lambda inner: DownloadCache(inner), id="download_cache"),
     ],
 )

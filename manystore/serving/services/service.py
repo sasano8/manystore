@@ -1,7 +1,7 @@
 """service — protocol を manystore の [KeyValueStore] へ写す中核（[StorageService]）。
 
 HTTP の **context（第一階層）は [ArrayStore] の mount に対応**する。config の各 context を
-`create_unsafe_key_value_store` で生成 → [SafeStore]（キー検証）で包み ArrayStorage に
+`create_unsafe_store` で生成 → [SafeStore]（キー検証）で包み ArrayStorage に
 `mount` し、(context, key) を `<context>/<key>` キーへ合成して 1 本の合成ストアへ写す＝**振り分けは
 ArrayStorage に委譲**（service は writable・メタ・watcher だけを上載せ）。一覧は ArrayStorage の
 `iter_all()`（各 mount を `<name>/` 前置する横断列挙）を context で切り出し prefix 絞り。各 context
@@ -17,7 +17,7 @@ from ...spec.exceptions import (
     ContextNotFound,
     ReadOnlyContext,
 )  # 集約先（後方互換で再エクスポート）
-from ...storage.backends import create_unsafe_key_value_store
+from ...storage.backends import create_unsafe_store
 from ...storage.surfaces.array import ArrayStore
 from ...storage.surfaces.safe import SafeStore
 from .config import AppConfig
@@ -47,7 +47,7 @@ class StorageService:
         """
         try:
             for name, cc in self._config.contexts.items():
-                raw = create_unsafe_key_value_store(cc.backend, **cc.opts)  # type: ignore[arg-type]
+                raw = create_unsafe_store(cc.backend, **cc.opts)  # type: ignore[arg-type]
                 store = SafeStore(raw)  # キー検証は mount したストア側で効く
                 await store.connect()  # mount は登録のみ＝接続は明示的に行う（責務分離）
                 await self._array.mount(

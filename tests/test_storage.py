@@ -39,7 +39,6 @@ from manystore import (
     open_async_store,
     validate_safe_path,
 )
-from manystore.spec import KeyValueFileStore, KeyValueFromFileStore
 from manystore.storage.surfaces.safe import SafeStore
 
 
@@ -210,20 +209,6 @@ async def test_local_kvs_iter_is_recursive(tmp_path: Path) -> None:
     assert names == ["top.txt", "a/b/c.bin"]  # 名前降順
 
 
-async def test_key_value_file_store_open_over_kvs(tmp_path: Path) -> None:
-    # KeyValueStore を FileStore として被せる（s3/nats も同型で FileStore 化できる）。
-    fs = KeyValueFileStore(LocalStore(tmp_path))
-
-    async with await fs.open_writer("k/v.bin") as f:
-        await f.write(b"abc")
-        await f.write(b"de")  # close 時にまとめて put
-    async with await fs.open_reader("k/v.bin") as f:
-        assert await f.read() == b"abcde"
-    # 無いキーの読み取りは NotFoundError。
-    with pytest.raises(NotFoundError):
-        await fs.open_reader("missing")
-
-
 async def test_kvs_get_default_and_get_or_raise(tmp_path: Path) -> None:
     # get は欠損時にデフォルト値（既定 None）を返し、get_or_raise は NotFoundError を上げる。
     store = LocalStore(tmp_path)
@@ -256,49 +241,24 @@ async def test_local_file_store_is_full_kvs(tmp_path: Path) -> None:
         assert await r.read() == b"hello"
 
 
-async def test_key_value_file_store_is_full_file_store(tmp_path: Path) -> None:
-    # KVS→FileStore は IO の埋め合わせ＝KVS 面は委譲しつつ open_reader/open_writer を合成。
-    fs = KeyValueFileStore(LocalStore(tmp_path))
+async def test_buffered_backend_gets_io_via_base(tmp_path: Path) -> None:
+    # 旧アダプタ KeyValueFileStore は撤去（M071）＝kv 寄り backend も基底 [BufferedStoreBase] の
+    # 既定合成で open_reader/open_writer を備える。DictStore（KVS-only 相当）で write→read を確認。
+    store = DictStore()
 
-    # IO 面（合成）
-    async with await fs.open_writer("k.bin") as w:
-        await w.write(b"xyz")
-    async with await fs.open_reader("k.bin") as r:
-        assert await r.read() == b"xyz"
-    # KVS 面（下層へ委譲）も使える＝完全な FileStore
-    assert await fs.get_or_raise("k.bin") == b"xyz"
-    assert await fs.get("missing", b"d") == b"d"
-    assert [i["filename"] async for i in fs.iter_all()] == ["k.bin"]
-    # 欠損キーの open_reader は NotFoundError（get_or_raise 経由）
+    async with await store.open_writer("k/v.bin") as w:
+        await w.write(b"abc")
+        await w.write(b"de")  # close 時にまとめて put
+    async with await store.open_reader("k/v.bin") as r:
+        assert await r.read() == b"abcde"
+    # KVS 面も同じ真実で読める＝完全な full Store。
+    assert await store.get_or_raise("k/v.bin") == b"abcde"
     with pytest.raises(NotFoundError):
-        await fs.open_reader("missing")
+        await store.open_reader("missing")  # 欠損は get_or_raise 経由で NotFoundError
 
 
-async def test_key_value_from_file_store_derives_kvs(tmp_path: Path) -> None:
-    # FileStore を KVS として被せる逆向きアダプタ（IO を落とすだけ・残りは下層へ委譲）。
-    kv = KeyValueFromFileStore(LocalStore(tmp_path))
-
-    await kv.put("a/b.bin", b"hello")  # 親ディレクトリは下層 writer が作る
-    assert await kv.get("a/b.bin") == b"hello"
-    assert await kv.get("missing") is None  # 欠損キーは None（KVS 規約）
-    assert await kv.exists("a/b.bin") is True
-    names = [info["filename"] async for info in kv.iter_all()]
-    assert names == ["a/b.bin"]
-    await kv.cp("a/b.bin", "c.bin")
-    assert await kv.get("c.bin") == b"hello"
-    await kv.mv("c.bin", "d.bin")
-    assert await kv.exists("c.bin") is False
-    assert await kv.get("d.bin") == b"hello"
-    await kv.delete("a/b.bin")
-    assert await kv.exists("a/b.bin") is False
-
-
-async def test_local_kvs_and_file_store_are_one_class(tmp_path: Path) -> None:
-    # M071＝LocalStore/LocalStore は同一クラス LocalStore の alias。
-    from manystore.storage.backends.local import LocalStore
-
-    assert LocalStore is LocalStore
-    assert LocalStore is LocalStore
+async def test_local_is_one_full_store(tmp_path: Path) -> None:
+    # M071＝LocalStore は put/get（値 API）も open_*（IO API）も持つ 1 つの Store。
     store = LocalStore(tmp_path)
 
     # put した値は open_reader でも読める（put/get も open_* も同じ 1 ストアの表面）。

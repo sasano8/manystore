@@ -19,7 +19,7 @@ from contextlib import asynccontextmanager
 from dataclasses import dataclass
 
 from ..spec import AsyncBufferedStore
-from .backends import create_unsafe_key_value_store
+from .backends import create_unsafe_store
 
 
 @dataclass(frozen=True)
@@ -164,7 +164,7 @@ def connect_store(
             policy=ConnectPolicy(timeout=2.0, deadline=30.0)) as store: ...`
     """
     return connecting(
-        lambda: create_unsafe_key_value_store(backend, **opts),
+        lambda: create_unsafe_store(backend, **opts),
         verify=verify,
         policy=policy,
     )

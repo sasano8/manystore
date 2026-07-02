@@ -500,8 +500,8 @@ class InjectedFault(Exception):
 class FaultInjectingKeyValueStore(BufferedStoreBase):
     """全 primitive が `InjectedFault` を投げる KVS（fail-loud 契約のための「壊れた下層」）。
 
-    connect/aclose だけは無害（wrapper を構築・接続できるように）。Safe/Array/DownloadCache/
-    KeyValueFileStore 等の wrapper に **inner** として被せ、下層障害を握り潰さず伝播するかを
+    connect/aclose だけは無害（wrapper を構築・接続できるように）。Safe/Array/DownloadCache
+    等の wrapper に **inner** として被せ、下層障害を握り潰さず伝播するかを
     [assert_fail_loud_propagation] で検査する。`get`/`list_all` 等の既定実装は基底由来＝基底 duality
     （`get` が NotFoundError 以外を default に化けさせない）もこの番兵で同時に検証できる。
     """

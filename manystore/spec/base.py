@@ -12,7 +12,7 @@ import contextlib
 import io
 import os
 import tempfile
-from collections.abc import AsyncIterable, AsyncIterator, Iterable
+from collections.abc import AsyncIterable, Iterable
 from functools import partial
 from pathlib import Path
 
@@ -22,7 +22,6 @@ from .exceptions import ConflictError, NotFoundError, UnsupportedOperation
 from .protocols import (
     AsyncBufferedStore,
     AsyncFileObject,
-    AsyncStreamingStore,
     FileInfo,
     IfMatch,
 )
@@ -371,112 +370,3 @@ class _KvWriteFileObject:
             self._buf.close()
             return
         await self.close()
-
-
-class KeyValueFileStore(BufferedStoreBase):
-    """[KeyValueStore] を [FileStore] として被せる汎用アダプタ＝**IO の埋め合わせ**。
-
-    **非推奨（M071）**: open_reader/open_writer の buffer 合成は [BufferedStoreBase] が既定で持つ＝
-    どの kv 寄り backend も既に full Store。この wrap は不要になった（後方互換で存置）。
-
-    KVS は FileStore から open_reader/open_writer を除いた部分集合なので、KVS→FileStore は
-    その 2 つを合成すれば済む（put/get/get_or_raise・iter_all/list_all/exists/delete/cp/mv・
-    connect/aclose は下層 KVS へそのまま委譲＝流用）。例 `KeyValueFileStore(S3Store(...))`＝
-    S3 を FileStore 化。合成する IO は真のストリーミングではなく、read=全体取得・write=close で
-    全体 put（メモリにバッファ）。backend 固有のストリーミング実装は [backends] の各 FileStore を
-    参照。
-    """
-
-    def __init__(self, store: AsyncBufferedStore) -> None:
-        self._store = store
-
-    # ── 合成する IO（KVS に無い分の埋め合わせ） ──
-
-    async def open_reader(self, filename: str) -> AsyncFileObject:
-        return _KvReadFileObject(await self._store.get_or_raise(filename))
-
-    async def open_writer(self, filename: str) -> AsyncFileObject:
-        return _KvWriteFileObject(self._store, filename)
-
-    # ── KVS 面は下層へ委譲（FileStore = KVS + IO の KVS 部分） ──
-
-    async def put(self, key: str, value: bytes, *, if_match: IfMatch = None) -> FileInfo:
-        return await self._store.put(key, value, if_match=if_match)
-
-    async def head(self, key: str) -> FileInfo:
-        return await self._store.head(key)
-
-    async def get_or_raise(self, key: str) -> bytes:
-        return await self._store.get_or_raise(key)
-
-    async def iter_all(self, limit: int | None = None, prefix: str = "") -> AsyncIterator[FileInfo]:
-        async for info in self._store.iter_all(limit, prefix):  # limit/prefix ごと下層へ素通し
-            yield info
-
-    async def exists(self, key: str) -> bool:
-        return await self._store.exists(key)
-
-    async def delete(self, key: str) -> None:
-        await self._store.delete(key)
-
-    async def cp(self, src: str, dst: str) -> None:
-        await self._store.cp(src, dst)
-
-    async def mv(self, src: str, dst: str) -> None:
-        await self._store.mv(src, dst)
-
-    async def connect(self) -> None:
-        await self._store.connect()
-
-    async def aclose(self) -> None:
-        await self._store.aclose()
-
-
-class KeyValueFromFileStore(BufferedStoreBase):
-    """[FileStore] を [KeyValueStore] として被せる汎用アダプタ（[KeyValueFileStore] の逆向き）。
-
-    **非推奨（M071）**: get/put の合成は [StreamingStoreBase] が既定で持つ＝file 寄り backend も既に
-    put/get を備える（`LocalStore` 参照）。この KVS ビュー wrap は不要になった（後方互換で存置）。
-
-    **FileStore = KeyValueStore + IO** なので、FileStore→KVS は **IO（open_reader/open_writer）を
-    落とすだけ**＝put/get/get_or_raise・iter/list/exists/delete/cp/mv・connect/aclose を下層
-    FileStore へそのまま委譲（流用）する。`get(key, default=None)` は基底 [BufferedStoreBase] が
-    get_or_raise を捕捉して与える。
-
-    用途: ローカルのように「真実の実装が FileStore 側」にある backend で、open_reader/open_writer を
-    隠した KVS ビューを得る（`LocalStore = KeyValueFromFileStore(LocalStore)`）。
-    """
-
-    def __init__(self, store: AsyncStreamingStore) -> None:
-        self._store = store
-
-    async def put(self, key: str, value: bytes, *, if_match: IfMatch = None) -> FileInfo:
-        return await self._store.put(key, value, if_match=if_match)
-
-    async def head(self, key: str) -> FileInfo:
-        return await self._store.head(key)
-
-    async def get_or_raise(self, key: str) -> bytes:
-        return await self._store.get_or_raise(key)
-
-    async def iter_all(self, limit: int | None = None, prefix: str = "") -> AsyncIterator[FileInfo]:
-        async for info in self._store.iter_all(limit, prefix):  # 下層 FileStore へ素通し
-            yield info
-
-    async def exists(self, key: str) -> bool:
-        return await self._store.exists(key)
-
-    async def delete(self, key: str) -> None:
-        await self._store.delete(key)
-
-    async def cp(self, src: str, dst: str) -> None:
-        await self._store.cp(src, dst)
-
-    async def mv(self, src: str, dst: str) -> None:
-        await self._store.mv(src, dst)
-
-    async def connect(self) -> None:
-        await self._store.connect()
-
-    async def aclose(self) -> None:
-        await self._store.aclose()

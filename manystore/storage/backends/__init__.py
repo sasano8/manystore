@@ -6,7 +6,7 @@
 httpx / client）は factory 内で遅延 import。
 """
 
-from ...spec import AsyncBufferedStore, AsyncStreamingStore
+from ...spec import AsyncStreamingStore
 from ..registry import (
     BackendSpec,
     get_backend_spec,
@@ -40,8 +40,6 @@ __all__ = [
     "get_backend_spec",
     "list_backends",
     "create_unsafe_store",
-    "create_unsafe_key_value_store",
-    "create_unsafe_file_store",
 ]
 
 
@@ -111,13 +109,3 @@ def create_unsafe_store(backend: str, **opts: object) -> AsyncStreamingStore:
     [open_async_store]。opts は backend 固有（例: `local_dir=`/`s3_bucket=`/`http_base_url=`）。
     """
     return get_backend_spec(backend).factory(**opts)
-
-
-def create_unsafe_key_value_store(backend: str, **opts: object) -> AsyncBufferedStore:
-    """**非推奨（M071）＝[create_unsafe_store] へ統合**（full Store を返す）。"""
-    return create_unsafe_store(backend, **opts)
-
-
-def create_unsafe_file_store(backend: str, **opts: object) -> AsyncStreamingStore:
-    """**非推奨（M071）＝[create_unsafe_store] へ統合**（backend は 1 クラスで常に full Store）。"""
-    return create_unsafe_store(backend, **opts)
