@@ -3,9 +3,9 @@
 サードパーティが新しい backend を実装したとき、`pytest` などから簡単に「前提とする Protocol に
 準拠しているか」を横断的に確認できるようにするツール。2 段階で確認できる:
 
-1. **メソッド存在チェック**（`assert_key_value_store` / `assert_file_store`）— Protocol メンバが
+1. **メソッド存在チェック**（`assert_buffered_store` / `assert_store`）— Protocol メンバが
    callable な属性として在るか。`typing.get_protocol_members`（継承を含む）が対象。
-2. **挙動契約テスト**（`FileStoreTester`）— **辞書ストアを正（オラクル）**とし、同じ操作を
+2. **挙動契約テスト**（`StoreTester`）— **辞書ストアを正（オラクル）**とし、同じ操作を
    reference（辞書）と target に適用して観測一致を観点ごとに検証する。各観点は**返り値**だけでなく
    **op 適用後の状態**（iter_all のファイル名一覧・昇順）も取り、両方の一致を見る。run 系に
    **レポート（list）を渡す**と操作順に結果を追記する（ツールはレポートを保持しない）。
@@ -19,12 +19,12 @@
 
     import asyncio
     from manystore import DictStore
-    from manystore.spec.conformancer import assert_file_store, FileStoreTester, save_report
+    from manystore.spec.conformancer import assert_store, StoreTester, save_report
 
     def test_my_file_store():
         target = MyFileStore()
-        assert_file_store(target)                              # メソッドが揃っているか
-        tester = FileStoreTester(DictStore(), target)     # 正=辞書, 対象=target
+        assert_store(target)                              # メソッドが揃っているか
+        tester = StoreTester(DictStore(), target)     # 正=辞書, 対象=target
         report = []                                            # 呼び出し側がレポートを所有
         asyncio.run(tester.run_light(report))                 # 操作順に結果を追記
         assert all(s["passed"] for s in report)
@@ -197,7 +197,7 @@ def signature_drift(protocol: type, expected: dict[str, str]) -> list[str]:
 
 # ── conformancer 自身が前提とする Protocol（挙動テスト _OPS / FileObject 操作の写し） ──
 #
-# FileStoreTester（_OPS・_op_*）は `store.list_all(limit)` / `store.open_reader(key)` → `.read(n)` /
+# StoreTester（_OPS・_op_*）は `store.list_all(limit)` / `store.open_reader(key)` → `.read(n)` /
 # `.write(data)` のように Protocol の **呼び出し方を直書き**している。protocols.py が進化してここと
 # 食い違うと、conformancer は **古いプロトコルを前提に**テストし続ける（黙って誤検証）。下記は
 # conformancer が叩く Protocol メンバとその時点のシグネチャの写し（**protocols.py が正**）。drift
@@ -497,7 +497,7 @@ class InjectedFault(Exception):
     """
 
 
-class FaultInjectingKeyValueStore(BufferedStoreBase):
+class FaultInjectingStore(BufferedStoreBase):
     """全 primitive が `InjectedFault` を投げる KVS（fail-loud 契約のための「壊れた下層」）。
 
     connect/aclose だけは無害（wrapper を構築・接続できるように）。Safe/Array/DownloadCache
@@ -565,7 +565,7 @@ async def _assert_op_fail_loud(name: str, call: object, store: object, key: str)
 
 
 async def assert_fail_loud_propagation(make_store: object, *, key: str = "faultloud/x") -> None:
-    """`make_store(inner)`（inner=[FaultInjectingKeyValueStore]）の返すストアが、下層障害を握り潰さず
+    """`make_store(inner)`（inner=[FaultInjectingStore]）の返すストアが、下層障害を握り潰さず
     loud に失敗するかを検査する（**in-process の wrapper/基底向け**・M054/M055 を契約化）。
 
     契約: `get(key,default)` は欠損以外を default に化けさせない／`exists` は障害を False に
@@ -574,7 +574,7 @@ async def assert_fail_loud_propagation(make_store: object, *, key: str = "faultl
     各 op ごとに新しい inner で wrapper を組み直す。`lambda inner: inner` で基底 duality も検査。
     """
     for name, call in _FAIL_LOUD_PROBES:
-        await _assert_op_fail_loud(name, call, make_store(FaultInjectingKeyValueStore()), key)
+        await _assert_op_fail_loud(name, call, make_store(FaultInjectingStore()), key)
 
 
 async def assert_fail_loud_over_transport(store: object, *, key: str = "faultloud/x") -> None:
@@ -709,7 +709,7 @@ async def differential_contract_aspects() -> list[tuple[str, str]]:
 
     out: list[tuple[str, str]] = []
     for level in ("light", "middle", "heavy"):
-        tester = FileStoreTester(DictStore(), DictStore())
+        tester = StoreTester(DictStore(), DictStore())
         report: list = []
         await getattr(tester, f"run_{level}")(report)
         out.extend((level, step["aspect"]) for step in report)
@@ -752,7 +752,7 @@ def scaffold_backend(class_name: str, *, kind: str = "file") -> str:
     ]
     head += [f"  - {c.id}: {c.summary}" for c in ABSOLUTE_CONTRACTS]
     head += [
-        "差分契約は FileStoreTester(DictStore(), <store>) の run_light/run_middle で。",
+        "差分契約は StoreTester(DictStore(), <store>) の run_light/run_middle で。",
         '"""',
         "",
         f"from manystore.spec import {base_name}",
@@ -785,12 +785,12 @@ def scaffold_backend(class_name: str, *, kind: str = "file") -> str:
     return "\n".join(head + body + footer) + "\n"
 
 
-def assert_key_value_store(obj: object) -> None:
+def assert_buffered_store(obj: object) -> None:
     """`obj` が [KeyValueStore] の全メソッドを持つことを表明する。"""
     assert_implements(obj, AsyncBufferedStore)
 
 
-def assert_file_store(obj: object) -> None:
+def assert_store(obj: object) -> None:
     """`obj` が [FileStore]（= KeyValueStore + open_reader/open_writer）を持つことを表明する。"""
     assert_implements(obj, AsyncStreamingStore)
 
@@ -906,7 +906,7 @@ def save_report(report: list, path: str | Path) -> None:
     Path(path).write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
-class FileStoreTester:
+class StoreTester:
     """辞書ストアを**正（オラクル）**とし、対象 [FileStore] の挙動を差分比較するテストツール。
 
     run 系（run_light 等）に**レポート（list）を渡す**と、同じ操作を reference（辞書）と target に
