@@ -11,13 +11,20 @@
   buffer 合成／Local=file 寄りで `LocalKeyValueStore = KeyValueFromFileStore(LocalFileStore)`）。
 - **get の duality**: primitive `get_or_raise`（欠損→`FileNotFoundError`）＋基底 `KeyValueStoreBase` が `get(default)` を
   供給。`get_or_raise` は `@abstractmethod`＝実装漏れはインスタンス化時 `TypeError`。client/service 層も具備。
-- **prefix は optional capability**（`SupportsPrefixListing`）＝S3 native／他は `scan_prefix` で明示 opt-in。
-  非対応は **fail-loud**（`NotImplementedError`・暗黙フォールバック無し）。Safe/Array が委譲伝播。
+- **prefix 列挙は core 引数**（`iter_all(prefix="")`/`list_all(prefix="")`）＝S3 はサーバ側 `Prefix=` で native／
+  他（local/dict/nats/remote）は scan+filter を契約上の既定動作で実装（旧 `SupportsPrefixListing` capability は
+  2026-06-26 廃止＝意思決定の変遷参照）。
+- **条件 put / CAS**（M046）: `put(key, value, *, if_match=None)`＝None=LWW／`FileInfo.absent()`=create-only／
+  `FileInfo`=update CAS（不一致 `ConflictError`）。比較トークンは `FileInfo.etag`（S3=ETag・local=mtime_ns+size・
+  dict=世代・NATS=メタ subject 最終 seq）。`head(key)->FileInfo` が version 読み口。全 backend＋native REST＋remote＋
+  S3 GW まで配線済。
 - async / sync ブリッジ（`AsyncToSyncKeyValueStore`）、接続ライフサイクル（`connect_key_value_store`/`connecting`/
   `ConnectPolicy`）、安全パス（`validate_safe_path`/`SafeKeyValueStore`/`SafeFileStore`）、合成（`ArrayKeyValueStore`/
-  `DownloadCache`）。
+  `DownloadCache`）、片方向同期 `StorageMirror`（`storage/sync/`）。
 - **適合性ツール `manystore.tools.conformancer`**: メソッド存在チェック＋`FileStoreTester`（DictFileStore をオラクルに
-  差分検証。`run_light` 実装済＝12 観点・副作用も記録・`save_report` で JSON 保存）。
+  差分検証＝run_light/middle/heavy/full）＋**オラクル非依存の絶対契約**（writer all-or-nothing・CAS 並行・非CAS 並行・
+  fail-loud〔in-process/transport〕＝`ABSOLUTE_CONTRACTS`）。契約カタログ→spec 文書／scaffold／drift ガード。
+  `tests/conformance_providers.py` で全 provider を 1 宣言→ matrix が dict/local/remote/実 nats/s3 へ非破壊で流す。
 - **UI/サーバ（`manystore[server]` extra）**: `serving.services`/`serving.server`/`client` の 3 層。任意 context を HTTP+WS で公開する
   汎用 CRUD UI。context = ArrayStorage 第一階層（bucket）。native REST は `{bucket}/{path}`、WS ライブ通知、
   `views.featured` で重点パス。`RemoteKeyValueStore` でサーバ越し KVS。
@@ -25,23 +32,47 @@
   1:1 合成（コア IF 不変・実 aiobotocore 往復で検証済）。
 - **統合エントリポイント `manystore.combined`（`python -m manystore`）**: native REST/WS（`/kv/raw`・buffered）と
   S3 ゲートウェイ（`/storage/s3`・streaming）を単一 lifespan で束ねる。
-- **CI**: GitHub Actions で `make check`（`ci.yml`）。**テスト軽重分離**＝`make test`（fast・`-m "not slow"`）/`make test-all`（全部）。
+- **CI**: GitHub Actions（`ci.yml`）＝`check` ジョブ（`make check`＝fast）＋**`e2e` ジョブ（M061）**＝docker compose で
+  nats/seaweedfs/minio を起こし `MANYSTORE_E2E_REQUIRED=1 make test-heavy`（実 backend・skip 不可）。**テスト軽重
+  分離**＝`make test`（fast・`-m "not slow"`）/`make test-heavy`（slow＝実 backend）/`make test-all`（全部）。
 - **Docs サイト（GitHub Pages・2026-06-25）**: `pages.yml` で MkDocs Material をビルド＝`make docs`（先に `make conformance-docs`
   で spec 再生成 → `mkdocs build --strict`）。PR はビルド検証のみ・**main push のみ公式 Actions（upload-pages-artifact/
   deploy-pages）で実公開**。`index.md` は snippets で README を取り込む単一ソース。docs 依存は `docs` group（mkdocs-material）。
   **要手動: Settings → Pages → Source = GitHub Actions を有効化**（初回のみ・ユーザー作業）。
-  直近 fast = **120 passed, 12 deselected**。実 backend E2E（NATS / S3 path-style）検証済（`make e2e-up`）。
+  実 backend E2E（NATS / S3 path-style＝SeaweedFS・MinIO）検証済（`make e2e-up`→gated matrix・CI `e2e` ジョブで実走）。
 - **local backend は非ブロッキング**（M010）: 全 IO syscall を anyio でスレッドへオフロード＝event loop を塞がない。
 
 ## 残作業（What's left）— バックログ
 
 優先度順。着手時は activeContext.md「現在のフォーカス」に展開する。
 
+> **方針（2026-06-28・ユーザー指示）＝品質優先・拡張後回し**。現プロダクトの品質を高める作業（下記
+> 「品質強化」＝correctness バグ修正・lifecycle 健全化・テスト/カバレッジ強化・DRY/cleanup）を最優先で消化する。
+> **拡張的タスク（新 surface/backend/IF）は後回し**＝`M051`(k8s)/`M039`(IPFS)/`M040`(LB)/`M026`(stream)/
+> `M045`(put2)/`M028b`(動的 mount) は品質強化が一段落するまで着手しない（下表に残すが優先度は最下）。
+> 品質強化タスク（M054〜M064）は 2026-06-28 の 4 観点コード監査（error handling / lifecycle・並行 / test
+> coverage / DRY・API 一貫性）で抽出。high 指摘は実コードで裏取り済。
+
+### 品質強化（最優先・2026-06-28 監査で抽出）
+
+> **全項目 完了済み**（下記「完了マイルストーン」へ昇格）。次は「機能・完成度」へ。
+
+> **完了済み（下記「完了マイルストーン」へ昇格）**: M054/M055（fail-loud）・M056（nats lock）・M057（lifecycle
+> ロールバック）・M058（writer all-or-nothing）・M059（pytest-cov）・M060（crypto pytest）・**M061**（実 backend e2e
+> を CI で gated 実走＝skip 許容やめ）・M062（list_all 集約）・M063（DownloadCache async）・M064（cp/mv identity
+> 設計固定）・**M065**（conformance を仕様の単一源泉に＝北極星 ①〜④＋fail-loud〔in-process/transport〕＋
+> 非CAS並行＋run_full）・**M066**（挙動契約の集約ハーネス）。
+> M016（CAS 以外の並行/大容量/エラーパス）は並行系を M065 step8 で契約化済＝残は StorageMirror 実行中の source 変更。
+
+> M016（既存・下表）も本監査で具体化＝CAS 以外の並行操作（並行 delete/get・Mirror 実行中の source 変更）／大容量・チャンク境界／backend エラーパスの fail-loud 検証が手薄。M059 で可視化 → M016 で穴埋め。
+
+### 機能・完成度（品質強化の後）
+
 | ID | タスク | 優先 | 備考 |
 |----|--------|------|------|
-| **M043** | **ABC 基底 ↔ Protocol 契約の lockstep 保証** | **最重要** | `KeyValueStoreBase`(ABC) は `get_or_raise` だけ abstract で、`AsyncKeyValueStore`(Protocol) の残り（put/iter_all/list_all/exists/delete/cp/mv/connect/aclose）を宣言も強制もしない＝**部分実装でもインスタンス化が通り黙って Protocol を破れる**（fail-loud でない）。「protocols.py=契約＋既定実装の唯一の源泉」と緊張。是正案＝①基底に全面 `@abstractmethod`/既定 ②conformancer で base↔Protocol parity を assert ③Protocol 単一宣言へ再構成。`FileStoreBase` も対称点検。設計 `interrupt/archive/2026-06-26-base-protocol-drift.md` |
+| M051 | kubernetes backend（M050 の具体 sink） | 相談 | ユーザー要望（2026-06-27・討議中・doc-first）＝put=server-side apply / get=補完済み live（put≠get）。キー=`namespace/resource_type/name`（`.yml` 含めず・group/version は discovery 補完・衝突時 `type.group`）。**FileInfo に世代情報**（resourceVersion/generation/uid/creationTimestamp）。**resourceVersion CAS を M046 の参照実装**に（`if_version` 不一致は ConflictError）。ローカル側=`KubeManifestStore` ラッパ（パス↔内容の同一性検証＝Safe 風 1 枚）。依存=`kubernetes-asyncio` を extra `[k8s]`（遅延 import）。cluster-scoped は後回し。詳細は interrupt |
 | M012 | `list(prefix=...)` / pagination | 中 | prefix は core `iter_all(prefix=…)` 引数化済（M030 capability は 2026-06-26 廃止）。**pagination 未対応**。設計案（2026-06-26 対話・要 doc-first）＝(a) `iter_all`/`list_all` に **offset+limit** を足す（単純・全 backend で scan 可だが大 offset は O(n)）／(b) **cursor/continuation-token** 形式（S3 ContinuationToken・NATS 等の native と整合・M021 の continuation と同一機構）。加えて **返り値を range メタ付きの独自型**にする案＝iter は「何件目〜何件目」を、list は from/to 件数属性を持つ（pagination メタ＝**file/value パラダイム内**。却下した transport の request/response 封筒とは別物）。未確定＝offset/limit vs cursor の二択と、独自結果型を入れるか。M021（S3 GW continuation）・M044（limit 既定の定数化）と連動 |
-| M013 | メタデータ / content-type | 中 | S3・NATS は native 対応だが共通 IF に無い |
+| M013残 | メタデータ / content-type | 中 | **sha256 メタ充填は完了**（2026-07-02＝M067 残B。put 時 `_sha256_hex` を native メタへ〔dict/s3=x-amz-meta/nats=ObjectInfo digest〕→head 露出→HTTP ヘッダ透過→array 透過。native メタ無しの local は None=best-effort。conformance `meta.sha256_correct` 追加）。**残＝content-type と汎用 user metadata dict**（first-class にするか汎用 dict か未確定・doc-first） |
 | M016 | テスト拡充（エラーパス/並行/大容量） | 中 | fake は happy path 中心 |
 | M014 | 操作レベル retry/timeout | 低 | 現状 connect のみ |
 | M015 | logging（操作・リトライ可視化） | 低 | 観測性なし |
@@ -54,14 +85,205 @@
 | M039 | IPFS backend 本実装 | 相談 | scaffold 配置済（`backends/ipfs.py`・本体 NotImplementedError・**factory 未接続**）。MFS（`/api/v0/files/*`）主＝パス鍵で KVS に乗せる／CID 直は従（フック `cid_add`/`cid_get` のみ）。httpx 流用。接続ネタ＝api_url/gateway_url/token/mfs_root/pin_on_write/timeout。本実装時に factory `"ipfs"` 分岐を足す |
 | M041 | nats not-found catch を撤去 | low | `nats.iter_all`/`exists` の `NotFoundError` catch（空/欠損の正規化）を将来 `obs.watch()` ベース再実装で取っ払う。M036 の残置（コード内 `# TODO(M041)`）|
 | M042 | transport 層の整理 | low | `client/remote.py` の Safepath Client / RemoteKVS の所属切り分け（コード内 `# TODO(M042)`）。設計musing を backlog 化 |
-| M044 | spec/既定値の定数を集約 | low | マジックナンバー・既定値を **共通知識の名前付き定数**として 1 か所に正本化し散在を断つ。種＝HTTP list cap `10_000`（`client/remote.py`）／list 既定 `limit=1000`（client `list_entries`・service・conformancer `args.get("limit",1000)`）等。`DEFAULT_CACHE_DIR` と同流儀の既定値置き場（定数モジュール）を設け、spec・デフォルト値に関わる値は名前で参照する。inline `# TODO(M044)` で sweep 可 |
 | M040 | ロードバランサーストレージ層 本実装 | 相談 | scaffold 配置済（`surfaces/loadbalancer.py`・本体 NotImplementedError・**facade 未公開**）。**負荷メトリクスで適切な1 backend を選ぶ**動的プレースメント（シャーディング/レプリケーションではない）。ネタ＝capability `SupportsLoadStats`/`LoadStats`＋`BalancePolicy`（RoundRobin/MostFreeSpace/LeastLoaded）。Array の兄弟。**未解決＝読みルーティング**（probe-all 既定 vs 配置インデックス）。local の free は `shutil.disk_usage`、cpu/mem は別途エージェント/エンドポイント要 |
+| M045 | `put2` ＝ error-as-value（Go 風 `(Error\|None, FileInfo)`） | 相談 | 別メソッド `put2(key, value) -> tuple[Error \| None, FileInfo]`＝成功は `(None, FileInfo)`／失敗は `(Error(...), FileInfo?)` で **エラー側に任意情報を載せられる**（“**半分** request/response 型”＝成功は FileInfo のまま・封筒は被せない。却下した full envelope とは別物）。要 doc-first。**未確定**＝(1) 例外ベース fail-loud（既存 put が raise）との二重化＝どの op が raise／どの op が tuple か、混在の指針／(2) `Error` 型の定義（共通基底 or 既存例外 `Exception\|None`／backend 固有情報の持たせ方）／(3) core IF に載せるか別系統 method か（載せるなら async↔sync lockstep ＋ conformancer parity ＝M043 前提）／(4) get/delete 等への波及。put→FileInfo（済）と request/response 封筒却下（projectbrief 非ターゲット）の中間地点 |
+| M076 | nats fake を conformance provider に（JetStream メタ subject 忠実化） | 中 | M074 の follow-up＝nats fake の conformance provider 化は保留した。理由＝nats backend の head/version/CAS は JetStream の**メタ subject**（`obs._js.get_last_msg(stream, meta_subject)`＝per-key の seq/size/deleted を JSON メッセージで持つ）に依存し、`FakeNatsObs` はこれを模していない（`_js` が無く head/CAS で AttributeError）。課題＝`FakeNatsObs` に最小の `_js.get_last_msg` 相当（put でメタ書き込み・delete で tombstone・get_last_msg で最新）を足し、nats-fake provider を非 gated で追加（CAS は非権威 xfail）。**嘘の温床にしない**＝観測契約のみ忠実に、並行/CAS は非権威。s3-fake（M074 で実装済）が先例 |
+| M071 | 公開 IF 統合＝`KeyValueStore` 廃し 1 ストアへ（Buffering/Nobuffering 再編） | 進行中 | **ステップ3 完了（2026-07-02）＝factory/顔を 1 本化**（旧名は存置）: `create_unsafe_store`（=`file_factory or kv_factory`＝常に full Store・KVS-only の manystore も作れる）／`create_safe_store`（=`SafeStore` 包装）／`open_async_store`（Safe＋接続 CM）／`SafeStore`（=`SafeFileStore` 別名）を新設。`open_store(url/名前)` も full Store を返すよう統一。旧 `create_unsafe/safe/open_async_{key_value,file}_store`・`SafeKeyValueStore`/`SafeFileStore` は非推奨で存置（非破壊）。トップ公開（file facade star）。test +1・make check 緑（268）・test-heavy 緑（別途）。**Stage 4 完了（2026-07-02）＝公開型 `AsyncStore`＋`manystore.store` facade**: 公開型を `AsyncStreamingStore`→`AsyncStore`（`SyncStreamingStore`→`SyncStore`）に昇格＝**唯一の公開ストア型**（旧名は alias・`AsyncBufferedStore` は put/get だけの view として存置）。統合 facade `manystore/storage/store.py` を新設（AsyncStore/SafeStore/create_*_store/open_store/backend Store 群/registry を集約）＝トップ `manystore` へ全フラット公開＋`manystore.store` namespace。`manystore.kv`/`file` は deprecated alias で存置。生成 spec 再生成。make check 緑（269）・test-heavy 緑（44）・mkdocs --strict 緑。**残＝Stage 5（M073 spec/impl 分離）→ Stage 6（docs 更新）**。**Stage 3 完了（2026-07-02）＝アダプタ撤去（非推奨化）**: 合成は基底が持つので `KeyValueFileStore`/`KeyValueFromFileStore` は不要＝docstring に非推奨明記＋内部利用を撤去（conformance `_open_remote` は `RemoteStore` を直接 yield＝wrap 廃止）。クラスは後方互換で存置。make check 緑（269）。**Stage 2 完了（2026-07-02）＝BackendSpec 単一 factory**: `BackendSpec(name, factory, origin)`（kv_factory/file_factory 廃止）。`register_*` は旧 kwargs（kv_factory=/file_factory=）を `_resolve_factory` で単一 factory に写して後方互換受理。builtin seed を単一 `_make_X`（full Store 返却）に統合。`create_unsafe_store`=`spec.factory(**opts)`／旧 `create_unsafe_{kv,file}_store` は委譲。conformance `_build_filestore` も `spec.factory` に簡素化（`native` 分岐撤去）。make check 緑（269）・test-heavy 緑（44）。**Stage 1 完了（2026-07-02）＝backend 1 クラス化**: 両軸 native 基底 `StreamableBufferedStoreBase`（4 primitive すべて native・S3 用）を protocols に追加。各 backend を 1 クラスへ＝`DictStore`/`LocalStore`/`S3Store`（StreamableBufferedStoreBase 継承・multipart/range 保持）/`NatsStore`/`HttpStore`（read-only writer）/`RemoteStore`。冗長 FileStore（Dict/Nats）と KVS ビュー（Local の KeyValueFromFileStore 包み）を廃し、旧名（`S3KeyValueStore`/`S3FileStore` 等）は alias。make check 緑（268）・test-heavy 実 backend 緑（44 passed）。**残 b/c/d の設計＝`plans/m071-unify-store-plan.md`**（各段 alias で非破壊＋緑確認）。確定＝backend 1 クラス `S3Store` 等（旧名 alias）／公開型 `AsyncStore`（`AsyncBufferedStore` は view alias）／facade `manystore.store` 新設（kv/file は alias）／M073 は `manystore/spec/` 新設で本ミルストン実施。段階＝(1)backend 1 クラス化 (2)BackendSpec 単一 factory (3)アダプタ撤去 (4)公開型改名＋store facade (5)M073 spec/impl 分離 (6)docs 更新。**ステップ2（2026-07-02）＝合成を基底に内蔵し full Store 化**（ユーザー案「ラップ不要」）: `StreamingStoreBase` は既に IO→get/put を内蔵していた。対称に **`BufferedStoreBase` に open_reader/open_writer の既定合成**（read=全体 get・write=close で全体 put）を追加＝**両基底とも put/get＋open_* の全 Store 表面**を持つ。これで `DictKeyValueStore` 等 kv 寄りも別ラッパ無しで full Store（検証済）。native ストリーミング backend（S3 multipart 等）は open_* を override。make check 緑（267）。**残ステップ**＝(a) factory/顔を 1 本化（`create_unsafe_store`/`create_safe_store`/`open_async_store`・旧名は alias）／(b) `KeyValueFileStore`/`KeyValueFromFileStore` アダプタと backend の KVS/FileStore クラス対を畳む（native override は残す）／(c) `BackendSpec` を単一 factory に／(d) facade `manystore.kv`/`file` 統合／(e) M073（contract/impl 分離）と一括。**ステップ1（2026-07-02）＝コア Protocol/基底クラスを改名**（ユーザーが IDE リネーム・私が文字列/docstring/docs/生成 spec の取りこぼしを追随）: `AsyncKeyValueStore→AsyncBufferedStore` / `AsyncFileStore→AsyncStreamingStore` / `SyncKeyValueStore→SyncBufferedStore` / `SyncFileStore→SyncStreamingStore` / `KeyValueStoreBase→BufferedStoreBase` / `FileStoreBase→StreamingStoreBase`。scaffold の `base_name` 文字列も追随（`import` 生成が壊れないよう）。make check 緑（267）・test-heavy 実 backend 緑・mkdocs 緑。**⚠️過渡状態**＝Protocol/基底は Buffered/Streaming だが facade（`manystore.kv`/`manystore.file`）・factory（`create_unsafe_key_value_store` 等）・backend 名（`S3KeyValueStore`/`S3FileStore`）・アダプタ（`KeyValueFileStore`/`KeyValueFromFileStore`）・概念語「KeyValueStore/FileStore」は未改名。**残ステップ**＝(a) 公開 1 IF へ統合（独立 `KeyValueStore` を落とす or view/型エイリアス化）／(b) facade・factory・backend 名の整理／(c) M073（contract/impl 分離）と一括設計。ユーザー提案（2026-07-02）。**内部軸を「buffering（KV 本質）vs no-buffering（stream 本質）」に昇格**＝基底を `BufferingStore`/`NobufferingStore`（native がどちら向きか＝原則7 の「核は native 側」を型で表現・逆方向は合成）に再編。**公開は 1 インターフェースに畳む**＝put/get（KV API）と open_reader/open_writer（stream API）を同一 IF に載せ、独立した公開 `KeyValueStore` を落とす（実質 `FileStore=KVS+IO` を唯一の公開ストア〔名前は `Store` 等要再考〕へ昇格）。**思想整合**＝原則6「バッファ性が IF の本質」の昇格・fsspec `AbstractFileSystem`（cat/pipe＋open）先例・両方向合成は既存 `KeyValueFileStore`/`KeyValueFromFileStore` が実証済。**要 doc-first・大型**＝`protocols.py`/全 backend/全 surface（Safe*/sync/array）/conformancer/`docs/architecture.md` へ波及＋**公開 API 破壊**（`manystore.kv`/`manystore.file` の 2 facade 統合）ゆえ major bump 扱い。**命名確定（2026-07-02）＝`BufferedStore`/`StreamingStore`**。**未確定**＝(1) `KeyValueStore` を「put/get だけ見たい人向け view/型エイリアス」で残すか完全撤去か／(2) URL/registry 系（M068-70）が落ち着いた後に着手 |
+| M073 | 仕様の集約＝構造契約（Protocol）＋挙動契約（conformance カタログ）を 1 つの spec 面へ | 相談 | ユーザー提案（2026-07-02）＝北極星「conformance=仕様の単一源泉」の帰結。**要は protocols.py の 2 役を分離**＝(A) 純粋な**契約/型**（Protocol・FileInfo/IfMatch/Verify）と (B) **既定実装**（`*StoreBase`・両方向アダプタ・IO・`_kv_copy`/`_sha256_hex`）。(A) を conformance の**挙動契約カタログ**（`ContractSpec`＋`assert_*`）と同居させ **spec パッケージ**（例 `manystore/spec/` or 昇格 `manystore/conformance/`）に束ね、そこから doc 生成（kv_spec/file_storage_spec/conformance_spec は既にここ由来）。**境界厳守**＝(B) 既定実装（runtime・全 backend が import）と**検証ハーネス**（`FileStoreTester`・fault-injection＝test-time）は spec に取り込まず層を保つ（runtime が test 機構を import しない）。**要 doc-first・大型・API 破壊**＝protocols.py を全所から import＝blast radius 大。**M071 と同じく protocols.py を再構成するので M071 と一括設計**（IF 統合＝BufferedStore/StreamingStore と、置き場の再編を 1 パスで）。関連 M022b（spec 検出）/M042（transport 整理）|
 
 > **ゴール段階**: G1=配布できる（M005〜M008 完了）→ G2=安心して使える（M009〜M011・M016）→
 > G3=機能十分（M012〜M015）→ G4=広く使える（M017 判断）。
 
 ### 完了マイルストーン（要点のみ・経緯は git 履歴）
 
+- **M077（2026-07-02・完了）＝conformance provider を registry 駆動＋profile 宣言に**: ユーザー提案＝conformance に
+  registry を参照させ store 構築を委ねる（ベタ実装削減）。`_build_filestore(backend, opts, native=)`＝`get_backend_spec`
+  で `file_factory`（native）or KVS を `KeyValueFileStore` で wrap（既存 provider と同形）。`BackendProfile(id,
+  backend, opts, native, gated, reachable, unsupported, setup)` の**宣言 1 つ**＋`_profile_opener` が
+  construct→connect→cleanup を一元化。`all_providers`/`native_file_providers` を profile 駆動に（dict/nats/s3-real/
+  s3-native）。**custom opener を残すもの**＝per-open リソース（local tmp・remote の in-process ASGI・s3-fake の
+  client 差替・fault 注入）＝registry はテスト結線を知らない。**新 backend は「registry 登録＋profile 1 行」で
+  conformance 自動参加**（`docs/implementing_a_backend.md` の「provider を足す」も profile 方式へ更新）。`make check`
+  緑（267＋2 xfail）・**`make test-heavy` 実 backend 緑**（44 passed/seaweedfs CAS xfail・xpass＝既知 flaky）。
+- **M074（2026-07-02・完了）＝conformance を real/fake/fault 切替＋backend 実装ガイドライン**: ユーザー要望
+  「backend 再実装のガイドラインになる作り」を軸に。(1) fake を共有化＝`tests/fakes.py`（`FakeS3`/`FakeNatsObs`
+  ほか・低層トランスポート模型。test_storage から移設し別名 import で温存）。(2) **s3-fake を非 gated provider
+  化**＝adapter は本物・低層 aiobotocore client だけ fake（`_session` 差替）で **docker 無し fast に全 conformance
+  契約を流す**（`copy_object`/`head_bucket`/`delete_object` を fake に追加）。s3-fake は 8 契約 pass＋CAS 2 xfail。
+  (3) **権威の所在を明確化**＝`unsupported`＝`{put_if_absent,put_if_match}` で CAS を**非権威 xfail**（fake は
+  単一プロセスで並行/CAS の意味論を再現しない＝認証は実 backend gated＋決定的 white-box に残す。ユーザーの
+  「排他ロック等は fake と実機で違いうる」懸念への回答）。(4) **ガイドライン doc**＝`docs/implementing_a_backend.md`
+  （Protocol→scaffold→参照実装 DictKeyValueStore→registry 登録→conformance matrix に provider 追加→契約を通す、
+  の 5 ステップ＋real/fake/fault の守備範囲表）。nats-fake は JetStream メタ subject 忠実化が要るため **M076 へ
+  follow-up**（嘘の温床を避ける）。`make check` 緑（267＋2 xfail）・mkdocs --strict 緑。
+- **M075（2026-07-02・完了）＝CLI を Typer へ移行**: `__main__.py` の argparse を Typer に置換。`app`（`serve`）
+  ＋ `store_app`（`store init`）。**typer を core 依存に**（`import manystore` では `__main__` 未読込＝typer 非
+  import なので実行時コストは CLI 起動時のみ／console script `manystore` も追加）。重い依存（uvicorn/fastapi）は
+  `serve` 内で遅延 import 継続。後方互換＝旧 `python -m manystore --config X`（先頭 `--config`）を serve に振る
+  （`--help`/`--version` は素通し＝トップレベルのサブコマンド一覧）。`store init` の既存ファイルは `typer.Exit(1)`
+  ＝`--force` で上書き。`main()` は Typer(click) standalone の成功時 `SystemExit(0)` を飲み込み非ゼロのみ伝播
+  （プロセス終了コードは保つ・テストから `main(argv)` 直呼び可）。テスト +1（back-compat 振り分け）。
+  `make check` 緑（258）。conformancer/server/gateway の各 `__main__` の Typer 化は後続（任意）。
+- **M070（2026-07-02・完了）＝`manystore store init` ＋ 構成ファイルからストア復元**: neutral な
+  `storage/config.py`（`ContextConfig`/`StoreConfig`/`parse_contexts`/`normalize_opts`/`load_store_config`/
+  `find_config_file`/`discover_store_config`）を新設。**local の相対 `root` は構成ファイルのディレクトリ基準で
+  絶対化**（cwd 非依存＝要件 (c)）。**上方向 discovery**（cwd から親へ `manystore.toml` を探す＝要件 (b)）。
+  `open_store(target)` を拡張＝`://` 有→URL（M069）／無→**context 名**を discovery して解決（空文字=default_context・
+  `config=` で明示可）。CLI をサブコマンド化＝`manystore store init [dir]` が雛形生成（要件 (a)・`--force`）、
+  `manystore serve --config` は旧 combined（**旧 `manystore --config` は先頭フラグ検出で serve に振り後方互換**）。
+  **serving の config は neutral を再利用**（`ContextConfig` 再export・`parse_contexts` 委譲＝drift 回避／
+  `load_config` も base_dir=ファイルの dir に。⚠️副作用＝serving の local 相対も**構成 dir 基準**に変わった〔従来は
+  cwd 相対〕＝`make ui` の dev ストアは `examples/.cache/…` になる。`.cache/` gitignore 済で無害）。トップ公開＝
+  `open_store`（拡張）/`StoreConfig`/`ContextConfig`/`load_store_config`/`discover_store_config`/`find_config_file`。
+  設計 `docs/store_config.md`（nav 追加）。テスト `tests/test_store_config.py`（10）。`make check` 緑（258）・
+  mkdocs --strict 緑。残＝FileStore 版の URL/名前解決・path=prefix サブスコープ（後続）。
+- **M069（2026-07-02・完了）＝名前 URL でストアを開く（fsspec 風）**: M068 registry の上に `open_store(url)`＝
+  既存顔 `open_async_key_value_store` の URL 版（Safe＋接続 CM）。`storage/url.py` の純関数 `parse_store_url(url)
+  -> (backend, opts)` が分解し委譲。**文法（doc-first・ユーザー確定 2026-07-02）**＝scheme=backend 名（registry
+  解決）／**netloc=bucket（全 backend「1 store=1 bucket」統一）**／query=接続 opts。`local://.`=cwd・
+  `local:///abs`／`s3://bkt?endpoint=&region=&access_key=&secret_key=&addressing_style=`（資格情報は query 可・
+  未指定は boto 既定チェーン／env・config 推奨）／`nats://bkt?server=nats://h:4222`（server は query＝bucket と別
+  レイヤ）／`http://h/base`＝URL 全体が base_url（例外・read-only）／`manystore://ctx?server=http://h/kv/raw`／
+  未知 scheme=plugin backend 名として素通し。opts は**既存 flat kwargs 形**（`s3_bucket=`…）へ写す＝**既存 factory
+  無改修・後方互換**（ネイティブ opts 整理・path=prefix サブスコープ・FileStore 版/名前解決は後続 M070 連動）。
+  `open_store`/`parse_store_url` をトップ公開。設計 `docs/url_scheme.md`（nav 追加）。テスト `tests/test_url_scheme.py`
+  （16）。`make check` 緑（248）・mkdocs --strict 緑。
+- **M072（2026-07-02・完了）＝local 並行 delete レース修正＋contract を確定的ゲートに**: fast フルスイートで
+  ~1/8 落ちる既存 flaky（`concurrent_delete_safe[local]`＝`FileNotFoundError: .../_conformance/cc/…`）を潰す。
+  **真因＝local `delete` の TOCTOU**（`if path.is_file(): path.unlink()`＝並行 double-delete で is_file 通過後に
+  別スレッドが消し `unlink` が生 FNF を漏らす）。修正＝`unlink(missing_ok=True)`（原子的・冪等。dir は
+  `contextlib.suppress(IsADirectoryError)`）。**併せて `iter_all._scan` の per-file `stat` も同型 race を
+  ガード**（走査〜stat 間に消えたファイルは一覧から除く）。**ユーザー方針「非一貫な挙動は確定的にテストを
+  赤に」への対応の要点**＝当初は cross-backend 契約 `assert_concurrent_delete_safe` を rounds=40 反復で強化
+  したが、**実 gated backend で nats が 390s→60s timeout を割る回帰**（1 round ~10s＝並行 get が M061 の
+  bounded-get を踏む×40）。→**契約は単発・軽量に戻し（gated-safe）**、local 固有の TOCTOU/stat race は
+  **決定的な white-box 単体テストを local 側に**置く方針に修正（probabilistic 多数反復に頼らない）:
+  `test_local_delete_idempotent_under_toctou`（is_file を True 固定＋ファイルを先に消す＝旧は生 FNF・fix は no-op）/
+  `test_local_iter_all_skips_file_vanished_mid_scan`（os.stat を「is_file=1回目 OK／ループ=2回目で欠損」に）。
+  いずれも fix で緑・未fix で赤を実証。`make check` 緑（232）・full fast x5 flake 0・実 nats delete 10s。**併せて e2e ゲートを締めた**＝`make test-heavy` に
+  `MANYSTORE_E2E_REQUIRED=1` を焼き込み（docker 未起動なら番兵が**赤**＝silent skip で緑を素通りさせない）。
+  CI は step env を削除し e2e-up→test-heavy を叩くだけ＝local==CI。docker 無しで slow を見たいだけなら
+  `uv run pytest -m slow` を直接叩く（fast/`make check` は従来どおり docker 不要・緑）。
+- **M068（2026-07-02・完了）＝backend レジストリ / プラグイン機構（fsspec 風の土台）**: `storage/backends/
+  __init__.py` の if/elif を `backends/registry.py` へ集約。**flat lookup ＋ tier/origin 分離 ＋ clobber 保護**
+  ＝builtin（予約・shadow 不可）/ entry-point（group `manystore.stores`・遅延発見・既存名は拒否+warn）/
+  programmatic（`register_backend`・`clobber=True` のみ上書き）。`BackendSpec(name, kv_factory, file_factory,
+  origin)`。builtin 6 件を seed（memory/local/s3/nats/http＋**`manystore`＝`RemoteKeyValueStore` を seed**・
+  file_factory=None＝KVS のみ。`ManystoreClient` は横断 SDK ゆえ非登録・コードは `client/` 据え置き）。重い依存
+  （client 含む）は factory 内で遅延 import。`create_unsafe_*_store(backend, **opts)` は registry の薄いラッパへ
+  （後方互換＝flat kwargs `local_dir=`/`s3_bucket=`… 温存。ネイティブ opts 整理は M069）。トップに `register_
+  backend`/`BackendSpec`/`get_backend_spec`/`list_backends` を公開。core Protocol 変更なし。設計 `docs/backend_
+  registry.md`（nav 追加）。テスト `tests/test_backend_registry.py`（builtin 解決・由来・clobber・EP 非 shadow・
+  一覧）。`make check` 緑（230）・mkdocs --strict 緑。
+
+- **M067（2026-06-30・完了）＝download の整合性検証（size 必須・hash あれば追加）**: client/download に
+  検証が無かった（`DownloadCache.download` は whole get→書込のみ・client get も `r.content` 素通し）。
+  **ビットフラグ `Verify(IntFlag)`**（NONE/SIZE/HASH/REQUIRE_HASH＋合成 DEFAULT=SIZE\|HASH・
+  STRICT=SIZE\|HASH\|REQUIRE_HASH）で検証ポリシーを選べるように。`download(key, *, verify=Verify.DEFAULT)`
+  ＝取得 bytes を `head()` の期待メタと照合し**検証してから書く**（cache に入るのは検証済みのみ・
+  cache hit は再検証しない・`Verify.NONE` は head() も引かない）。size は全 backend の `head().size` で
+  完結／hash は `FileInfo.sha256`（best-effort＝無ければスキップ・REQUIRE_HASH なら失敗）。不一致は
+  新例外 `IntegrityError`（status 422）。`Verify`/`IntegrityError` をトップ export。**残 B＝hash メタ充填は
+  2026-07-02 完了**（put 時 sha256 を native メタへ→head 露出→conformance `meta.sha256_correct`。M013残 参照）。
+- **M061（2026-06-30・完了）＝実 backend e2e を CI で gated 実走（skip 許容やめ）**: docker compose で nats /
+  seaweedfs / **minio** を起こし、`ci.yml` に e2e ジョブ追加（`make e2e-up`→`MANYSTORE_E2E_REQUIRED=1
+  make test-heavy`→`make e2e-down`。ubuntu runner 同梱の docker+compose を直接叩く＝local==CI）。**核は
+  skip マスクの撤去**＝`test_conformance_matrix._store` の `except Exception`→`pytest.skip` を外し、**未到達
+  のみ skip／到達できる接続・契約の失敗は伝播**（gated の実バグ・能力差を赤/xfail で表に出す）。実走で
+  2 つの実問題を炙り出して是正: ①**nats `concurrent_delete_safe` ハング**＝`obs.get` がチャンク購読で
+  待つ間に並行 delete の `purge_stream` がチャンクを消し「来ないチャンク」を無期限待ち（nats-py に read
+  timeout 無し）→ `get_or_raise` を `wait_for(_GET_TIMEOUT_S=10s)` で境界化し、タイムアウト時は実在再確認で
+  「消えていれば NotFound（delete にレース負け＝契約許容）／残存なら伝播（fail-loud）」に振り分け。
+  ②**SeaweedFS は条件付き PUT（CAS）を保証しない**＝同時 create が**時々**二重成功（**flaky**＝強制したり
+  しなかったり・非決定的）。**conformancer を s3 実装ごとのマトリクスに**（`conformance_providers.S3_IMPLS`＝
+  seaweedfs/minio。MinIO は CAS を満たす＝実機 6/6 実証）。実装の能力差は provider の `unsupported` から
+  **`xfail(非strict)`**＝暗黙 skip でなく明示の行に出す（flaky ゆえ strict にしない＝XPASS のたびに CI を
+  割らない・XFAIL/XPASS の揺れ自体が「保証なし」を物語る）。CI 必須時は `test_e2e_backends_reachable_when_
+  required` が起動漏れを赤にする。slow 41 passed / 2 xfailed（seaweedfs CAS）/ 9 skipped（virtual ほか）。
+  **`make test-heavy` に per-test 目標時間**（`pytest-timeout`・既定 `TEST_HEAVY_TIMEOUT=60s`）＝将来の
+  ハングを stack 付きで打ち切り「必要以上の待機」を防ぐ backstop（async の await 中の停止も signal method で
+  中断＝実証済）。`make check` 緑（215）・mkdocs --strict 緑。
+- **M065（2026-06-28〜29・完了）＝conformancer を「仕様の単一源泉」に育てる（北極星①〜④）**: 実装漏れを
+  conformancer に契約として実装し backend 横断で検知。`FileStoreTester` に **run_middle/heavy/full** を実装
+  （差分契約＝DictFileStore をオラクルに観測一致）＋**オラクル非依存の絶対契約**（`ABSOLUTE_CONTRACTS` カタログ）
+  ＝writer all-or-nothing（M058 を契約先行修正）・CAS 並行（create/update）・**非CAS 並行**（`assert_concurrent_
+  overwrite_atomic`＝無条件並行上書きの原子性／`assert_concurrent_delete_safe`＝並行 delete 冪等・get は seed か
+  NotFound）・**fail-loud**（fault-injection で「障害を欠損/False/default/正常終了に化けさせない」を契約化＝
+  in-process `assert_fail_loud_propagation`／transport `assert_fail_loud_over_transport`＝HTTP Remote＋実 leaf
+  nats/s3 の下層を故障プロキシに差し替え）。北極星＝**①テスト②pytest-cov 可視（`make cov`・TOTAL 77%＝M059）
+  ③spec 文書生成（`docs/conformance_spec.md`・絶対契約は宣言／差分観点は run_* 実行から導出）④scaffold
+  （`--scaffold`＝契約一覧が実装の TODO）**。`run_full`＝差分＋全絶対契約を 1 レポートへ集約。**この契約群が
+  nats `delete` の握り潰し（`suppress(Exception)`→`except JSNotFound`）と `_S3MultipartWriter.__aexit__` の
+  all-or-nothing 違反（→`_abort()`）を炙り出し是正**。実 nats/s3-path/native で緑。`make check` 緑（215）。
+- **M066（2026-06-28・完了）＝挙動契約の集約ハーネス**: IF が揃うので同一契約 body を全実装へ流す。
+  `tests/conformance_providers.py` に **全 provider を 1 か所宣言**（dict/local/remote/実 nats/s3-virtual/s3-path
+  ＋leaf-fault＋native-file）→ `tests/test_conformance_matrix.py` が全契約をパラメタ化して流す。run_light/middle/heavy
+  を **delete_all 全消去から uuid 名前空間スコープ＋後始末（`_cleanup_ns`）へ**転換＝**非破壊**ゆえ共有 backend
+  （実 nats/s3）でも安全に実行。⚠️既知の弱点＝gated provider は contract の AssertionError も skip に化けうる
+  （`_store` の except・健全時は real PASS でカバレッジは効く）。
+- **M054〜M064 品質監査（2026-06-28〜29・完了）＝2026-06-28 の 4 観点監査で抽出**: M054（nats `get_or_raise`
+  fail-loud＝`except JSNotFound` narrowing）・M055（remote `exists` の 404/5xx 区別）・M056（nats `_get_obs` の
+  double-checked lock＝接続リーク防止）・M057（connect/aclose の `_connect_all`/`_aclose_all`＝部分確立を巻き戻し・
+  全件クローズ）・M058（`_KvWriteFileObject.__aexit__` の all-or-nothing）・M059（pytest-cov・`make cov`・TOTAL 77%）・
+  M060（crypto.py を pytest 化＝inline `_selftest` を撤去し `tests/test_crypto.py`・test +9）・M062（`list_all` の
+  基底集約＝override 13 箇所削除・47 行減）・M063（`DownloadCache.download` の同期 IO を anyio offload）・
+  M064（array cp/mv の identity 判定＝保守設計を docstring 明記＋テスト固定）。
+- **M046（2026-06-28・完了）＝conditional put / CAS**: put の lost-update を **派生メソッドを作らず put 1 本＋任意
+  `if_match`**（ユーザー確定）で実装＝None=LWW／`FileInfo.absent()`=create-only／`FileInfo`=update CAS（不一致
+  `ConflictError`）。**opaque version 文字列は出さず比較トークンは `FileInfo.etag` に畳む**（S3=ETag・local=
+  os.link/flock+mtime_ns+size・dict=世代 seq・NATS=メタ subject の最終 stream seq＋`Nats-Expected-Last-Subject-
+  Sequence` でサーバ側原子 CAS）。`head(key)->FileInfo` が version 読み口。**全 backend＋native REST（routes の
+  If-None-Match/If-Match→if_match・HEAD で ETag 露出）＋remote（条件ヘッダ＋head override）＋S3 GW（If-Match は
+  MD5 突合＋head version の二段橋渡し・不成立 412・非対応 501）**まで配線。conformancer の create/update CAS 並行
+  チェッカを実ストア（Dict/Local）＋HTTP 越し＋実 nats で機械検証。M043 lockstep 全揃え。
+- **M053（2026-06-27・完了）**: 「欠損」を例外ファミリへ昇格＝**`NotFoundError(FileNotFoundError, ManystoreError)`**
+  （status=404・title="Not Found"）を新設（ユーザー指摘＝tests が exceptions.py 定義でない生 `FileNotFoundError`
+  を想定していた）。stdlib を先頭に残すので既存 `except FileNotFoundError`/`pytest.raises(FileNotFoundError)` は
+  継承で全通り（破壊変更ゼロ）。src の生 FNF を全て NotFoundError へ（protocols `_kv_copy`・memory/nats/s3/http/remote
+  の get_or_raise・local の `mv`／**`open_reader` の OS 生 FNF**・**s3 native `open_reader` の NoSuchKey**＝streaming 経路も
+  正規化）。トップ export 追加。tests は `pytest.raises(NotFoundError)` へ厳格化（test_storage/conformance/ui・fake も）。
+  `_STDLIB_PROBLEM` の FNF 行は生 FNF fallback 用に残置。
+- **M052（2026-06-27・完了）**: テストを pytest-asyncio（`asyncio_mode="auto"`）へ一括移行＝`asyncio.run(scenario())`/
+  直接 `asyncio.run(coro)` 包み **75 箇所**を `async def test_*`＋`await` に展開（test_storage 55・conformance 10・
+  e2e 1 ほか）。挙動・件数完全不変（133 passed/2 skip）。陳腐化した過渡コメントを除去。今後の新規テストは async def が標準。
+- **M049（2026-06-27・完了）**: `create`（create-if-not-exists）を **`_StoreBase` の既定実装**として追加（cp/mv と
+  同列の*非原子の派生*＝backend primitive ではない）。既存なら `ConflictError`。exists→put で組む＝TOCTOU で
+  並行二重作成しうる（原子版は M046 `put_if_absent` が正本＝役割分担）。async/sync 両 Protocol＋sync_bridge に追加し
+  M043 lockstep（parity assert）を維持。Safe 越しでも override 済み exists/put を呼ぶのでキー検証が透過。
+- **M050（2026-06-27・完了）**: 2 ストア片方向同期 `StorageMirror` を新パッケージ `storage/sync/` に新設。source→sink を
+  **集合差 reconcile**（両側 iter_all を突合）で create/update/skip 分類＋`prune=True` で delete。source が常に正・
+  sink→source 書き戻しなし（one-way）。`compare`（既定 size 比較）で無駄更新スキップ。`plan()`=dry-run / `sync()`=適用。
+  kv facade＋トップへ export。**残＝M051 で k8s を具体 sink に**（apply 変換は sink backend の put に内包）。
+- **M048（2026-06-27・完了）**: 例外を `exceptions.py` に集約＝**`UnsupportedOperation(io.UnsupportedOperation,
+  ManystoreError)`**（status=405・stdlib を先頭に残し `except io.UnsupportedOperation`/FileObject 慣習を維持しつつ
+  HTTP status を持たせる）＋ **`ConflictError(ManystoreError)`**（status=409・M046 用）を新設。生 `io.UnsupportedOperation`
+  raise を全廃して manystore 版へ（protocols/local/http/s3/ipfs/crypto・計 10 箇所）＝「例外は exceptions に
+  HTTP status 付きで集約」をユーザー方針として確立。tests は `io.UnsupportedOperation` subclass ゆえ無改修で緑。
+  **追補（ユーザー方針）**: 任意例外→problem の変換ロジックを **基底メソッド `ManystoreError.problem_for`**
+  （classmethod）へ集約＝変換の正本を基底に置く。モジュール関数 `to_problem` はそこへの薄い委譲（後方互換）。
+- **M047（2026-06-27・完了）**: CI/Makefile/mkdocs を supervisor 新標準へ追従（下り dispatch・急がない）。
+  ①`pages.yml`＝deploy と Upload Pages artifact の guard を `github.event_name == 'push' && github.ref ==
+  'refs/heads/main'` へ（PR run の環境保護落ちを恒久回避）＋`setup-uv@v6`（[[func-mkdocs]] 雛形が正本）。
+  ②Makefile をテスト 4 段＝`test`=`not slow and not benchmark`・`test-heavy`=slow・`test-benchmark`=benchmark・
+  `test-all`=全部（`.PHONY` 追補）。③pyproject markers に `benchmark` 追加。④`ci.yml`＝`checkout@v5`/`setup-uv@v6`
+  へ（Node20 廃止 warning 解消・R17）。⑤mkdocs `--strict` 緑確認（spec 再生成で tracked 変化なし）。
+  `make check` 緑（fast 126）・`test-all` 137 passed 1 skipped。benchmark 該当無し＝`test-benchmark` は exit 5（許容）。
+- **M043（2026-06-27・完了）**: ABC 基底 ↔ Protocol の lockstep を是正＝是正案①+②（supervisor 指示）。
+  ①**基底に共通表面を全面宣言**＝`protocols.py` に共通基底 `_StoreBase(abc.ABC)` を新設し、
+  `KeyValueStoreBase`/`FileStoreBase` の双方が継ぐ。`_StoreBase` は abstract primitive
+  （put/get_or_raise/iter_all/exists/delete/connect/aclose）＋既定実装（get/list_all/cp/mv）を 1 か所に持つ
+  ＝部分実装は**インスタンス化時 `TypeError`**（fail-loud）。`FileStoreBase` は open_reader/open_writer を
+  abstract に足し get_or_raise/put を IO から導出。②**conformancer に base↔Protocol parity assert**
+  （`base_protocol_parity_errors`/`assert_base_protocol_parity`）＝Protocol 全メンバの網羅＋シグネチャ一致を
+  機械チェック。test で `KeyValueStoreBase↔AsyncKeyValueStore`・`FileStoreBase↔AsyncFileStore` を点検。
+  **波及**: 共通 abstract を _StoreBase に上げた結果、mixin 後置だった backend（http/s3/nats/ipfs）は
+  abstract が concrete mixin を MRO で隠して生成不能になったため、宣言を `(_XBase, KeyValueStoreBase)` へ
+  並べ替え（mixin 先置の定石）。横展開ゲート（IPFS/LB 本体は M043 前提）の前提を満たした。
+  **追補（2026-06-27・ユーザー要望）＝conformancer↔Protocol drift ガード**: conformancer の `_OPS`/`_op_*` は
+  Protocol の呼び出し方を直書きする＝protocols.py が進化すると「古い契約を前提に黙って誤検証」しうる。
+  汎用 `signature_drift(protocol, expected)` ＋ conformancer が叩くメンバのシグネチャ写し
+  （`_PINNED_*_SIGNATURES`）＋ `assert_conformancer_protocol_current`（**protocols.py が正**・不一致は
+  conformancer が古い合図＝`_op_*` と写しを追従）。逆方向（conformancer 先行）は想定しない。fast 126 passed。
 - **M038（2026-06-26・完了）**: `manystore/crypto.py` 新設＝ストリーム暗号と FileStore IO への繋ぎこみ IF を明確化。
   primitive **`StreamCipher`**（`transform(offset, data)`＝オフセット指定・チャンク境界非依存の対称変換）＋参照実装
   `XorStreamCipher`（繰り返し鍵 XOR・**安全でない** placeholder）。`AsyncFileObject` を包む **`CipherReader`/`CipherWriter`**
@@ -126,17 +348,35 @@
 ## 現状ステータス
 
 独立ライブラリ化＋配布前提（G1）完了。コア抽象は「FileStore=KVS+IO・核は native primitive 側・get duality・
-prefix capability（fail-loud）」で安定。protocols.py が契約＋既定実装の単一源泉。次は G2（安心して使える＝
-error-swallow 監査 M036 / Safe 既定化 M011・M032 / テスト拡充）と UI/GW の残フェーズ。
+prefix は core 引数・conditional put/CAS」で安定。protocols.py が契約＋既定実装の単一源泉。**品質優先フェーズ**
+（2026-06-28〜30）＝4 観点監査の品質強化（M054〜M064）・**conformance を仕様の単一源泉に**（M065/M066＝北極星
+①〜④＋fail-loud＋非CAS並行＋run_full）・**M061**（実 backend e2e を CI で gated 実走＝skip 許容やめ・s3 実装
+マトリクス・nats 並行 delete/get 修正）まで完了＝**品質強化フェーズ完了**。残＝機能・完成度（M012/M013/M021残/
+M025残 等）。拡張（M051/M039/M040/M026/M045）は方針どおり後回し。fast 215 passed・slow 41 passed/2 xfailed。
 
 ## 既知の問題
 
 - `s3-virtual`（ドメインスタイル）はローカル S3 互換では `bucket.<host>` を名前解決できず常に skip。
   **virtual-host の仕様上の制約**（実 AWS 等の DNS 環境向け）であり未解決バグではない。
+- **SeaweedFS は条件付き PUT（CAS）を保証しない**＝`put_if_absent`/`put_if_match` の並行契約で同時 create が
+  **時々**二重成功（**flaky**＝強制したりしなかったり・非決定的）。**実装の能力差**（バグでなく backend 仕様）
+  ＝conformance では `S3_IMPLS` の `unsupported` で `xfail(非strict)` 宣言（flaky ゆえ strict 不可）。CAS が
+  要るなら MinIO / 実 AWS S3 を使う（実機検証済）。
 - `make test`（fast）は lint を回さない＝format ドリフト（特に CJK 行の E501）は `make format` でしか出ない。
+- **e2e の seaweedfs は `make e2e-up` 必須**（`docker compose up` 直叩きは不可）＝`weed shell` の S3 identity
+  登録ステップを含む。未登録だと接続時 `HeadBucket 403 Forbidden` で seaweedfs 系が総崩れ（2026-07-02 に遭遇）。
+  MinIO は既定資格情報（minioadmin）で動くのでこの手当て不要。
 
 ## 意思決定の変遷
 
+- **atomic write は torn-write 防止であり排他制御ではない／並行更新は conditional put で別途**（2026-06-27 方針→
+  **M046 で実装済**）: local の temp+`os.replace` は torn を見せない原子性のみ保証し、並行 put の lost update は
+  検出しない（LWW）。検出は **CAS を opt-in の conditional put として `ConflictError` で raise**（put 既定の無条件
+  set 契約は維持＝最小-core）。**比較トークンは opaque な `version:str` でなく `FileInfo.etag` に畳んだ**（当初の
+  opaque version 案から訂正）＝S3=ETag・NATS=メタ subject の最終 seq・**local=mtime_ns+size**（modern FS は ns 精度で
+  etag 的に使える・ユーザー合意）。難所はトークン選択でなく CAS の原子性＝local は os.link（create）／flock+stat
+  比較+replace（update）で直列化し TOCTOU を避ける。全 backend＋REST/remote/S3 GW まで配線し conformancer が並行
+  安全性を機械検証（M065 の絶対契約）。
 - **`put` は共通レスポンス `FileInfo`（`{filename,size}`）を返す**（2026-06-26）: 全 backend が追加 I/O なしに生成できる
   最小・共通の *file メタデータ* のみ。revision/etag は共通でないため core には載せない。
 - **prefix 列挙を core の `iter_all(prefix="")`/`list_all(prefix="")` 引数に畳む（capability 廃止）**（2026-06-26・ユーザー判断）:

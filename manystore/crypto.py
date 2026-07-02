@@ -19,9 +19,9 @@
             await enc.write(plaintext)        # 暗号文として書かれる
 """
 
-import io
 from typing import Protocol, runtime_checkable
 
+from manystore.exceptions import UnsupportedOperation
 from manystore.protocols import AsyncFileObject
 
 
@@ -76,7 +76,7 @@ class CipherReader:
         return out
 
     async def write(self, data: bytes) -> int:
-        raise io.UnsupportedOperation("read-only stream")
+        raise UnsupportedOperation("read-only stream")
 
     async def close(self) -> None:
         await self._inner.close()
@@ -102,7 +102,7 @@ class CipherWriter:
         self._offset = 0
 
     async def read(self, size: int = -1) -> bytes:
-        raise io.UnsupportedOperation("write-only stream")
+        raise UnsupportedOperation("write-only stream")
 
     async def write(self, data: bytes) -> int:
         enc = self._cipher.transform(self._offset, data)
@@ -117,77 +117,3 @@ class CipherWriter:
 
     async def __aexit__(self, *exc: object) -> None:
         await self.close()
-
-
-def _selftest() -> None:
-    """最小限の動作確認（テストには置かない＝後で tests へ移す。インライン self-test）。
-
-    in-memory の fake [AsyncFileObject] を使い、CipherWriter で暗号化書き込み → CipherReader で
-    復号読み出しの round-trip と、チャンク分割しても結果が一致する（境界非依存）ことを確認する。
-    """
-    import asyncio
-
-    class _MemFile:
-        """[AsyncFileObject] を満たす最小の in-memory ストリーム（読み/書き両用の fake）。"""
-
-        def __init__(self, data: bytes = b"") -> None:
-            self._buf = bytearray(data)
-            self._pos = 0
-
-        async def read(self, size: int = -1) -> bytes:
-            if size is None or size < 0:
-                chunk = bytes(self._buf[self._pos :])
-            else:
-                chunk = bytes(self._buf[self._pos : self._pos + size])
-            self._pos += len(chunk)
-            return chunk
-
-        async def write(self, data: bytes) -> int:
-            self._buf += data
-            return len(data)
-
-        async def close(self) -> None:
-            pass
-
-        async def __aenter__(self) -> _MemFile:
-            return self
-
-        async def __aexit__(self, *exc: object) -> None:
-            await self.close()
-
-    async def main() -> None:
-        cipher = XorStreamCipher(b"correct horse battery staple")
-        plaintext = b"the quick brown fox jumps over the lazy dog" * 10
-
-        # 暗号化書き込み（複数チャンクに分けて write ＝オフセット可変性を確認）。
-        sink = _MemFile()
-        async with CipherWriter(sink, cipher) as enc:
-            for i in range(0, len(plaintext), 7):
-                await enc.write(plaintext[i : i + 7])
-        ciphertext = bytes(sink._buf)
-        assert ciphertext != plaintext, "暗号文が平文と一致している（変換が効いていない）"
-        assert len(ciphertext) == len(plaintext), "ストリーム暗号は長さを変えない"
-
-        # 復号読み出し（書き込みとは別のチャンクサイズで read ＝境界非依存を確認）。
-        source = _MemFile(ciphertext)
-        out = bytearray()
-        async with CipherReader(source, cipher) as dec:
-            while True:
-                chunk = await dec.read(13)
-                if not chunk:
-                    break
-                out += chunk
-        assert bytes(out) == plaintext, "round-trip 不一致（復号できていない）"
-
-        # 一括 read でも一致（size=-1）。
-        source2 = _MemFile(ciphertext)
-        async with CipherReader(source2, cipher) as dec:
-            assert await dec.read() == plaintext
-
-        print("crypto self-test OK: round-trip & chunk-boundary independence")
-
-    asyncio.run(main())
-
-
-if __name__ == "__main__":
-    _selftest()

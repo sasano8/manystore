@@ -12,7 +12,11 @@ SRC := manystore tests
 E2E_S3_ACCESS_KEY := manystore
 E2E_S3_SECRET_KEY := manystoresecret123
 
-.PHONY: format format-check lint test test-all check grep-todo ui e2e-up e2e-down conformance-docs docs docs-serve
+# slow（実 backend）テストの per-test 目標時間（秒）。超過＝ハング扱いで stack を吐いて落とす
+# （pytest-timeout・必要以上の待機を防ぐ backstop）。正規の最遅は ~10s なので CI ばらつき込みで 60s。
+TEST_HEAVY_TIMEOUT := 60
+
+.PHONY: format format-check lint pylint test test-heavy test-benchmark test-all cov cov-html check grep-todo ui e2e-up e2e-down conformance-docs docs docs-serve
 
 # ストレージ UI / サーバを開発設定で起動（既定 http://127.0.0.1:8000）。
 # 既定ストレージは .cache/manystore_dev（使い捨て・起動時に自動作成）。PORT=xxxx で上書き可。
@@ -40,13 +44,37 @@ lint:
 pylint:
 	uvx pylint@$(PYLINT_VERSION) manystore --enable=duplicate-code
 
-# テスト（内ループ既定＝fast のみ。slow=実 backend/ネットワーク/ポーリング待ちを除外＝R13）
+# テスト 4 段（R13）。内ループ既定＝fast（slow=実 backend/ネットワーク/ポーリング待ち、
+# benchmark=性能計測 を除外）。slow/benchmark はマーカーで分離。
 test:
-	uv run pytest -m "not slow"
+	uv run pytest -svx -m "not slow and not benchmark"
 
-# 全テスト（CI / 明示時。slow も含めて回す）
+# 重いテスト（実 backend/ネットワーク/ポーリング待ち）。先に `make e2e-up` で backend を起動する。
+# `MANYSTORE_E2E_REQUIRED=1` を焼き込む＝backend 未起動なら番兵が**赤**（silent skip で緑を素通り
+# させない・local==CI）。docker 無しで slow を見たいだけなら `uv run pytest -m slow` を直接叩く。
+# `--timeout` で per-test の目標時間を設ける＝詰まりは stack を吐いて落とし、必要以上に待たない。
+test-heavy:
+	MANYSTORE_E2E_REQUIRED=1 uv run pytest -m "slow" --timeout=$(TEST_HEAVY_TIMEOUT)
+
+# ベンチマーク（環境差で揺れる＝gate にせず情報収集に留める。該当無しなら exit 5 でも可）。
+test-benchmark:
+	uv run pytest -m "benchmark"
+
+# 全テスト（CI / 明示時。slow・benchmark も含めて回す）
 test-all:
 	uv run pytest
+
+# カバレッジ計測（fast テストで未到達行を term に出す）。happy-path 偏重の穴を定量把握する（M059）。
+cov:
+	uv run pytest -m "not slow and not benchmark" --cov=manystore --cov-report=term-missing
+
+# カバレッジを HTML で出す（出力は .cache/coverage/html＝pyproject の [tool.coverage.html]）。
+cov-html:
+	uv run pytest -m "not slow and not benchmark" --cov=manystore --cov-report=html
+	@echo "open .cache/coverage/html/index.html （WSL: explorer.exe .cache/coverage/html/index.html）"
+
+cov-html-show:
+	@python -m http.server 8000 --directory .cache/coverage/html
 
 # 一括検証（format 確認 + fast test）＝内ループの「検証緑」判定
 check: format-check test
@@ -70,11 +98,16 @@ docs: conformance-docs
 docs-serve: conformance-docs
 	uv run --group docs mkdocs serve
 
-# 実 backend E2E の起動＋S3 identity 登録（これで s3-path / nats ケースが走る）
+# 実 backend E2E の起動＋S3 identity 登録（これで nats / s3（seaweedfs・minio）ケースが走る）。
+# SeaweedFS と MinIO の両方を立て、conformance の s3 実装マトリクスを実機検証する。
 e2e-up:
-	docker compose up -d nats seaweedfs
+	docker compose up -d nats seaweedfs minio
 	@echo "SeaweedFS の起動待ち..."; sleep 4
 	echo 's3.configure -access_key $(E2E_S3_ACCESS_KEY) -secret_key $(E2E_S3_SECRET_KEY) -user manystore -actions Read,Write,List,Tagging,Admin -apply' | docker compose exec -T seaweedfs weed shell
+	@echo "MinIO の起動待ち..."; \
+	  for i in $$(seq 1 30); do \
+	    curl -sf http://localhost:9000/minio/health/live >/dev/null 2>&1 && break || sleep 1; \
+	  done
 
 # 実 backend の停止
 e2e-down:

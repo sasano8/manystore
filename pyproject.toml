@@ -25,7 +25,13 @@ dependencies = [
     # local backend の同期 IO をスレッドへオフロードして event loop を塞がない（M010）。
     # スレッドプール系（真の async disk IO ではない＝移植性・最小を優先）。httpx 経由で在中だが直接使うので明示。
     "anyio>=4.0.0",
+    # CLI（`manystore` / `python -m manystore`）の実装。`import manystore`（ライブラリ利用）では
+    # __main__ を読み込まないので typer は import されない＝実行時コストは CLI 起動時のみ。
+    "typer>=0.12.0",
 ]
+
+[project.scripts]
+manystore = "manystore.__main__:main"
 
 [project.urls]
 Homepage = "https://github.com/sasano8/manystore"
@@ -46,6 +52,11 @@ dev = [
     "pytest>=8.0",
     # async テストを `async def test_*` で素直に書く（asyncio_mode=auto）。
     "pytest-asyncio>=0.24.0",
+    # カバレッジ計測（`make cov`＝未到達行の可視化。happy-path 偏重の穴を定量把握）。
+    "pytest-cov>=5.0",
+    # per-test タイムアウト（`make test-heavy` の backstop＝実 backend 越しのハングを目標時間で打ち切り
+    # stack を吐いて落とす。必要以上の待機を防ぐ）。
+    "pytest-timeout>=2.3.0",
     # server 層のテスト（ASGI TestClient = starlette + httpx）に必要。httpx は本体依存にも含む。
     "fastapi>=0.110.0",
     "uvicorn>=0.29.0",
@@ -75,6 +86,35 @@ testpaths = ["tests"]
 addopts = "-ra"
 # `async def test_*` を自動で非同期テストとして実行（マーカ不要）。既存の asyncio.run スタイルとも共存。
 asyncio_mode = "auto"
-# 軽重分離（R13）: 待ち支配（実 backend 起動・ネットワーク・sleep/ポーリング）のテストは `slow`。
-# 内ループ `make test` は `-m "not slow"` で除外、`make test-all` で全部走る。
-markers = ["slow: 実バックエンド/ネットワーク/ポーリング待ちを伴う重いテスト"]
+# 軽重分離（R13・4 段）: 待ち支配（実 backend 起動・ネットワーク・sleep/ポーリング）は `slow`、
+# 性能計測は `benchmark`。内ループ `make test` は `-m "not slow and not benchmark"` で fast のみ、
+# `make test-heavy`=slow / `make test-benchmark`=benchmark / `make test-all` で全部走る。
+markers = [
+    "slow: 実バックエンド/ネットワーク/ポーリング待ちを伴う重いテスト",
+    "benchmark: 性能計測テスト（環境差で揺れる＝gate にせず情報収集）",
+]
+# 上流（starlette/fastapi の TestClient）が httpx 利用で出す Deprecation を抑制（httpx2 移行は
+# 上流都合で当方の責ではない）。message 前方一致で対象を絞る（他の警告は素通しのまま）。
+filterwarnings = [
+    "ignore:Using `httpx` with `starlette.testclient` is deprecated:Warning",
+]
+
+# カバレッジ計測（`make cov`）。source は本体パッケージのみ。scaffold（ipfs/loadbalancer）も
+# 敢えて除外せず未到達として可視化する（穴を隠さない＝fail-loud と同じ精神）。
+[tool.coverage.run]
+source = ["manystore"]
+branch = true
+# 生成物（.coverage データ / HTML）は目につかない `.cache/coverage/` 配下へ（`.cache/` は gitignore 済）。
+data_file = ".cache/coverage/.coverage"
+
+[tool.coverage.html]
+directory = ".cache/coverage/html"
+
+[tool.coverage.report]
+show_missing = true
+# `if __name__ == "__main__"` の inline self-test 等、テスト対象でない行のみ除外。
+exclude_also = [
+    "if __name__ == .__main__.:",
+    "raise NotImplementedError",
+    "\\.\\.\\.",
+]

@@ -9,11 +9,12 @@ from collections.abc import AsyncIterator
 
 from ...exceptions import UnsafePathError  # 集約先（後方互換: ここからも import できる）
 from ...protocols import (
+    AsyncBufferedStore,
     AsyncFileObject,
-    AsyncFileStore,
-    AsyncKeyValueStore,
+    AsyncStreamingStore,
+    BufferedStoreBase,
     FileInfo,
-    KeyValueStoreBase,
+    IfMatch,
 )
 
 __all__ = ["UnsafePathError", "validate_safe_path", "SafeKeyValueStore", "SafeFileStore"]
@@ -38,14 +39,17 @@ def validate_safe_path(path: str) -> str:
     return path
 
 
-class SafeKeyValueStore(KeyValueStoreBase):
+class SafeKeyValueStore(BufferedStoreBase):
     """キーを [validate_safe_path] で検証してから委譲する [KeyValueStore] ラッパ。"""
 
-    def __init__(self, store: AsyncKeyValueStore) -> None:
+    def __init__(self, store: AsyncBufferedStore) -> None:
         self._store = store
 
-    async def put(self, key: str, value: bytes) -> FileInfo:
-        return await self._store.put(validate_safe_path(key), value)
+    async def put(self, key: str, value: bytes, *, if_match: IfMatch = None) -> FileInfo:
+        return await self._store.put(validate_safe_path(key), value, if_match=if_match)
+
+    async def head(self, key: str) -> FileInfo:
+        return await self._store.head(validate_safe_path(key))
 
     async def get_or_raise(self, key: str) -> bytes:
         return await self._store.get_or_raise(validate_safe_path(key))
@@ -57,11 +61,6 @@ class SafeKeyValueStore(KeyValueStoreBase):
             validate_safe_path(prefix)
         async for info in self._store.iter_all(limit, prefix):
             yield info
-
-    async def list_all(self, limit: int | None = None, prefix: str = "") -> list[FileInfo]:
-        if prefix:
-            validate_safe_path(prefix)
-        return await self._store.list_all(limit, prefix)
 
     async def exists(self, key: str) -> bool:
         return await self._store.exists(validate_safe_path(key))
@@ -90,7 +89,7 @@ class SafeFileStore(SafeKeyValueStore):
     FileStore 固有の IO（open_reader/open_writer）だけを filename 検証付きで足す。
     """
 
-    def __init__(self, store: AsyncFileStore) -> None:
+    def __init__(self, store: AsyncStreamingStore) -> None:
         super().__init__(store)  # 下層は完全な FileStore（KVS 面も持つ）
 
     async def open_reader(self, filename: str) -> AsyncFileObject:

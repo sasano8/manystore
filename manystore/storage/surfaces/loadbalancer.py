@@ -14,7 +14,7 @@
    メトリクス（CPU/メモリ/空き容量…）を見て[BalancePolicy]がその時点の最適 member を選ぶ。
 
 そのため [ArrayKeyValueStore] を継承して `_route` だけ差し替える、は罠（iter/exists/cp/mv も総取り
-換え）。**[KeyValueStoreBase] を継承した兄弟**として置く（共通 composite 基底の抽出は将来 YAGNI）。
+換え）。**[BufferedStoreBase] を継承した兄弟**として置く（共通 composite 基底の抽出は将来 YAGNI）。
 
 ## 未解決の論点（読みのルーティング）— scaffold では probe-all を既定とする
 「書きは負荷で1つ選ぶ」は決まるが、**後でその鍵を read/delete するとき、どの member に入れたかが
@@ -26,7 +26,14 @@
 from collections.abc import AsyncIterator
 from typing import Protocol, TypedDict, runtime_checkable
 
-from ...protocols import AsyncKeyValueStore, FileInfo, KeyValueStoreBase
+from ...protocols import (
+    AsyncBufferedStore,
+    BufferedStoreBase,
+    FileInfo,
+    IfMatch,
+    _aclose_all,
+    _connect_all,
+)
 
 
 # ── ネタ①: 負荷メトリクスの capability（backend が任意で報告する） ──
@@ -63,7 +70,7 @@ class BalancePolicy(Protocol):
     返すのは選んだ member の index。stats を使わない戦略（round_robin）も同じ IF に乗る。
     """
 
-    def select(self, members: list[AsyncKeyValueStore], stats: list[LoadStats | None]) -> int: ...
+    def select(self, members: list[AsyncBufferedStore], stats: list[LoadStats | None]) -> int: ...
 
 
 class RoundRobinPolicy:
@@ -72,14 +79,14 @@ class RoundRobinPolicy:
     def __init__(self) -> None:
         self._next = 0
 
-    def select(self, members: list[AsyncKeyValueStore], stats: list[LoadStats | None]) -> int:
+    def select(self, members: list[AsyncBufferedStore], stats: list[LoadStats | None]) -> int:
         raise NotImplementedError("loadbalancer scaffold: RoundRobinPolicy.select")
 
 
 class MostFreeSpacePolicy:
     """`free_bytes` が最大の member を選ぶ（空き容量ベースの配置）。"""
 
-    def select(self, members: list[AsyncKeyValueStore], stats: list[LoadStats | None]) -> int:
+    def select(self, members: list[AsyncBufferedStore], stats: list[LoadStats | None]) -> int:
         raise NotImplementedError("loadbalancer scaffold: MostFreeSpacePolicy.select")
 
 
@@ -94,11 +101,11 @@ class LeastLoadedPolicy:
         self._cpu_weight = cpu_weight
         self._mem_weight = mem_weight
 
-    def select(self, members: list[AsyncKeyValueStore], stats: list[LoadStats | None]) -> int:
+    def select(self, members: list[AsyncBufferedStore], stats: list[LoadStats | None]) -> int:
         raise NotImplementedError("loadbalancer scaffold: LeastLoadedPolicy.select")
 
 
-class LoadBalancedKeyValueStore(KeyValueStoreBase):
+class LoadBalancedKeyValueStore(BufferedStoreBase):
     """匿名の member 群を負荷で選んで束ねる合成 [KeyValueStore]（[ArrayKeyValueStore] の兄弟）。
 
     本体は未実装（`NotImplementedError`）。書きは [BalancePolicy] で 1 member を選び、読み系は
@@ -106,25 +113,25 @@ class LoadBalancedKeyValueStore(KeyValueStoreBase):
     """
 
     def __init__(self, policy: BalancePolicy | None = None) -> None:
-        self._members: list[AsyncKeyValueStore] = []
+        self._members: list[AsyncBufferedStore] = []
         self._policy = policy or RoundRobinPolicy()
 
-    def add_member(self, store: AsyncKeyValueStore) -> None:
+    def add_member(self, store: AsyncBufferedStore) -> None:
         """負荷分散対象の backend を1つ追加する（匿名・順序のみ意味を持つ）。"""
         self._members.append(store)
 
-    def members(self) -> list[AsyncKeyValueStore]:
+    def members(self) -> list[AsyncBufferedStore]:
         return list(self._members)
 
     async def _collect_stats(self) -> list[LoadStats | None]:
         """各 member の [LoadStats] を集める（[SupportsLoadStats] 非対応は None）。"""
         raise NotImplementedError("loadbalancer scaffold: _collect_stats")
 
-    async def _select(self) -> AsyncKeyValueStore:
+    async def _select(self) -> AsyncBufferedStore:
         """policy で書き込み先 member を1つ選ぶ。"""
         raise NotImplementedError("loadbalancer scaffold: _select")
 
-    async def put(self, key: str, value: bytes) -> FileInfo:
+    async def put(self, key: str, value: bytes, *, if_match: IfMatch = None) -> FileInfo:
         # 負荷で1 member を選んで書く（選んだ先は鍵に残さない＝読みは probe-all）。
         raise NotImplementedError("loadbalancer scaffold: put")
 
@@ -137,9 +144,6 @@ class LoadBalancedKeyValueStore(KeyValueStoreBase):
         # TODO(M040): dedup 方針は本実装で決定（同一鍵が複数 member にある場合）。
         raise NotImplementedError("loadbalancer scaffold: iter_all")
         yield  # 未到達（async generator 化のため）
-
-    async def list_all(self, limit: int | None = None, prefix: str = "") -> list[FileInfo]:
-        return [info async for info in self.iter_all(limit, prefix)]
 
     async def exists(self, key: str) -> bool:
         raise NotImplementedError("loadbalancer scaffold: exists")  # probe-all
@@ -154,9 +158,7 @@ class LoadBalancedKeyValueStore(KeyValueStoreBase):
         raise NotImplementedError("loadbalancer scaffold: mv")
 
     async def connect(self) -> None:
-        for store in self._members:
-            await store.connect()
+        await _connect_all(self._members)  # 途中失敗で確立済みを巻き戻す（M057）
 
     async def aclose(self) -> None:
-        for store in self._members:
-            await store.aclose()
+        await _aclose_all(self._members)  # 全件閉じ切る（1 つの失敗で残りを漏らさない・M057）

@@ -21,10 +21,10 @@ Kubo は HTTP API なので **httpx を流用**（http backend と同じ遅延 i
 リモートのピン留めサービス（Pinata 等）は `token`（`Authorization` ヘッダ）で叩く。
 """
 
-import io
 from collections.abc import AsyncIterator
 
-from ...protocols import AsyncFileObject, FileInfo, KeyValueStoreBase, _KvReadFileObject
+from ...exceptions import UnsupportedOperation
+from ...protocols import AsyncFileObject, BufferedStoreBase, FileInfo, IfMatch, _KvReadFileObject
 
 # 既定の Kubo HTTP API（ローカルデーモン）と Gateway。
 DEFAULT_API_URL = "http://127.0.0.1:5001"
@@ -80,13 +80,13 @@ class _IpfsBase:
         return None
 
 
-class IpfsKeyValueStore(KeyValueStoreBase, _IpfsBase):
+class IpfsKeyValueStore(_IpfsBase, BufferedStoreBase):
     """IPFS(MFS) 越しの KVS スキャフォールド。primitive は `get_or_raise`（kv 寄り）。
 
     本体は未実装（`NotImplementedError`）。上の docstring の MFS エンドポイント対応に沿って詰める。
     """
 
-    async def put(self, key: str, value: bytes) -> FileInfo:
+    async def put(self, key: str, value: bytes, *, if_match: IfMatch = None) -> FileInfo:
         _todo("put")  # files/write（create/parents/truncate）＋任意 pin
 
     async def get_or_raise(self, key: str) -> bytes:
@@ -95,9 +95,6 @@ class IpfsKeyValueStore(KeyValueStoreBase, _IpfsBase):
     async def iter_all(self, limit: int | None = None, prefix: str = "") -> AsyncIterator[FileInfo]:
         _todo("iter_all")  # files/ls を <mfs_root>/<prefix> から再帰（prefix 絞り込み込み）
         yield  # 未到達（async generator 化のため）
-
-    async def list_all(self, limit: int | None = None, prefix: str = "") -> list[FileInfo]:
-        return [info async for info in self.iter_all(limit, prefix)]
 
     async def exists(self, key: str) -> bool:
         _todo("exists")  # files/stat の有無
@@ -132,4 +129,4 @@ class IpfsFileStore(IpfsKeyValueStore):
         return _KvReadFileObject(await self.get_or_raise(filename))  # 欠損は FileNotFoundError
 
     async def open_writer(self, filename: str) -> AsyncFileObject:
-        raise io.UnsupportedOperation("ipfs backend scaffold: open_writer not implemented yet")
+        raise UnsupportedOperation("ipfs backend scaffold: open_writer not implemented yet")

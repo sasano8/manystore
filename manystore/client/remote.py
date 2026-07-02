@@ -16,8 +16,22 @@ httpx を遅延 import する。
 from collections.abc import AsyncIterator
 from urllib.parse import quote
 
-from ..protocols import FileInfo, KeyValueStoreBase, _kv_copy, _kv_move
+from ..exceptions import ConflictError, NotFoundError
+from ..protocols import (
+    DEFAULT_LIST_LIMIT,
+    MAX_HTTP_LIST_FETCH,
+    BufferedStoreBase,
+    FileInfo,
+    IfMatch,
+    _kv_copy,
+    _kv_move,
+)
 from ..serving.services.protocol import ContextInfo, EntryInfo
+
+# server 側 routes.py と対の独自メタヘッダ（size/modified_at/sha256）。ETag は標準ヘッダ。
+_SIZE_HEADER = "X-Manystore-Size"
+_MODIFIED_AT_HEADER = "X-Manystore-Modified-At"
+_SHA256_HEADER = "X-Manystore-Sha256"
 
 
 def _quote_key(key: str) -> str:
@@ -51,7 +65,7 @@ class ManystoreClient:
             for c in r.json()["contexts"]
         ]
 
-    async def list_entries(self, context: str, limit: int = 1000) -> list[EntryInfo]:
+    async def list_entries(self, context: str, limit: int = DEFAULT_LIST_LIMIT) -> list[EntryInfo]:
         r = await self._client.get(f"{context}/", params={"limit": limit})
         r.raise_for_status()
         return [EntryInfo(key=e["key"], size=e["size"]) for e in r.json()["entries"]]
@@ -59,7 +73,7 @@ class ManystoreClient:
     async def get_or_raise(self, context: str, key: str) -> bytes:
         r = await self._client.get(f"{context}/{_quote_key(key)}")
         if r.status_code == 404:
-            raise FileNotFoundError(key)  # 欠損は FileNotFoundError に正規化（get_or_raise 規約）
+            raise NotFoundError(key)  # 欠損は NotFoundError に正規化（get_or_raise 規約）
         r.raise_for_status()
         return r.content
 
@@ -71,10 +85,34 @@ class ManystoreClient:
 
     async def exists(self, context: str, key: str) -> bool:
         r = await self._client.head(f"{context}/{_quote_key(key)}")
-        return r.status_code == 200
+        if r.status_code == 404:
+            return False
+        # 404 以外（5xx・認証等）は「無い」に握り潰さず伝播（fail-loud＝head_meta と同規約）。
+        r.raise_for_status()
+        return True
 
-    async def put(self, context: str, key: str, value: bytes) -> None:
-        r = await self._client.put(f"{context}/{_quote_key(key)}", content=value)
+    async def head_meta(self, context: str, key: str) -> dict | None:
+        """HEAD でメタ（etag/size/modified_at/sha256）を読む。欠損（404）は None。"""
+        r = await self._client.head(f"{context}/{_quote_key(key)}")
+        if r.status_code == 404:
+            return None
+        r.raise_for_status()
+        etag = r.headers.get("etag")
+        size = r.headers.get(_SIZE_HEADER)
+        modified_at = r.headers.get(_MODIFIED_AT_HEADER)
+        return {
+            "etag": etag.strip('"') if etag is not None else None,
+            "size": int(size) if size is not None else None,
+            "modified_at": float(modified_at) if modified_at is not None else None,
+            "sha256": r.headers.get(_SHA256_HEADER),
+        }
+
+    async def put(
+        self, context: str, key: str, value: bytes, *, headers: dict[str, str] | None = None
+    ) -> None:
+        r = await self._client.put(f"{context}/{_quote_key(key)}", content=value, headers=headers)
+        if r.status_code == 409:
+            raise ConflictError(key)  # conditional put の条件不一致（server の problem 409 を戻す）
         r.raise_for_status()
 
     async def delete(self, context: str, key: str) -> None:
@@ -85,11 +123,11 @@ class ManystoreClient:
         await self._client.aclose()
 
 
-class RemoteKeyValueStore(KeyValueStoreBase):
-    """1 つの context をサーバ越しに [KeyValueStore] として扱うストア（RW）。
+class RemoteStore(BufferedStoreBase):
+    """1 つの context をサーバ越しに扱う **full Store**（RW・M071）。
 
-    primitive `get_or_raise` だけ実装し、`get(key, default=None)` は基底 [KeyValueStoreBase]
-    から受け取る（欠損は基底が捕捉して `default`）。
+    kv 寄り＝put/get が native（サーバ往復）、open_reader/open_writer は基底 [BufferedStoreBase] の
+    buffer 合成。primitive `get_or_raise` だけ実装し `get(default)` は基底から受け取る。
     """
 
     def __init__(
@@ -103,9 +141,31 @@ class RemoteKeyValueStore(KeyValueStoreBase):
         self._client = ManystoreClient(base_url, headers=headers, transport=transport)
         self._context = context
 
-    async def put(self, key: str, value: bytes) -> FileInfo:
-        await self._client.put(self._context, key, value)
-        return {"filename": key, "size": len(value)}
+    async def put(self, key: str, value: bytes, *, if_match: IfMatch = None) -> FileInfo:
+        # conditional put を条件ヘッダに写す（None=LWW／不在=create-only／FileInfo=update CAS）。
+        # 不一致は server problem(409)＝ManystoreClient.put が ConflictError に戻す（fail-loud）。
+        headers: dict[str, str] | None = None
+        if if_match is not None:
+            if if_match.is_absent():
+                headers = {"If-None-Match": "*"}  # create-only（不在を要求）
+            else:
+                headers = {"If-Match": f'"{if_match.get("etag")}"'}  # update CAS（etag 一致）
+        await self._client.put(self._context, key, value, headers=headers)
+        return FileInfo(filename=key, size=len(value))
+
+    async def head(self, key: str) -> FileInfo:
+        # HEAD のメタ（etag/size/modified_at）から version 付き FileInfo を組む。欠損は NotFound。
+        # 既定 [BufferedStoreBase].head は get で全 body を読み etag=None＝CAS 不可ゆえ override。
+        meta = await self._client.head_meta(self._context, key)
+        if meta is None:
+            raise NotFoundError(key)
+        return FileInfo(
+            filename=key,
+            size=meta["size"],
+            modified_at=meta["modified_at"],
+            etag=meta["etag"],
+            sha256=meta.get("sha256"),
+        )
 
     async def get_or_raise(self, key: str) -> bytes:
         return await self._client.get_or_raise(self._context, key)
@@ -113,10 +173,11 @@ class RemoteKeyValueStore(KeyValueStoreBase):
     async def iter_all(self, limit: int | None = None, prefix: str = "") -> AsyncIterator[FileInfo]:
         # native REST API は prefix を持たない（サーバ側 prefix は S3 gateway のみ）。
         # ここは全件取得し client 側で scan+filter する（prefix 非対応 backend と同じ既定動作）。
-        # HTTP 越しは無制限不可で None は実上限 10_000 にクランプ。prefix 絞り込み時は server 側
-        # limit で取りこぼさないよう常に 10_000 取得してから絞る。
-        # TODO(M044): 10_000 を共通の名前付き既定定数へ集約（spec/既定値の正本化）
-        fetch_cap = 10_000 if prefix else (limit if limit is not None else 10_000)
+        # HTTP 越しは無制限不可で None は実上限 MAX_HTTP_LIST_FETCH にクランプ。prefix 絞り込み時は
+        # server 側 limit で取りこぼさないよう常にこの上限まで取得してから絞る。
+        fetch_cap = (
+            MAX_HTTP_LIST_FETCH if prefix else (limit if limit is not None else MAX_HTTP_LIST_FETCH)
+        )
         count = 0
         for e in await self._client.list_entries(self._context, limit=fetch_cap):
             if prefix and not e.key.startswith(prefix):
@@ -125,9 +186,6 @@ class RemoteKeyValueStore(KeyValueStoreBase):
                 return
             yield FileInfo(filename=e.key, size=e.size)
             count += 1
-
-    async def list_all(self, limit: int | None = None, prefix: str = "") -> list[FileInfo]:
-        return [info async for info in self.iter_all(limit, prefix)]
 
     async def exists(self, key: str) -> bool:
         return await self._client.exists(self._context, key)
@@ -148,4 +206,8 @@ class RemoteKeyValueStore(KeyValueStoreBase):
         await self._client.aclose()
 
 
-# TODO(M042): transport 層の整理（Safepath Client / RemoteKVS の所属の切り分け）
+# 旧名は alias（非推奨・M071）。
+RemoteKeyValueStore = RemoteStore
+
+
+# TODO(M042): transport 層の整理（Safepath Client / RemoteStore の所属の切り分け）

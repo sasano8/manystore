@@ -12,7 +12,7 @@
 """
 
 import contextlib
-import io
+import fcntl
 import os
 import tempfile
 from collections.abc import AsyncIterator
@@ -22,17 +22,61 @@ from typing import BinaryIO
 
 import anyio.to_thread
 
+from ...exceptions import ConflictError, NotFoundError, UnsupportedOperation
 from ...protocols import (
     AsyncFileObject,
     FileInfo,
-    FileStoreBase,
-    KeyValueFromFileStore,
+    IfMatch,
+    StreamingStoreBase,
+    _atomic_write_bytes,
     _kv_copy,
 )
 
 # 同期関数をワーカースレッドへ逃がす（event loop を塞がない）。
 # 位置引数のみ＝kwargs は partial で畳む。
 _offload = anyio.to_thread.run_sync
+
+
+def _local_etag(st: os.stat_result) -> str:
+    """local の CAS トークン＝`mtime_ns-size`（modern FS は statx で ns 精度＝etag 的に使える）。"""
+    return f"{st.st_mtime_ns}-{st.st_size}"
+
+
+def _create_only(path: Path, value: bytes) -> None:
+    """`os.link` で **原子的 create-only**（既存なら ConflictError）。ロック不要。"""
+    fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=f"{path.name}.", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "wb") as f:
+            f.write(value)
+        try:
+            os.link(tmp, path)  # dst が在れば FileExistsError＝原子的に二重作成を弾く
+        except FileExistsError as e:
+            raise ConflictError(f"key already exists: {path.name}") from e
+    finally:
+        with contextlib.suppress(OSError):
+            os.unlink(tmp)  # link 成功でも tmp は不要（target が別 inode で残る）
+
+
+def _cas_replace(path: Path, value: bytes, if_match: FileInfo) -> None:
+    """update CAS＝parent dir を flock で囲い `stat→etag 比較→replace` を直列化（TOCTOU 回避）。
+
+    Linux には「変化していたら失敗する replace」syscall が無いため、比較と差し替えを排他で括る。
+    flock は同一 dir への並行 CAS どうしを直列化する（無条件 put の LWW 経路はロックを取らない＝
+    LWW は元から先勝ち上書きを許す契約なので CAS の健全性を損なわない）。
+    """
+    lock_fd = os.open(path.parent, os.O_RDONLY)
+    try:
+        fcntl.flock(lock_fd, fcntl.LOCK_EX)
+        try:
+            st = path.stat()
+        except FileNotFoundError as e:
+            raise ConflictError(f"version mismatch (absent): {path.name}") from e
+        if _local_etag(st) != if_match.get("etag"):
+            raise ConflictError(f"version mismatch: {path.name}")
+        _atomic_write_bytes(path, value)  # 一致時のみ原子的差し替え
+    finally:
+        fcntl.flock(lock_fd, fcntl.LOCK_UN)
+        os.close(lock_fd)
 
 
 class LocalFileObject:
@@ -82,7 +126,7 @@ class _LocalAtomicWriter:
         return cls(path, tmp, fh)
 
     async def read(self, size: int = -1) -> bytes:
-        raise io.UnsupportedOperation("not readable")
+        raise UnsupportedOperation("not readable")
 
     async def write(self, data: bytes) -> int:
         return await _offload(self._fh.write, data)
@@ -120,15 +164,13 @@ class _LocalAtomicWriter:
             await self.close()
 
 
-class LocalFileStore(FileStoreBase):
-    """ローカルファイルシステムの「真実の実装」（完全な [FileStore]＝KeyValueStore + IO）。
+class LocalStore(StreamingStoreBase):
+    """ローカルファイルシステムの **full Store**＝file 寄り（M071）。
 
-    **file 寄り**＝primitive は `open_reader`/`open_writer`（ストリーム）なので [FileStoreBase] を
-    継承し、put/get/get_or_raise（全体）は基底が IO から導出する（値境界でのみバッファ）。本クラスは
-    IO 2 つ＋名前空間操作（iter/list/exists/delete・cp/mv・vacuum）を filesystem-native に実装する
-    ＝KeyValueStore も満たす。KVS ビュー（IO を隠したもの）は
-    `KeyValueFromFileStore(LocalFileStore(...))`（＝[LocalKeyValueStore]）で被せる＝実装の二重持ちを
-    避ける。書き込みは open_writer の temp+rename で原子的（all-or-nothing）。バイナリ専用。
+    **file 寄り**＝primitive は `open_reader`/`open_writer`（ストリーム）なので [StreamingStoreBase]
+    を継承し、put/get/get_or_raise（全体）は基底が IO から導出（値境界でのみバッファ）。IO 2 つ＋
+    名前空間操作（iter/list/exists/delete・cp/mv・vacuum）を filesystem-native に実装。full Store。
+    書き込みは open_writer の temp+rename で原子的（all-or-nothing）。バイナリ専用。
     """
 
     def __init__(self, directory: Path) -> None:
@@ -137,15 +179,55 @@ class LocalFileStore(FileStoreBase):
         self._dir = Path(directory).resolve()
         self._dir.mkdir(parents=True, exist_ok=True)
 
-    # ── ストリーム入出力（primitive）。put/get_or_raise/get は [FileStoreBase] が導出 ──
+    # ── ストリーム入出力（primitive）。put/get_or_raise/get は [StreamingStoreBase] が導出 ──
 
     async def open_reader(self, filename: str) -> AsyncFileObject:
-        fh = await _offload((self._dir / filename).open, "rb")
+        try:
+            fh = await _offload((self._dir / filename).open, "rb")
+        except FileNotFoundError as e:
+            raise NotFoundError(filename) from e  # OS 生 FNF を NotFoundError に正規化
         return LocalFileObject(fh)
 
     async def open_writer(self, filename: str) -> AsyncFileObject:
         # 親ディレクトリ作成＋temp+rename で all-or-nothing（ネストキーもそのまま置ける）。
         return await _LocalAtomicWriter.open(self._dir / filename)
+
+    # ── conditional put（CAS）＋ head（情報取得）。基底の派生 put を native で上書き ──
+
+    async def put(self, filename: str, value: bytes, *, if_match: IfMatch = None) -> FileInfo:
+        # None=無条件 LWW（temp+replace）／不在 FileInfo=create-only（os.link）／他=update
+        # CAS（flock+stat 比較+replace）。同期 syscall 一式をまとめてスレッドへ逃がす。
+        path = self._dir / filename
+
+        def _do() -> FileInfo:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            if if_match is None:
+                _atomic_write_bytes(path, value)
+            elif if_match.is_absent():
+                _create_only(path, value)
+            else:
+                _cas_replace(path, value, if_match)
+            return FileInfo(filename=filename, size=len(value))
+
+        return await _offload(_do)
+
+    async def head(self, filename: str) -> FileInfo:
+        def _stat() -> FileInfo:
+            path = self._dir / filename
+            try:
+                st = path.stat()
+            except (FileNotFoundError, NotADirectoryError) as e:
+                raise NotFoundError(filename) from e
+            if not os.path.isfile(path):
+                raise NotFoundError(filename)
+            return FileInfo(
+                filename=filename,
+                size=st.st_size,
+                modified_at=st.st_mtime,
+                etag=_local_etag(st),
+            )
+
+        return await _offload(_stat)
 
     # ── 名前空間操作（filesystem-native） ──
 
@@ -167,24 +249,29 @@ class LocalFileStore(FileStoreBase):
                     continue
                 if limit is not None and len(out) >= limit:
                     break
-                out.append(FileInfo(filename=name, size=f.stat().st_size))
+                try:
+                    size = f.stat().st_size
+                except FileNotFoundError, NotADirectoryError:
+                    # 列挙〜stat の間に並行 delete で消えたファイルは一覧から除く（レース安全）。
+                    # 生 FileNotFoundError を漏らさず「消えた＝載せない」に正規化する（M072）。
+                    continue
+                out.append(FileInfo(filename=name, size=size))
             return out
 
         for info in await _offload(_scan):
             yield info
 
-    async def list_all(self, limit: int | None = None, prefix: str = "") -> list[FileInfo]:
-        return [info async for info in self.iter_all(limit, prefix)]
-
     async def exists(self, filename: str) -> bool:
         return await _offload((self._dir / filename).is_file)
 
     async def delete(self, filename: str) -> None:
-        # ファイルだけ消す（空になった親ディレクトリは残す）。無いキーは無視。
+        # ファイルだけ消す（空になった親ディレクトリは残す）。無いキー/並行 delete は no-op。
         def _del() -> None:
-            path = self._dir / filename
-            if path.is_file():
-                path.unlink()
+            # `missing_ok=True`＝「無い/並行 delete で先に消えた」を原子的に no-op（冪等）。
+            # 旧 is_file()→unlink() は TOCTOU で並行 delete が生 FNF を漏らした（M072）。
+            # IsADirectoryError＝キーがディレクトリ（ファイルでない）＝対象外（旧 is_file 相当）。
+            with contextlib.suppress(IsADirectoryError):
+                (self._dir / filename).unlink(missing_ok=True)
 
         await _offload(_del)
 
@@ -211,7 +298,7 @@ class LocalFileStore(FileStoreBase):
         def _mv() -> None:
             src_path = self._dir / src
             if not src_path.is_file():
-                raise FileNotFoundError(src)
+                raise NotFoundError(src)
             dst_path = self._dir / dst
             dst_path.parent.mkdir(parents=True, exist_ok=True)
             os.replace(src_path, dst_path)  # 同一 FS 内の原子的 rename
@@ -228,17 +315,6 @@ class LocalFileStore(FileStoreBase):
         return None
 
 
-class LocalKeyValueStore(KeyValueFromFileStore):
-    """[LocalFileStore] を KVS ビューとして被せた薄いラッパ（実装は LocalFileStore に集約）。
-
-    get/put は下層 open_reader/open_writer 越し、iter/list/exists/delete/cp/mv は素通し委譲
-    （[KeyValueFromFileStore]）。vacuum だけは Local 固有（空ディレクトリ掃除・KVS Protocol 外）
-    なのでここで足す。
-    """
-
-    def __init__(self, directory: Path) -> None:
-        self._fs = LocalFileStore(directory)  # Local 固有操作（vacuum）用に concrete 参照を保持
-        super().__init__(self._fs)
-
-    async def vacuum(self) -> None:
-        await self._fs.vacuum()
+# 旧名は alias（非推奨・M071）。LocalStore が既に full Store＋vacuum を持つ（KVS ビュー不要）。
+LocalFileStore = LocalStore
+LocalKeyValueStore = LocalStore

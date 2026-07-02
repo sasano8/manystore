@@ -7,9 +7,9 @@ PermissionError）を
 先頭に残したまま** [ManystoreError] を多重継承する＝`isinstance`/`str` は従来どおりで、既存の
 `except`／HTTP 写像を壊さず problem 変換だけを足せる。
 
-モジュール関数 [to_problem] は **任意の例外**（manystore 外の stdlib 例外も）を problem dict に写す
-（[ManystoreError] は自身の status/title、その他は既定写像、未知は 500）。元モジュール
-（stores.safe / implement.service / gateway.multipart）は後方互換で各例外を再エクスポートする。
+**任意の例外**（manystore 外の stdlib も）を problem dict に写すロジックは **基底メソッド
+[ManystoreError.problem_for]**（classmethod）が正本（[ManystoreError] は自身の status/title、他は
+既定写像 [_STDLIB_PROBLEM]、未知は 500）。関数 [to_problem] はそこへの薄い委譲（後方互換）。
 """
 
 import io
@@ -34,12 +34,31 @@ class ManystoreError(Exception):
 
         `detail` は `str(self)`。`instance` は任意（その問題が起きた URI 参照を渡せる）。
         """
-        problem: dict = {
-            "type": self.type,
-            "title": self.title,
-            "status": self.status,
-            "detail": str(self),
-        }
+        return self._problem_dict(self.type, self.title, self.status, str(self), instance)
+
+    @classmethod
+    def problem_for(cls, exc: Exception, *, instance: str | None = None) -> dict:
+        """**任意の例外**を RFC 9457 Problem Details(dict) に写す（変換ロジックの正本）。
+
+        [ManystoreError] は自身の `status`/`title`/`type`（`to_problem`）を使う。他は stdlib の
+        既定写像 [_STDLIB_PROBLEM] で当てる（未知は 500 / `about:blank`）。`detail` は `str(exc)`。
+        返り値は `application/problem+json`（[PROBLEM_JSON]）でシリアライズする。
+        """
+        if isinstance(exc, ManystoreError):
+            return exc.to_problem(instance=instance)
+        status, title = 500, "Internal Server Error"
+        for typ, st, ti in _STDLIB_PROBLEM:
+            if isinstance(exc, typ):
+                status, title = st, ti
+                break
+        return cls._problem_dict("about:blank", title, status, str(exc), instance)
+
+    @staticmethod
+    def _problem_dict(
+        type_: str, title: str, status: int, detail: str, instance: str | None
+    ) -> dict:
+        """Problem Details(dict) を組む共通ヘルパ（`instance` は与えられたときだけ載せる）。"""
+        problem: dict = {"type": type_, "title": title, "status": status, "detail": detail}
         if instance is not None:
             problem["instance"] = instance
         return problem
@@ -50,6 +69,18 @@ class UnsafePathError(ValueError, ManystoreError):
 
     status = 400
     title = "Unsafe Path"
+
+
+class NotFoundError(FileNotFoundError, ManystoreError):
+    """キー/ファイルが存在しない（`get_or_raise` 等の欠損正規化先）。
+
+    stdlib の `FileNotFoundError` を**先頭に残す**＝既存の `except FileNotFoundError` や
+    `pytest.raises(FileNotFoundError)` を継承で満たしつつ、manystore 例外ファミリ（status/title・
+    problem 変換）に載せる。backend は欠損を生 `FileNotFoundError` でなく**これ**で正規化する。
+    """
+
+    status = 404
+    title = "Not Found"
 
 
 class ContextNotFound(KeyError, ManystoreError):
@@ -73,6 +104,38 @@ class NoSuchUpload(ManystoreError):
     title = "No Such Upload"
 
 
+class UnsupportedOperation(io.UnsupportedOperation, ManystoreError):
+    """ストア/ストリームが対応しない操作（read-only backend への書き込み・reader への write 等）。
+
+    stdlib の `io.UnsupportedOperation` を**先頭に残す**＝既存の `except io.UnsupportedOperation` や
+    ファイルオブジェクトの慣習（reader に write したら拒否）を満たしつつ HTTP status を持たせる。
+    backend/FileObject は生 `io.UnsupportedOperation` でなく**これ**を raise（例外は集約）。
+    """
+
+    status = 405
+    title = "Method Not Allowed"
+
+
+class ConflictError(ManystoreError):
+    """並行更新の衝突（conditional put の条件不一致＝lost-update を fail-loud に拒否）。
+
+    `put_if_absent`（既存あり）/ `put_if_match`（version 不一致）が満たせないとき上げる（M046）。
+    """
+
+    status = 409
+    title = "Conflict"
+
+
+class IntegrityError(ManystoreError):
+    """取得データが期待メタと一致しない（download の整合性検証で size/hash 不一致）。
+
+    truncation・転送破損・キャッシュ汚染などを fail-loud に拒否する（M067・`Verify` 参照）。
+    """
+
+    status = 422
+    title = "Integrity Error"
+
+
 # stdlib 例外 → (status, title) の既定写像。manystore 外の例外も problem にできる。
 # サブクラス関係で取りこぼさないよう**具体的なものを先**に並べる（io.UnsupportedOperation は
 # ValueError のサブクラスなので ValueError より前に置く）。
@@ -86,25 +149,9 @@ _STDLIB_PROBLEM: list[tuple[type, int, str]] = [
 
 
 def to_problem(exc: Exception, *, instance: str | None = None) -> dict:
-    """任意の例外を RFC 9457 Problem Details(dict) に変換する。
+    """任意の例外を RFC 9457 Problem Details(dict) に変換する（後方互換の関数 API）。
 
-    [ManystoreError] は自身の `status`/`title`/`type` を使う。それ以外は stdlib の既定写像で
-    `status`/`title` を当てる（未知は 500 / `about:blank`）。`detail` は `str(exc)`。
-    返り値は `application/problem+json`（[PROBLEM_JSON]）でシリアライズすればよい。
+    変換ロジックの**正本は基底メソッド [ManystoreError.problem_for]**。本関数はそこへの薄い委譲
+    （既存の `from .exceptions import to_problem` 呼び出しをそのまま保つ）。
     """
-    if isinstance(exc, ManystoreError):
-        return exc.to_problem(instance=instance)
-    status, title = 500, "Internal Server Error"
-    for typ, st, ti in _STDLIB_PROBLEM:
-        if isinstance(exc, typ):
-            status, title = st, ti
-            break
-    problem: dict = {
-        "type": "about:blank",
-        "title": title,
-        "status": status,
-        "detail": str(exc),
-    }
-    if instance is not None:
-        problem["instance"] = instance
-    return problem
+    return ManystoreError.problem_for(exc, instance=instance)

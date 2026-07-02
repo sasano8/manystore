@@ -14,7 +14,7 @@ import contextlib
 from collections.abc import AsyncIterator
 from typing import Protocol
 
-from ...protocols import AsyncKeyValueStore
+from ...protocols import AsyncBufferedStore
 from .protocol import Event
 
 
@@ -25,7 +25,7 @@ class Watcher(Protocol):
     async def aclose(self) -> None: ...
 
 
-async def _snapshot(store: AsyncKeyValueStore) -> dict[str, int]:
+async def _snapshot(store: AsyncBufferedStore) -> dict[str, int]:
     """ストアを列挙して `key -> size` のスナップショットを作る。"""
     snap: dict[str, int] = {}
     async for info in store.iter_all():
@@ -50,7 +50,7 @@ def _diff(old: dict[str, int], new: dict[str, int], context: str) -> list[Event]
 class PollingWatcher:
     """ストアを一定間隔で列挙し、差分イベントを購読者へ fan-out するウォッチャ。"""
 
-    def __init__(self, store: AsyncKeyValueStore, context: str, interval: float = 1.0) -> None:
+    def __init__(self, store: AsyncBufferedStore, context: str, interval: float = 1.0) -> None:
         self._store = store
         self._context = context
         self._interval = interval

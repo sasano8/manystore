@@ -12,18 +12,9 @@ import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
 
-
-@dataclass(frozen=True)
-class ContextConfig:
-    """1 つの context マウント。
-
-    `opts` は backend 固有引数（`create_unsafe_key_value_store` へ渡す）。
-    """
-
-    name: str
-    backend: str
-    opts: dict[str, object] = field(default_factory=dict)
-    writable: bool = True
+# context 型・パース・local 相対解決は neutral な `storage/config.py` を再利用（drift 回避・M070）。
+from ...storage.config import ContextConfig as ContextConfig  # re-export（後方互換）
+from ...storage.config import parse_contexts
 
 
 @dataclass(frozen=True)
@@ -46,39 +37,14 @@ class AppConfig:
     default_context: str = ""
 
 
-# backend 名 → `create_unsafe_key_value_store` のキーワード接頭辞のうち、よく使うものを
-# トップレベルキーから補完する（例: local context の `root` を `local_dir` に写す）。
-def _normalize_opts(backend: str, raw: dict[str, object]) -> dict[str, object]:
-    opts = dict(raw)
-    if backend == "local":
-        # `root` を local backend の `local_dir` に写す（TOML 側は直感的な root を使える）。
-        root = opts.pop("root", None)
-        if root is not None:
-            opts["local_dir"] = Path(str(root))
-    return opts
+def parse_config(data: dict[str, object], *, base_dir: Path | None = None) -> AppConfig:
+    """既に読み込んだ dict（TOML 相当）から [AppConfig] を組み立てる。
 
-
-def parse_config(data: dict[str, object]) -> AppConfig:
-    """既に読み込んだ dict（TOML 相当）から [AppConfig] を組み立てる。"""
-    raw_contexts = data.get("contexts", {})
-    if not isinstance(raw_contexts, dict):
-        raise ValueError("`contexts` must be a table")
-
-    contexts: dict[str, ContextConfig] = {}
-    for name, body in raw_contexts.items():
-        if not isinstance(body, dict):
-            raise ValueError(f"context {name!r} must be a table")
-        backend = str(body.get("backend", ""))
-        if not backend:
-            raise ValueError(f"context {name!r} requires `backend`")
-        writable = bool(body.get("writable", True))
-        opts = {k: v for k, v in body.items() if k not in ("backend", "writable")}
-        contexts[name] = ContextConfig(
-            name=name,
-            backend=backend,
-            opts=_normalize_opts(backend, opts),
-            writable=writable,
-        )
+    local 相対パスは `base_dir`（構成ファイルのディレクトリ。未指定は cwd）基準で解決する（M070）。
+    context の解釈は neutral な `storage/config.py` の [parse_contexts] に委譲する（drift 回避）。
+    """
+    base = Path(base_dir) if base_dir is not None else Path.cwd()
+    contexts = parse_contexts(data, base_dir=base)
 
     featured: list[FeaturedView] = []
     views = data.get("views", {})
@@ -106,7 +72,8 @@ def parse_config(data: dict[str, object]) -> AppConfig:
 
 
 def load_config(path: str | Path) -> AppConfig:
-    """TOML ファイルを読み込んで [AppConfig] を返す。"""
+    """TOML を読み込み [AppConfig] を返す（local 相対はこのファイルのディレクトリ基準）。"""
+    path = Path(path)
     with open(path, "rb") as f:
         data = tomllib.load(f)
-    return parse_config(data)
+    return parse_config(data, base_dir=path.parent)
