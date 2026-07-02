@@ -4,9 +4,8 @@
 writer all-or-nothing / 並行 CAS / CRUD）を**注入するストアだけ変えて**全実装で回せる。ここに
 backend を 1 か所だけ宣言し、`test_conformance_matrix` が各契約を全 provider に流す。
 
-各 provider は **接続済み FileStore** を yield する async CM。KVS-native な backend（nats/s3/
-remote）は `KeyValueFileStore` で FileStore 化して被せる（put/get/iter/exists/delete と
-put(if_match)/head を下層へ委譲＝同じ契約で検査できる）。
+各 provider は **接続済み full Store** を yield する async CM。M071 で backend は 1 クラス
+（put/get も open_* も持つ＝旧 `KeyValueFileStore` の wrap は不要）。
 
 フラグ:
 - `gated` … 実 backend（未到達なら skip・`slow` マーク）。**到達できる限り実走**＝接続/契約の
@@ -35,18 +34,13 @@ from pathlib import Path
 
 import httpx
 
-from manystore import (
-    ConnectPolicy,
-    KeyValueFileStore,
-    LocalFileStore,
-    connect_key_value_store,
-)
-from manystore.client import RemoteKeyValueStore
+from manystore import ConnectPolicy, connect_key_value_store
+from manystore.client import RemoteStore
 from manystore.serving.server.app import create_app
 from manystore.serving.server.routes import KV_RAW_PREFIX
 from manystore.serving.services.config import parse_config
 from manystore.serving.services.service import StorageService
-from manystore.storage.backends import create_unsafe_file_store, get_backend_spec
+from manystore.storage.backends import LocalStore, create_unsafe_file_store, get_backend_spec
 from manystore.storage.connect import connecting
 from manystore.tools.conformancer import InjectedFault
 
@@ -178,7 +172,7 @@ def _profile_provider(p: BackendProfile) -> Provider:
 @asynccontextmanager
 async def _open_local() -> AsyncIterator[object]:
     with tempfile.TemporaryDirectory() as d:
-        yield LocalFileStore(Path(d))
+        yield LocalStore(Path(d))
 
 
 @asynccontextmanager
@@ -189,11 +183,11 @@ async def _open_remote() -> AsyncIterator[object]:
         service = StorageService(cfg, watch_interval=1.0)
         await service.connect()
         app = create_app(service)
-        remote = RemoteKeyValueStore(
+        remote = RemoteStore(
             f"http://test{KV_RAW_PREFIX}", "work", transport=httpx.ASGITransport(app=app)
         )
         try:
-            yield KeyValueFileStore(remote)  # KVS を FileStore 化（IO も HTTP 往復で回る）
+            yield remote  # RemoteStore は full Store（open_* は基底合成・M071＝wrap 不要）
         finally:
             await remote.aclose()
             await service.aclose()

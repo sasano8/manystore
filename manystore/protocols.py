@@ -571,6 +571,9 @@ class _KvWriteFileObject:
 class KeyValueFileStore(BufferedStoreBase):
     """[KeyValueStore] を [FileStore] として被せる汎用アダプタ＝**IO の埋め合わせ**。
 
+    **非推奨（M071）**: open_reader/open_writer の buffer 合成は [BufferedStoreBase] が既定で持つ＝
+    どの kv 寄り backend も既に full Store。この wrap は不要になった（後方互換で存置）。
+
     KVS は FileStore から open_reader/open_writer を除いた部分集合なので、KVS→FileStore は
     その 2 つを合成すれば済む（put/get/get_or_raise・iter_all/list_all/exists/delete/cp/mv・
     connect/aclose は下層 KVS へそのまま委譲＝流用）。例 `KeyValueFileStore(S3KeyValueStore(...))`＝
@@ -626,6 +629,9 @@ class KeyValueFileStore(BufferedStoreBase):
 
 class KeyValueFromFileStore(BufferedStoreBase):
     """[FileStore] を [KeyValueStore] として被せる汎用アダプタ（[KeyValueFileStore] の逆向き）。
+
+    **非推奨（M071）**: get/put の合成は [StreamingStoreBase] が既定で持つ＝file 寄り backend も既に
+    put/get を備える（`LocalStore` 参照）。この KVS ビュー wrap は不要になった（後方互換で存置）。
 
     **FileStore = KeyValueStore + IO** なので、FileStore→KVS は **IO（open_reader/open_writer）を
     落とすだけ**＝put/get/get_or_raise・iter/list/exists/delete/cp/mv・connect/aclose を下層
