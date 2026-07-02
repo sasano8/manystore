@@ -29,6 +29,7 @@ from .surfaces.array import DEFAULT_CACHE_DIR, ArrayKeyValueStore, DownloadCache
 from .surfaces.safe import SafeKeyValueStore, UnsafePathError, validate_safe_path
 from .surfaces.sync_bridge import AsyncToSyncKeyValueStore
 from .sync import StorageMirror, SyncPlan, SyncResult
+from .url import parse_store_url
 
 __all__ = [
     # shared
@@ -71,6 +72,9 @@ __all__ = [
     "create_safe_array_store",
     "open_async_key_value_store",
     "open_async_array_store",
+    # URL でストアを開く（fsspec 風・M069）
+    "open_store",
+    "parse_store_url",
     # safe path
     "SafeKeyValueStore",
     "validate_safe_path",
@@ -121,6 +125,23 @@ def open_async_key_value_store(
         verify=verify,
         policy=policy,
     )
+
+
+def open_store(
+    url: str,
+    *,
+    verify: bool = True,
+    policy: ConnectPolicy | None = None,
+):
+    """名前 URL（`scheme://…`）から安全な KeyValueStore を開く入口（fsspec 風・M069）。
+
+    `async with open_store("s3://bkt?endpoint=http://h:9000") as store:` の形で使う。
+    URL を [parse_store_url] で `(backend, opts)` に分解し、顔 [open_async_key_value_store] へ委譲
+    ＝Safe 包装＋接続 CM（検証つきの接続済みストアを yield・終了で aclose）。scheme は backend 名
+    （[registry]）に解決。文法は `docs/url_scheme.md`。
+    """
+    backend, opts = parse_store_url(url)
+    return open_async_key_value_store(backend, verify=verify, policy=policy, **opts)
 
 
 @asynccontextmanager

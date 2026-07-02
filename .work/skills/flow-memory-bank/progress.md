@@ -87,7 +87,6 @@
 | M042 | transport 層の整理 | low | `client/remote.py` の Safepath Client / RemoteKVS の所属切り分け（コード内 `# TODO(M042)`）。設計musing を backlog 化 |
 | M040 | ロードバランサーストレージ層 本実装 | 相談 | scaffold 配置済（`surfaces/loadbalancer.py`・本体 NotImplementedError・**facade 未公開**）。**負荷メトリクスで適切な1 backend を選ぶ**動的プレースメント（シャーディング/レプリケーションではない）。ネタ＝capability `SupportsLoadStats`/`LoadStats`＋`BalancePolicy`（RoundRobin/MostFreeSpace/LeastLoaded）。Array の兄弟。**未解決＝読みルーティング**（probe-all 既定 vs 配置インデックス）。local の free は `shutil.disk_usage`、cpu/mem は別途エージェント/エンドポイント要 |
 | M045 | `put2` ＝ error-as-value（Go 風 `(Error\|None, FileInfo)`） | 相談 | 別メソッド `put2(key, value) -> tuple[Error \| None, FileInfo]`＝成功は `(None, FileInfo)`／失敗は `(Error(...), FileInfo?)` で **エラー側に任意情報を載せられる**（“**半分** request/response 型”＝成功は FileInfo のまま・封筒は被せない。却下した full envelope とは別物）。要 doc-first。**未確定**＝(1) 例外ベース fail-loud（既存 put が raise）との二重化＝どの op が raise／どの op が tuple か、混在の指針／(2) `Error` 型の定義（共通基底 or 既存例外 `Exception\|None`／backend 固有情報の持たせ方）／(3) core IF に載せるか別系統 method か（載せるなら async↔sync lockstep ＋ conformancer parity ＝M043 前提）／(4) get/delete 等への波及。put→FileInfo（済）と request/response 封筒却下（projectbrief 非ターゲット）の中間地点 |
-| M069 | 名前 URL スキーマ取得（`s3://`/`nats://`/`local://.`/`manystore://`）＋ bucket 粒度統一 | normal | M068 の上に `open_store(url)` サーフェス。scheme→registry 解決、`netloc=bucket`・`path=bucket 内 prefix（任意）`・`local://.`=既定 cwd。全 backend「1 store=1 bucket/root」（既に概ね成立）を URL 規約に落とす。ここで prefix 付き flat kwargs（`s3_bucket=`）→ backend ネイティブ opts への整理を回収（M068 のシム廃止の出口）。要 doc-first（scheme 表・URL 文法） |
 | M070 | `manystore store init` ＋ 構成ファイルからストア復元 | normal | (a) CLI で雛形 `manystore.toml` 生成／(b) **上方向 discovery**（親を辿って構成発見）／(c) **local 相対パスを構成ファイルのディレクトリ基準で解決**（現 `_normalize_opts` は cwd 基準）。`serving/services/config.py` のパーサを neutral な場所へ昇格し client 側と共有。M068/M069 と組んで `open_store("mycontext")`（名前解決）と `open_store("s3://…")`（直 URL）を両立 |
 | M074 | conformance を real/fake/fault で切替可能に（fake を provider 化） | 中 | ユーザー指摘（2026-07-02）＝現状 conformance は **real/mock/monkeypatch を統一的に切替できない**。dict/local/remote は in-process で常時走るが、**nats/s3 は gated real のみ**（fault provider も real 接続後に client 差し替え＝gated）。**fake は存在するのに conformance に未接続**＝`_FakeS3`（test_storage）・`_FakeNatsObs`（test_storage・`_patch_obs` で monkeypatch）は単発 unit でしか使われず**同一契約が流れない**。課題＝(a) fake を**非gated の conformance provider に昇格**（`_open_nats_fake`/`_open_s3_fake`）＝同じ契約を docker 無し fast で全 backend に流す→**nats/s3 の fast カバレッジも揃う**（先の「nats fast cov」を包含）／(b) fault-injection も fake 上で回せるよう統一（現状 real 依存）／(c) fake の忠実性が契約で担保される副次効果。設計論点＝fake をどこまで実機に寄せるか（CAS/digest/streaming の擬似）・provider 宣言の一元化 |
 | M071 | 公開 IF 統合＝`KeyValueStore` 廃し 1 ストアへ（Buffering/Nobuffering 再編） | 相談 | ユーザー提案（2026-07-02）。**内部軸を「buffering（KV 本質）vs no-buffering（stream 本質）」に昇格**＝基底を `BufferingStore`/`NobufferingStore`（native がどちら向きか＝原則7 の「核は native 側」を型で表現・逆方向は合成）に再編。**公開は 1 インターフェースに畳む**＝put/get（KV API）と open_reader/open_writer（stream API）を同一 IF に載せ、独立した公開 `KeyValueStore` を落とす（実質 `FileStore=KVS+IO` を唯一の公開ストア〔名前は `Store` 等要再考〕へ昇格）。**思想整合**＝原則6「バッファ性が IF の本質」の昇格・fsspec `AbstractFileSystem`（cat/pipe＋open）先例・両方向合成は既存 `KeyValueFileStore`/`KeyValueFromFileStore` が実証済。**要 doc-first・大型**＝`protocols.py`/全 backend/全 surface（Safe*/sync/array）/conformancer/`docs/architecture.md` へ波及＋**公開 API 破壊**（`manystore.kv`/`manystore.file` の 2 facade 統合）ゆえ major bump 扱い。**命名確定（2026-07-02）＝`BufferedStore`/`StreamingStore`**。**未確定**＝(1) `KeyValueStore` を「put/get だけ見たい人向け view/型エイリアス」で残すか完全撤去か／(2) URL/registry 系（M068-70）が落ち着いた後に着手 |
@@ -98,6 +97,17 @@
 
 ### 完了マイルストーン（要点のみ・経緯は git 履歴）
 
+- **M069（2026-07-02・完了）＝名前 URL でストアを開く（fsspec 風）**: M068 registry の上に `open_store(url)`＝
+  既存顔 `open_async_key_value_store` の URL 版（Safe＋接続 CM）。`storage/url.py` の純関数 `parse_store_url(url)
+  -> (backend, opts)` が分解し委譲。**文法（doc-first・ユーザー確定 2026-07-02）**＝scheme=backend 名（registry
+  解決）／**netloc=bucket（全 backend「1 store=1 bucket」統一）**／query=接続 opts。`local://.`=cwd・
+  `local:///abs`／`s3://bkt?endpoint=&region=&access_key=&secret_key=&addressing_style=`（資格情報は query 可・
+  未指定は boto 既定チェーン／env・config 推奨）／`nats://bkt?server=nats://h:4222`（server は query＝bucket と別
+  レイヤ）／`http://h/base`＝URL 全体が base_url（例外・read-only）／`manystore://ctx?server=http://h/kv/raw`／
+  未知 scheme=plugin backend 名として素通し。opts は**既存 flat kwargs 形**（`s3_bucket=`…）へ写す＝**既存 factory
+  無改修・後方互換**（ネイティブ opts 整理・path=prefix サブスコープ・FileStore 版/名前解決は後続 M070 連動）。
+  `open_store`/`parse_store_url` をトップ公開。設計 `docs/url_scheme.md`（nav 追加）。テスト `tests/test_url_scheme.py`
+  （16）。`make check` 緑（248）・mkdocs --strict 緑。
 - **M072（2026-07-02・完了）＝local 並行 delete レース修正＋contract を確定的ゲートに**: fast フルスイートで
   ~1/8 落ちる既存 flaky（`concurrent_delete_safe[local]`＝`FileNotFoundError: .../_conformance/cc/…`）を潰す。
   **真因＝local `delete` の TOCTOU**（`if path.is_file(): path.unlink()`＝並行 double-delete で is_file 通過後に
