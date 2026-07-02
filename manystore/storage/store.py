@@ -34,16 +34,12 @@ from .config import (
     find_config_file,
     load_store_config,
 )
-from .connect import ConnectPolicy, connect_key_value_store, connecting
-from .surfaces.array import DEFAULT_CACHE_DIR, ArrayKeyValueStore, DownloadCache
-from .surfaces.safe import SafeFileStore, SafeKeyValueStore, UnsafePathError, validate_safe_path
-from .surfaces.sync_bridge import AsyncToSyncKeyValueStore
+from .connect import ConnectPolicy, connect_store, connecting
+from .surfaces.array import DEFAULT_CACHE_DIR, ArrayStore, DownloadCache
+from .surfaces.safe import SafeStore, UnsafePathError, validate_safe_path
+from .surfaces.sync_bridge import AsyncToSyncStore
 from .sync import StorageMirror, SyncPlan, SyncResult
 from .url import parse_store_url
-
-#: 統合された安全ストア型（M071）＝full Store の Safe 包装。`SafeFileStore` の別名。
-SafeStore = SafeFileStore
-
 
 # ── 統合ストアの入口（M071・kv/file の顔を 1 本に）──
 
@@ -51,7 +47,7 @@ SafeStore = SafeFileStore
 def create_safe_store(backend: str, **opts: object) -> SafeStore:
     """安全な（検証付き）**full Store**（put/get＋open_*）を**構築のみ**返す（未接続・M071）。
 
-    生 [create_unsafe_store] を [SafeStore]（=SafeFileStore）で 1 枚包む。接続まで一括で欲しいなら
+    生 [create_unsafe_store] を [SafeStore] で 1 枚包む。接続まで一括で欲しいなら
     顔 [open_async_store]。
     """
     return SafeStore(create_unsafe_store(backend, **opts))
@@ -123,17 +119,17 @@ def open_store(
 # ── 合成ストア（array）の入口 ──
 
 
-async def create_safe_array_store(mounts: Mapping[str, AsyncBufferedStore]) -> SafeKeyValueStore:
+async def create_safe_array_store(mounts: Mapping[str, AsyncBufferedStore]) -> SafeStore:
     """安全な合成ストアを**構築のみ**で返す（未接続）。async＝`mount` が非同期 IF のため。
 
-    `mounts`（論理名 → backend）を [ArrayKeyValueStore] に**登録**し（mount は I/O なし）、
-    [SafeKeyValueStore] で 1 枚包む（合成キー `<mount>/<subkey>` を検証）。接続は呼び出し側に委ねる
+    `mounts`（論理名 → backend）を [ArrayStore] に**登録**し（mount は I/O なし）、
+    [SafeStore] で 1 枚包む（合成キー `<mount>/<subkey>` を検証）。接続は呼び出し側に委ねる
     ＝接続まで一括で欲しいなら顔 [open_async_array_store] を使う。
     """
-    arr = ArrayKeyValueStore()
+    arr = ArrayStore()
     for name, store in mounts.items():
         await arr.mount(name, store)  # 登録のみ（I/O なし。mount は非同期 IF）
-    return SafeKeyValueStore(arr)  # connect/aclose は下層 array へ委譲＝全 mount を一括
+    return SafeStore(arr)  # connect/aclose は下層 array へ委譲＝全 mount を一括
 
 
 @asynccontextmanager
@@ -143,7 +139,7 @@ async def open_async_array_store(
     verify: bool = True,
     policy: ConnectPolicy | None = None,
 ):
-    """安全な合成ストアを開く入口（ライブラリの顔）＝[ArrayKeyValueStore] を [SafeKeyValueStore] で
+    """安全な合成ストアを開く入口（ライブラリの顔）＝[ArrayStore] を [SafeStore] で
     包んだ接続 CM。
 
     `async with open_async_array_store({"docs": store_a, "imgs": store_b}) as arr:` の形で使う。
@@ -171,7 +167,7 @@ __all__ = [
     "create_unsafe_store",
     "parse_store_url",
     # 合成ストア（array）
-    "ArrayKeyValueStore",
+    "ArrayStore",
     "create_safe_array_store",
     "open_async_array_store",
     "DownloadCache",
@@ -197,8 +193,8 @@ __all__ = [
     # 接続 / sync bridge / mirror
     "ConnectPolicy",
     "connecting",
-    "connect_key_value_store",
-    "AsyncToSyncKeyValueStore",
+    "connect_store",
+    "AsyncToSyncStore",
     "StorageMirror",
     "SyncPlan",
     "SyncResult",

@@ -16,8 +16,8 @@ from fakes import patch_nats_obs as _patch_obs
 
 from manystore import (
     DEFAULT_CACHE_DIR,
-    ArrayKeyValueStore,
-    AsyncToSyncKeyValueStore,
+    ArrayStore,
+    AsyncToSyncStore,
     ConnectPolicy,
     DictStore,
     DownloadCache,
@@ -30,7 +30,7 @@ from manystore import (
     S3Store,
     UnsafePathError,
     Verify,
-    connect_key_value_store,
+    connect_store,
     connecting,
     create_safe_array_store,
     create_safe_store,
@@ -40,12 +40,12 @@ from manystore import (
     validate_safe_path,
 )
 from manystore.spec import KeyValueFileStore, KeyValueFromFileStore
-from manystore.storage.surfaces.safe import SafeFileStore, SafeKeyValueStore
+from manystore.storage.surfaces.safe import SafeStore
 
 
 def test_async_to_sync_kvs_roundtrip(tmp_path: Path) -> None:
     # 非同期 KeyValueStore を同期ブリッジで被せ、ループ無しの同期コードから put/get できる。
-    with AsyncToSyncKeyValueStore(LocalStore(tmp_path)) as store:
+    with AsyncToSyncStore(LocalStore(tmp_path)) as store:
         assert store.exists("a.txt") is False
         store.put("a.txt", b"hello")
         assert store.exists("a.txt") is True
@@ -74,7 +74,7 @@ def test_validate_safe_path_rejects_unsafe(bad: str) -> None:
 
 
 async def test_safe_kvs_validates_before_delegating(tmp_path: Path) -> None:
-    safe = SafeKeyValueStore(LocalStore(tmp_path))
+    safe = SafeStore(LocalStore(tmp_path))
     # 正常キー（サブディレクトリ付き）は通り、委譲先に書かれる。
     await safe.put("ok/a.txt", b"hi")
     assert await safe.get("ok/a.txt") == b"hi"
@@ -178,7 +178,7 @@ async def test_put_returns_common_fileinfo(tmp_path: Path) -> None:
     loc = await LocalStore(tmp_path).put("k", b"xyz")
     assert (loc["filename"], loc["size"]) == ("k", 3)
     # array ルータは外向きキー（mount/subkey）で prefix し直して返す（subkey ではない）。
-    arr = ArrayKeyValueStore()
+    arr = ArrayStore()
     await arr.mount("docs", DictStore())
     a = await arr.put("docs/a.txt", b"AB")
     assert (a["filename"], a["size"]) == ("docs/a.txt", 2)
@@ -327,7 +327,7 @@ def test_windows_local_store_is_unimplemented(tmp_path: Path) -> None:
 
 
 async def test_safe_file_store_validates_filename(tmp_path: Path) -> None:
-    safe = SafeFileStore(LocalStore(tmp_path))
+    safe = SafeStore(LocalStore(tmp_path))
 
     async with await safe.open_writer("ok/a.bin") as f:
         await f.write(b"x")
@@ -491,9 +491,9 @@ async def test_nats_iter_all_propagates_real_error() -> None:
 # ── connection lifecycle（接続前 factory 包み → async with で接続） ──
 
 
-async def test_connect_key_value_store_local_roundtrip(tmp_path: Path) -> None:
+async def test_connect_store_local_roundtrip(tmp_path: Path) -> None:
     # init では接続せず、async with で connect してから使う。
-    async with connect_key_value_store("local", local_dir=tmp_path) as store:
+    async with connect_store("local", local_dir=tmp_path) as store:
         await store.put("k", b"v")
         assert await store.get("k") == b"v"
 
@@ -825,11 +825,11 @@ def test_download_cache_dir_fixed_absolute_at_init(
     assert cache.cache_dir == (tmp_path / "mycache").resolve()
 
 
-# ── ArrayKeyValueStore（論理名で複数 backend を束ねる） ──
+# ── ArrayStore（論理名で複数 backend を束ねる） ──
 
 
 async def test_array_kvs_mount_and_route(tmp_path: Path) -> None:
-    arr = ArrayKeyValueStore()
+    arr = ArrayStore()
 
     await arr.mount("docs", LocalStore(tmp_path / "docs"))  # 登録のみ（I/O なし）
     await arr.mount("imgs", LocalStore(tmp_path / "imgs"))
@@ -856,7 +856,7 @@ async def test_array_kvs_mount_and_route(tmp_path: Path) -> None:
 
 
 async def test_array_kvs_cp_mv_across_mounts(tmp_path: Path) -> None:
-    arr = ArrayKeyValueStore()
+    arr = ArrayStore()
 
     await arr.mount("a", LocalStore(tmp_path / "a"))
     await arr.mount("b", LocalStore(tmp_path / "b"))
@@ -882,7 +882,7 @@ async def test_array_kvs_cp_native_within_mount_else_get_put(tmp_path: Path) -> 
             native_calls.append(("mv", src, dst))
             await super().mv(src, dst)
 
-    arr = ArrayKeyValueStore()
+    arr = ArrayStore()
     await arr.mount("m", _NativeSpy(tmp_path / "m"))  # 同一 mount は同一ストアオブジェクト
     await arr.mount("other", LocalStore(tmp_path / "other"))
     await arr.put("m/x", b"data")
@@ -912,7 +912,7 @@ class _LifecycleRecorder:
 
 async def test_array_mount_is_registration_only() -> None:
     # mount は登録のみ＝I/O なし（connect しない）。接続は合成ストアの connect() が一括で担う。
-    arr = ArrayKeyValueStore()
+    arr = ArrayStore()
     rec = _LifecycleRecorder()
 
     await arr.mount("x", rec)  # 登録のみ（非同期 IF だが現状 I/O なし）
@@ -1096,7 +1096,7 @@ async def test_dict_store_prefix_via_scan_filter() -> None:
 
 async def test_safe_store_iter_all_validates_prefix_then_delegates() -> None:
     rec = _IterAllRecorder({"ok/1": 1, "ok/2": 2, "no/1": 3})
-    safe = SafeKeyValueStore(rec)
+    safe = SafeStore(rec)
 
     got = [i["filename"] async for i in safe.iter_all(prefix="ok/")]
     assert got == ["ok/2", "ok/1"]
@@ -1113,7 +1113,7 @@ async def test_safe_store_iter_all_validates_prefix_then_delegates() -> None:
 async def test_array_store_iter_all_prefix_routes_to_single_mount() -> None:
     m1 = _IterAllRecorder({"x/1": 1, "y/2": 2})
     m2 = _IterAllRecorder({"x/9": 9})
-    arr = ArrayKeyValueStore()
+    arr = ArrayStore()
 
     await arr.mount("m1", m1)
     await arr.mount("m2", m2)
@@ -1154,7 +1154,7 @@ async def test_s3_iter_all_filters_server_side() -> None:
 async def test_open_async_store_is_safe_and_connected(tmp_path: Path) -> None:
     # 顔: async with で Safe 包装＋接続済みの KVS を得る（生 backend を直接触らせない）。
     async with open_async_store("local", local_dir=tmp_path) as store:
-        assert isinstance(store, SafeKeyValueStore)  # Safe 包装は必須
+        assert isinstance(store, SafeStore)  # Safe 包装は必須
         await store.put("a/b.txt", b"hi")
         assert await store.get("a/b.txt") == b"hi"
         with pytest.raises(UnsafePathError):
@@ -1164,7 +1164,7 @@ async def test_open_async_store_is_safe_and_connected(tmp_path: Path) -> None:
 async def test_open_async_store_is_safe_full_filestore(tmp_path: Path) -> None:
     # 顔: Safe 包装＋接続済みの完全な FileStore（= KVS + IO）。
     async with open_async_store("local", local_dir=tmp_path) as fs:
-        assert isinstance(fs, SafeFileStore)
+        assert isinstance(fs, SafeStore)
         # IO 面（filename 検証付き）
         async with await fs.open_writer("k/v.bin") as w:
             await w.write(b"data")
@@ -1182,7 +1182,7 @@ async def test_open_async_store_is_safe_full_filestore(tmp_path: Path) -> None:
 async def test_open_async_uses_memory_backend_without_connect() -> None:
     # memory は接続不要・揮発。顔から開いても Safe 包装される。
     async with open_async_store("memory") as store:
-        assert isinstance(store, SafeKeyValueStore)
+        assert isinstance(store, SafeStore)
         await store.put("k", b"v")
         assert await store.get("k") == b"v"
 
@@ -1201,10 +1201,10 @@ def test_create_unsafe_store_maps_backends(tmp_path: Path) -> None:
 async def test_create_unsafe_store_unified_full_store(tmp_path: Path) -> None:
     # 統合入口（M071）＝常に full Store（put/get＋open_*）。native があればそれ、無ければ kv 合成。
     from manystore import SafeStore, create_safe_store, create_unsafe_store, open_async_store
-    from manystore.storage.surfaces.safe import SafeFileStore
+    from manystore.storage.surfaces.safe import SafeStore as _SafeStore
 
-    assert SafeStore is SafeFileStore  # 統合 Safe 型は SafeFileStore の別名
-    assert isinstance(create_unsafe_store("memory"), DictStore)  # native FileStore
+    assert SafeStore is _SafeStore  # 公開 SafeStore は surfaces.safe.SafeStore 実体そのもの
+    assert isinstance(create_unsafe_store("memory"), DictStore)  # native full Store
 
     # KVS-only backend（manystore）も create_unsafe_store は作れる（旧 file 版は不可だった）。
     s = create_unsafe_store("manystore", base_url="http://x", context="c")
@@ -1221,13 +1221,13 @@ async def test_create_unsafe_store_unified_full_store(tmp_path: Path) -> None:
 async def test_create_safe_factories_wrap_without_connecting(tmp_path: Path) -> None:
     # create_safe_* は Safe 包装のみ（構築だけ・未接続）。接続せずともキー検証は効く。
     kv = create_safe_store("memory")
-    assert isinstance(kv, SafeKeyValueStore)
+    assert isinstance(kv, SafeStore)
     fs = create_safe_store("local", local_dir=tmp_path)
-    assert isinstance(fs, SafeFileStore)
+    assert isinstance(fs, SafeStore)
 
     # create_safe_array_store は async（mount が非同期 IF のため）＝構築のみ・未接続。
     arr = await create_safe_array_store({"docs": create_unsafe_store("memory")})
-    assert isinstance(arr, SafeKeyValueStore)
+    assert isinstance(arr, SafeStore)
     # 未接続でも memory backend は使える（接続不要）＋ Safe 検証が効く。
     await kv.connect()
     await kv.put("a/b", b"v")
@@ -1259,7 +1259,7 @@ async def test_create_new_key_then_conflict_on_existing() -> None:
 
 async def test_create_through_safe_validates_key() -> None:
     """Safe 越しの create も（基底 default が override 済み exists/put を呼ぶ）キー検証が効く。"""
-    store = SafeKeyValueStore(DictStore())
+    store = SafeStore(DictStore())
     await store.create("ok/key", b"v")
     assert await store.get("ok/key") == b"v"
     with pytest.raises(UnsafePathError):

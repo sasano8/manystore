@@ -34,7 +34,7 @@ from pathlib import Path
 
 import httpx
 
-from manystore import ConnectPolicy, connect_key_value_store
+from manystore import ConnectPolicy, connect_store
 from manystore.client import RemoteStore
 from manystore.serving.server.app import create_app
 from manystore.serving.server.routes import KV_RAW_PREFIX
@@ -275,7 +275,7 @@ class _FaultObjStore:
 def _open_nats_faulty() -> Callable[[], object]:
     @asynccontextmanager
     async def opener() -> AsyncIterator[object]:
-        async with connect_key_value_store(
+        async with connect_store(
             "nats",
             nats_url=NATS_URL,
             nats_bucket="manystore_e2e",
@@ -322,7 +322,7 @@ def _open_s3_faulty(impl: S3Impl, addressing_style: str) -> Callable[[], object]
     @asynccontextmanager
     async def opener() -> AsyncIterator[object]:
         await _s3_ensure_bucket(impl, addressing_style)
-        async with connect_key_value_store(
+        async with connect_store(
             "s3",
             s3_bucket=S3_BUCKET,
             s3_endpoint=impl.endpoint,

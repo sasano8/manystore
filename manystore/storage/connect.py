@@ -5,7 +5,7 @@
 
 - [ConnectPolicy] … 接続の方針（初回 timeout・リトライ・バックオフ・全体 deadline）。
 - [connecting] … 任意のストア factory を包む汎用の async context manager。
-- [connect_key_value_store] … backend 名から接続前状態を作る入口。
+- [connect_store] … backend 名から接続前状態を作る入口。
 
 `verify` と `ConnectPolicy` は役割が別:
 - `ConnectPolicy` … 接続を**何回・どれだけ粘って**試すか（初回 timeout・リトライ・deadline）。
@@ -151,7 +151,7 @@ async def connecting(
         await store.aclose()
 
 
-def connect_key_value_store(
+def connect_store(
     backend: str,
     *,
     verify: bool = True,
@@ -160,7 +160,7 @@ def connect_key_value_store(
 ):
     """backend を接続前の状態（factory 包み）として返す。`async with ... as store` で接続して使う。
 
-    例: `async with connect_key_value_store("nats", url=u, bucket=b,
+    例: `async with connect_store("nats", url=u, bucket=b,
             policy=ConnectPolicy(timeout=2.0, deadline=30.0)) as store: ...`
     """
     return connecting(

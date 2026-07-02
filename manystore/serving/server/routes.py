@@ -1,6 +1,6 @@
 """routes — REST + WebSocket エンドポイント（protocol の実体）。
 
-addressing は **`{bucket}/{path}`**（M025改）。bucket は [ArrayKeyValueStore] の第一階層
+addressing は **`{bucket}/{path}`**（M025改）。bucket は [ArrayStore] の第一階層
 （mount）、後続は不透明な `path`。`contexts`/`objects`/`keys` の飾りは廃止し、表層語を
 **bucket** に統一する（S3 と揃える。内部 [StorageService] の `context` 命名はそのまま）:
 

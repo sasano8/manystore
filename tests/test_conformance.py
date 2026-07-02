@@ -51,7 +51,7 @@ from manystore.spec.conformancer import (
     signature_drift,
 )
 from manystore.spec.exceptions import ConflictError, NotFoundError
-from manystore.storage.surfaces.safe import SafeKeyValueStore
+from manystore.storage.surfaces.safe import SafeStore
 
 
 def _kvs_instances(tmp_path):
@@ -357,7 +357,7 @@ async def test_run_full_records_absolute_violation_without_raising() -> None:
     "make_store",
     [
         pytest.param(lambda inner: inner, id="base_duality"),
-        pytest.param(lambda inner: SafeKeyValueStore(inner), id="safe"),
+        pytest.param(lambda inner: SafeStore(inner), id="safe"),
         pytest.param(lambda inner: KeyValueFileStore(inner), id="kv_file_store"),
         pytest.param(lambda inner: DownloadCache(inner), id="download_cache"),
     ],

@@ -15,7 +15,7 @@ from manystore.storage.backends import (
     NatsStore,
     S3Store,
 )
-from manystore.storage.surfaces.safe import SafeKeyValueStore
+from manystore.storage.surfaces.safe import SafeStore
 
 
 def test_parse_memory() -> None:
@@ -82,7 +82,7 @@ def test_parse_requires_scheme() -> None:
 
 async def test_open_store_memory_roundtrip() -> None:
     async with open_store("memory://") as store:
-        assert isinstance(store, SafeKeyValueStore)  # Safe 包装されている
+        assert isinstance(store, SafeStore)  # Safe 包装されている
         await store.put("k", b"v")
         assert await store.get("k") == b"v"
 

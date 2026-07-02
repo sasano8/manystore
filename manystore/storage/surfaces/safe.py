@@ -1,23 +1,22 @@
 """safe path — ストアのキー/パスに不正（パストラバーサル等）が無いか検証するラッパ。
 
 [validate_safe_path] が POSIX 相対パスのみを許し、絶対パス・`..`・バックスラッシュ・NUL を弾く。
-[SafeKeyValueStore] / [SafeFileStore] は同じインターフェイスを被せ、キー/filename を検証してから
-委譲する（path を覗いて検証するため各メソッドを明示的に書く＝型情報もそのまま引き継がれる）。
+[SafeStore] は full Store（put/get＋open_*）に同じインターフェイスを被せ、キー/filename を検証して
+から委譲する（path を覗いて検証するため各メソッドを明示的に書く＝型情報もそのまま引き継がれる）。
 """
 
 from collections.abc import AsyncIterator
 
 from ...spec import (
-    AsyncBufferedStore,
     AsyncFileObject,
-    AsyncStreamingStore,
+    AsyncStore,
     BufferedStoreBase,
     FileInfo,
     IfMatch,
 )
 from ...spec.exceptions import UnsafePathError  # 集約先（後方互換: ここからも import できる）
 
-__all__ = ["UnsafePathError", "validate_safe_path", "SafeKeyValueStore", "SafeFileStore"]
+__all__ = ["UnsafePathError", "validate_safe_path", "SafeStore"]
 
 
 def validate_safe_path(path: str) -> str:
@@ -39,10 +38,15 @@ def validate_safe_path(path: str) -> str:
     return path
 
 
-class SafeKeyValueStore(BufferedStoreBase):
-    """キーを [validate_safe_path] で検証してから委譲する [KeyValueStore] ラッパ。"""
+class SafeStore(BufferedStoreBase):
+    """キー/filename を [validate_safe_path] で検証してから委譲する full [Store] ラッパ。
 
-    def __init__(self, store: AsyncBufferedStore) -> None:
+    Store は **put/get（値 API）＋ open_reader/open_writer（IO API）を 1 つに載せた 1 IF** なので、
+    KVS 面（put/get/get_or_raise・iter/exists/delete/cp/mv・connect/aclose）はキー検証込みで、
+    IO 面（open_reader/open_writer）は filename 検証込みで、下層 [AsyncStore] へ委譲する。
+    """
+
+    def __init__(self, store: AsyncStore) -> None:
         self._store = store
 
     async def put(self, key: str, value: bytes, *, if_match: IfMatch = None) -> FileInfo:
@@ -74,26 +78,14 @@ class SafeKeyValueStore(BufferedStoreBase):
     async def mv(self, src: str, dst: str) -> None:
         await self._store.mv(validate_safe_path(src), validate_safe_path(dst))
 
-    async def connect(self) -> None:
-        await self._store.connect()
-
-    async def aclose(self) -> None:
-        await self._store.aclose()
-
-
-class SafeFileStore(SafeKeyValueStore):
-    """filename/キーを [validate_safe_path] で検証してから委譲する [FileStore] ラッパ。
-
-    **FileStore = KeyValueStore + IO** なので、KVS 面（put/get/get_or_raise・iter/list/exists/
-    delete/cp/mv・connect/aclose）は [SafeKeyValueStore] からそのまま継承し（キー検証込み）、
-    FileStore 固有の IO（open_reader/open_writer）だけを filename 検証付きで足す。
-    """
-
-    def __init__(self, store: AsyncStreamingStore) -> None:
-        super().__init__(store)  # 下層は完全な FileStore（KVS 面も持つ）
-
     async def open_reader(self, filename: str) -> AsyncFileObject:
         return await self._store.open_reader(validate_safe_path(filename))
 
     async def open_writer(self, filename: str) -> AsyncFileObject:
         return await self._store.open_writer(validate_safe_path(filename))
+
+    async def connect(self) -> None:
+        await self._store.connect()
+
+    async def aclose(self) -> None:
+        await self._store.aclose()
