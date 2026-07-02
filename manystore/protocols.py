@@ -172,12 +172,12 @@ class AsyncBufferedStore(Protocol):
     async def aclose(self) -> None: ...
 
 
-class AsyncStreamingStore(AsyncBufferedStore, Protocol):
-    """[KeyValueStore] にストリーム IO（open_reader/open_writer）を足したストア（バイナリ専用）。
+class AsyncStore(AsyncBufferedStore, Protocol):
+    """**唯一の公開ストア型**（M071）＝put/get（buffered）＋ open_reader/open_writer（stream）。
 
-    モデル: **FileStore = KeyValueStore + {open_reader, open_writer}**。KVS 面（put/get/iter…・
-    connect/aclose）は [KeyValueStore] からそのまま継承し、FileStore は方向が型に出る IO 2 メソッド
-    だけを足す（= KeyValueStore は FileStore から IO を除いた部分集合）。
+    モデル: **Store = 値操作 + ストリーム IO**。`AsyncBufferedStore`（put/get/iter…）を継承し IO 2
+    メソッドを足す。`AsyncBufferedStore` は「put/get だけ見たい」ための **view 型**として残す
+    （Store はその上位＝すべての backend が満たす）。
 
     - `open_reader(filename)` … 読み取り用（write は `io.UnsupportedOperation`）。
     - `open_writer(filename)` … 書き込み用（read は `io.UnsupportedOperation`）。
@@ -185,6 +185,10 @@ class AsyncStreamingStore(AsyncBufferedStore, Protocol):
 
     async def open_reader(self, filename: str) -> AsyncFileObject: ...
     async def open_writer(self, filename: str) -> AsyncFileObject: ...
+
+
+#: 旧名 alias（非推奨・M071）＝公開型は `AsyncStore` に一本化。
+AsyncStreamingStore = AsyncStore
 
 
 # ── sync（async の同期版・突合用に 1:1 で並べる） ──
@@ -223,11 +227,15 @@ class SyncBufferedStore(Protocol):
     def close(self) -> None: ...
 
 
-class SyncStreamingStore(SyncBufferedStore, Protocol):
-    """[FileStore] の同期版＝**SyncBufferedStore + open_reader/open_writer**（包含を継承）。"""
+class SyncStore(SyncBufferedStore, Protocol):
+    """`AsyncStore` の同期版＝**SyncBufferedStore + open_reader/open_writer**（M071）。"""
 
     def open_reader(self, filename: str) -> SyncFileObject: ...
     def open_writer(self, filename: str) -> SyncFileObject: ...
+
+
+#: 旧名 alias（非推奨・M071）。
+SyncStreamingStore = SyncStore
 
 
 # ════════════════════════════════════════════════════════════════════════════
