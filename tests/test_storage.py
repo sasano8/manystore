@@ -1187,6 +1187,26 @@ def test_create_unsafe_file_store_maps_backends(tmp_path: Path) -> None:
         create_unsafe_file_store("local")  # local_dir 必須
 
 
+async def test_create_unsafe_store_unified_full_store(tmp_path: Path) -> None:
+    # 統合入口（M071）＝常に full Store（put/get＋open_*）。native があればそれ、無ければ kv 合成。
+    from manystore import SafeStore, create_safe_store, create_unsafe_store, open_async_store
+    from manystore.storage.surfaces.safe import SafeFileStore
+
+    assert SafeStore is SafeFileStore  # 統合 Safe 型は SafeFileStore の別名
+    assert isinstance(create_unsafe_store("memory"), DictFileStore)  # native FileStore
+
+    # KVS-only backend（manystore）も create_unsafe_store は作れる（旧 file 版は不可だった）。
+    s = create_unsafe_store("manystore", base_url="http://x", context="c")
+    assert hasattr(s, "open_reader") and hasattr(s, "open_writer")  # 基底合成で full Store
+
+    # create_safe_store は SafeStore 包装・open_async_store は Safe＋接続で put/get＋IO が回る。
+    assert isinstance(create_safe_store("memory"), SafeStore)
+    async with open_async_store("local", local_dir=tmp_path) as store:
+        await store.put("k", b"v")
+        async with await store.open_reader("k") as f:
+            assert await f.read() == b"v"
+
+
 async def test_create_safe_factories_wrap_without_connecting(tmp_path: Path) -> None:
     # create_safe_* は Safe 包装のみ（構築だけ・未接続）。接続せずともキー検証は効く。
     kv = create_safe_key_value_store("memory")

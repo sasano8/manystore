@@ -36,6 +36,7 @@ __all__ = [
     "register_backend",
     "get_backend_spec",
     "list_backends",
+    "create_unsafe_store",
     "create_unsafe_key_value_store",
     "create_unsafe_file_store",
 ]
@@ -134,8 +135,22 @@ register_builtin_backend("http", kv_factory=_kv_http, file_factory=_file_http)
 register_builtin_backend("manystore", kv_factory=_kv_manystore, file_factory=None)
 
 
+def create_unsafe_store(backend: str, **opts: object) -> AsyncStreamingStore:
+    """backend 名から生の（未接続・**キー検証なし**）**full Store**（put/get＋open_* 両備）を作る。
+
+    kv/file の二本立て factory を畳んだ**統合入口**（M071）。native ストリーミングがあればそれ
+    （`file_factory`）、無ければ kv 実装（`kv_factory`）を返す＝基底が IO/whole を双方向合成し full
+    Store になる（`manystore` 等 KVS-only も可）。安全に使うなら [create_safe_store]／顔
+    [open_async_store]。
+    """
+    spec = get_backend_spec(backend)
+    return (spec.file_factory or spec.kv_factory)(**opts)
+
+
 def create_unsafe_key_value_store(backend: str, **opts: object) -> AsyncBufferedStore:
     """backend 名から生の（未接続・**キー検証なし**）[KeyValueStore] を作る低レベルファクトリ。
+
+    **非推奨（M071）＝[create_unsafe_store] へ統合**。put/get だけなら本関数も可。
 
     [registry] の薄いラッパ。**unsafe**＝`../escape` 等を弾かない（対策は呼び出し側責務）。安全に
     使うなら [create_safe_key_value_store]（Safe 包装）か顔の `open_async_key_value_store`
@@ -148,8 +163,8 @@ def create_unsafe_key_value_store(backend: str, **opts: object) -> AsyncBuffered
 def create_unsafe_file_store(backend: str, **opts: object) -> AsyncStreamingStore:
     """[create_unsafe_key_value_store] の FileStore 版（backend → 完全な [FileStore]＝KVS + IO）。
 
-    http は read-only（書き込み・一覧は `io.UnsupportedOperation`）。FileStore 非対応の
-    backend（例 `manystore`）は [ValueError]。opts は KVS 版と同形。
+    **非推奨（M071）＝[create_unsafe_store] へ統合**。本関数は native `file_factory` の無い backend
+    を [ValueError] にする点だけ異なる（後方互換で存置）。http は read-only。opts は KVS 版と同形。
     """
     spec = get_backend_spec(backend)
     if spec.file_factory is None:

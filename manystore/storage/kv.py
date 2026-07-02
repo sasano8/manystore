@@ -175,11 +175,14 @@ def open_store(
       空文字は `default_context`。local 相対パスは**構成ファイルのディレクトリ基準**で解決される。
     いずれも顔 [open_async_key_value_store] へ委譲＝Safe 包装＋接続 CM。
     """
+    from .file import open_async_store  # full Store の顔（M071）。kv→file の一方向 import
+
     if "://" in target:
         backend, opts = parse_store_url(target)
     else:
         backend, opts = _resolve_context(target, config)
-    return open_async_key_value_store(backend, verify=verify, policy=policy, **opts)
+    # full Store（put/get＋open_*）を返す＝URL/名前でも顔と同じ統合ストア（M071）。
+    return open_async_store(backend, verify=verify, policy=policy, **opts)
 
 
 @asynccontextmanager
